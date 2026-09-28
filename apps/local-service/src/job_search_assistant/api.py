@@ -20,14 +20,21 @@ from .domain.models import (
     LibraryRecord,
     LibraryRecordInput,
     ProfilePayload,
+    RagRebuildResponse,
+    RagSearchRequest,
+    RagSearchResponse,
+    RagStatus,
     RiskRuleInput,
 )
+from .rag import RagService
 from .repositories import JobRepository, LibraryRepository
 from .repositories.library import ALLOWED_KINDS, LibraryKind
 
 
 def create_router(
-    job_repository: JobRepository, library_repository: LibraryRepository
+    job_repository: JobRepository,
+    library_repository: LibraryRepository,
+    rag_service: RagService,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
 
@@ -135,5 +142,23 @@ def create_router(
         if not library_repository.delete(valid_kind(kind), record_id):
             raise HTTPException(status_code=404, detail="record not found")
         return Response(status_code=204)
+
+    @router.get("/rag/status", response_model=RagStatus)
+    def rag_status() -> RagStatus:
+        return RagStatus.model_validate(rag_service.status())
+
+    @router.post("/rag/rebuild", response_model=RagRebuildResponse)
+    def rebuild_rag_index() -> RagRebuildResponse:
+        try:
+            return RagRebuildResponse.model_validate(rag_service.rebuild())
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @router.post("/rag/search", response_model=RagSearchResponse)
+    def search_rag(request: RagSearchRequest) -> RagSearchResponse:
+        try:
+            return RagSearchResponse(items=rag_service.search(request.query, request.limit))
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     return router

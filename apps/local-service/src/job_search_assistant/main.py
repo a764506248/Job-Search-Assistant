@@ -9,10 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .api import create_router
 from .config import settings
-from .repositories import JobRepository, LibraryRepository
+from .embedding import Embedder, HttpEmbeddingClient
+from .rag import RagService
+from .repositories import JobRepository, LibraryRepository, VectorRepository
 
 
-def create_app(database_path: Path | None = None) -> FastAPI:
+def create_app(database_path: Path | None = None, embedder: Embedder | None = None) -> FastAPI:
     application = FastAPI(
         title="Job Search Assistant Local Service",
         version=__version__,
@@ -28,7 +30,12 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     resolved_database_path = database_path or settings.data_dir / "jobs.sqlite3"
     job_repository = JobRepository(resolved_database_path)
     library_repository = LibraryRepository(resolved_database_path)
-    application.include_router(create_router(job_repository, library_repository))
+    vector_repository = VectorRepository(resolved_database_path)
+    resolved_embedder = embedder or HttpEmbeddingClient(
+        settings.embedding_url, settings.embedding_model
+    )
+    rag_service = RagService(library_repository, vector_repository, resolved_embedder)
+    application.include_router(create_router(job_repository, library_repository, rag_service))
     static_dir = Path(__file__).parent / "static"
     application.mount("/assets", StaticFiles(directory=static_dir), name="dashboard-assets")
 

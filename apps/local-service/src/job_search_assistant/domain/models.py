@@ -190,3 +190,38 @@ class LibraryListResponse(ApiModel):
 
 class ProfilePayload(ApiModel):
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class RagStatus(ApiModel):
+    chunks: int
+    sources: int
+    indexed_at: datetime | None = None
+    model: str | None = None
+    embedding_available: bool
+    embedding_service: dict[str, Any]
+
+
+class RagRebuildResponse(ApiModel):
+    chunks: int
+    sources: int
+    indexed_at: datetime | None = None
+    model: str | None = None
+    rebuilt: int
+
+
+class RagSearchRequest(ApiModel):
+    query: str = Field(min_length=1)
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class RagSearchResult(ApiModel):
+    source_type: str
+    source_id: str
+    source_name: str
+    chunk_index: int
+    content: str
+    score: float
+
+
+class RagSearchResponse(ApiModel):
+    items: list[RagSearchResult]

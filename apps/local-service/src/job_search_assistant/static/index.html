@@ -40,6 +40,9 @@
           <button class="nav-item" data-view="models">
             <span class="nav-icon">✦</span>模型配置
           </button>
+          <button class="nav-item" data-view="knowledge">
+            <span class="nav-icon">◉</span>向量知识库
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -198,6 +201,33 @@
             </section>
             <section><div class="section-title"><div><p class="eyebrow">CONFIGURED MODELS</p><h2>模型配置</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
           </div>
+        </section>
+
+        <section id="knowledge-view" class="view">
+          <div class="settings-grid">
+            <section class="panel form-panel">
+              <div class="panel-heading"><div><p class="eyebrow">LOCAL RAG</p><h2>本地向量索引</h2></div></div>
+              <div class="knowledge-status">
+                <div><span>Embedding 服务</span><strong id="embedding-status">检查中</strong></div>
+                <div><span>向量模型</span><strong id="embedding-model">BAAI/bge-small-zh-v1.5</strong></div>
+                <div><span>资料来源</span><strong id="rag-sources">—</strong></div>
+                <div><span>文本分片</span><strong id="rag-chunks">—</strong></div>
+              </div>
+              <div class="knowledge-actions">
+                <button id="rebuild-index" class="button primary" type="button">重建本地索引</button>
+                <small id="rag-indexed-at">尚未建立索引</small>
+              </div>
+            </section>
+            <aside class="panel guidance"><span class="guidance-mark">⌂</span><h3>数据留在本机</h3><p>Docker 只负责将项目和简历片段转成向量。原文、向量和检索结果都保存在本机 SQLite 中。</p></aside>
+          </div>
+          <section class="panel search-test-panel">
+            <div class="panel-heading"><div><p class="eyebrow">RETRIEVAL TEST</p><h2>语义检索测试</h2></div></div>
+            <form id="rag-search-form" class="rag-search-form">
+              <input name="query" required placeholder="例如：需要 Python、FastAPI 和 RAG 经验的岗位" />
+              <button class="button primary" type="submit">检索项目与简历</button>
+            </form>
+            <div id="rag-results" class="rag-results"><div class="library-empty">输入岗位需求，查看知识库命中的真实资料。</div></div>
+          </section>
         </section>
 
         <div id="toast" class="toast" role="status" aria-live="polite"></div>

@@ -1,5 +1,5 @@
 const state = { jobs: [], filter: '', libraries: {} }
-const pageTitles = { overview: '工作台', jobs: '职位快照', profile: '个人档案', projects: '项目库', resumes: '简历库', rules: '匹配规则', models: '模型配置' }
+const pageTitles = { overview: '工作台', jobs: '职位快照', profile: '个人档案', projects: '项目库', resumes: '简历库', rules: '匹配规则', models: '模型配置', knowledge: '向量知识库' }
 
 const $ = (selector) => document.querySelector(selector)
 const $$ = (selector) => document.querySelectorAll(selector)
@@ -28,6 +28,7 @@ function showView(name) {
   $$('.nav-item[data-view]').forEach((node) => node.classList.toggle('active', node.dataset.view === name))
   $('#page-title').textContent = pageTitles[name] || '工作台'
   if (name === 'profile') void loadProfile()
+  if (name === 'knowledge') void loadRagStatus()
   if ($(`#${name}-view`)?.classList.contains('library-view')) void loadLibrary(name)
 }
 
@@ -76,6 +77,18 @@ async function loadProfile() {
   Object.entries(result.data || {}).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value ?? ''
   })
+}
+
+async function loadRagStatus() {
+  const response = await fetch('/v1/rag/status')
+  if (!response.ok) throw new Error('无法读取索引状态')
+  const status = await response.json()
+  $('#embedding-status').textContent = status.embeddingAvailable ? '已连接' : '未启动'
+  $('#embedding-status').className = status.embeddingAvailable ? 'status-good' : 'status-bad'
+  $('#embedding-model').textContent = status.model || status.embeddingService?.model || 'BAAI/bge-small-zh-v1.5'
+  $('#rag-sources').textContent = String(status.sources)
+  $('#rag-chunks').textContent = String(status.chunks)
+  $('#rag-indexed-at').textContent = status.indexedAt ? `最后构建：${formatTime(status.indexedAt)}` : '尚未建立索引'
 }
 
 function resetRecordForm(form) {
@@ -212,6 +225,43 @@ $('#profile-form').addEventListener('submit', async (event) => {
   const data = Object.fromEntries(new FormData(event.currentTarget))
   const response = await fetch('/v1/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) })
   showToast(response.ok ? '个人档案已保存' : '保存失败')
+})
+
+$('#rebuild-index').addEventListener('click', async (event) => {
+  const button = event.currentTarget
+  button.disabled = true
+  button.textContent = '正在生成向量…'
+  try {
+    const response = await fetch('/v1/rag/rebuild', { method: 'POST' })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.detail || '索引构建失败')
+    await loadRagStatus()
+    showToast(`已生成 ${result.rebuilt} 个本地向量分片`)
+  } catch (error) { showToast(error.message) }
+  finally { button.disabled = false; button.textContent = '重建本地索引' }
+})
+
+$('#rag-search-form').addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const query = new FormData(event.currentTarget).get('query')?.trim()
+  if (!query) return
+  const container = $('#rag-results')
+  container.innerHTML = '<div class="library-empty">正在检索…</div>'
+  try {
+    const response = await fetch('/v1/rag/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, limit: 5 }),
+    })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.detail || '检索失败')
+    container.innerHTML = result.items.length ? result.items.map((item) => `
+      <article class="rag-result">
+        <div><span class="tag">${escapeHtml(item.sourceType)}</span><strong>${escapeHtml(item.sourceName)}</strong></div>
+        <span class="rag-score">相似度 ${(item.score * 100).toFixed(1)}%</span>
+        <p>${escapeHtml(item.content)}</p>
+      </article>
+    `).join('') : '<div class="library-empty">没有检索到资料，请先重建索引。</div>'
+  } catch (error) { container.innerHTML = `<div class="library-empty">${escapeHtml(error.message)}</div>` }
 })
 
 $$('.record-form').forEach((form) => {
