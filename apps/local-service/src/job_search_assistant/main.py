@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .api import create_router
 from .config import settings
-from .repositories import JobRepository
+from .repositories import JobRepository, LibraryRepository
 
 
 def create_app(database_path: Path | None = None) -> FastAPI:
@@ -25,8 +25,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-Local-Token"],
     )
-    repository = JobRepository(database_path or settings.data_dir / "jobs.sqlite3")
-    application.include_router(create_router(repository))
+    resolved_database_path = database_path or settings.data_dir / "jobs.sqlite3"
+    job_repository = JobRepository(resolved_database_path)
+    library_repository = LibraryRepository(resolved_database_path)
+    application.include_router(create_router(job_repository, library_repository))
     static_dir = Path(__file__).parent / "static"
     application.mount("/assets", StaticFiles(directory=static_dir), name="dashboard-assets")
 

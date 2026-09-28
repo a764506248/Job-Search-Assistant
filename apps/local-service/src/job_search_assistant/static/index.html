@@ -25,14 +25,20 @@
           <button class="nav-item" data-view="jobs">
             <span class="nav-icon">▤</span>职位快照
           </button>
-          <button class="nav-item pending" disabled title="将在下一阶段接入">
-            <span class="nav-icon">◇</span>项目库<span class="soon">即将接入</span>
+          <button class="nav-item" data-view="profile">
+            <span class="nav-icon">◎</span>个人档案
           </button>
-          <button class="nav-item pending" disabled title="将在下一阶段接入">
-            <span class="nav-icon">▧</span>简历库<span class="soon">即将接入</span>
+          <button class="nav-item" data-view="projects">
+            <span class="nav-icon">◇</span>项目库
           </button>
-          <button class="nav-item pending" disabled title="将在下一阶段接入">
-            <span class="nav-icon">⌁</span>匹配规则<span class="soon">即将接入</span>
+          <button class="nav-item" data-view="resumes">
+            <span class="nav-icon">▧</span>简历库
+          </button>
+          <button class="nav-item" data-view="rules">
+            <span class="nav-icon">⌁</span>匹配规则
+          </button>
+          <button class="nav-item" data-view="models">
+            <span class="nav-icon">✦</span>模型配置
           </button>
         </nav>
 
@@ -132,6 +138,66 @@
               <p>启动本地服务并打开 Boss 职位详情页，扩展会自动将 JD 保存到这里。</p>
             </div>
           </section>
+        </section>
+
+        <section id="profile-view" class="view">
+          <div class="settings-grid">
+            <section class="panel form-panel">
+              <div class="panel-heading"><div><p class="eyebrow">PROFILE</p><h2>个人档案</h2></div></div>
+              <form id="profile-form" class="data-form">
+                <label>姓名或称呼<input name="displayName" placeholder="例如：小林" /></label>
+                <label>目标岗位<input name="targetRoles" placeholder="例如：AI应用开发、Python后端" /></label>
+                <div class="form-row"><label>工作年限<input name="yearsExperience" type="number" min="0" placeholder="3" /></label><label>期望城市<input name="cities" placeholder="上海、杭州、远程" /></label></div>
+                <label>个人简介<textarea name="summary" rows="4" placeholder="概括你的主要方向和优势"></textarea></label>
+                <label>默认问候语<textarea name="defaultGreeting" rows="3" placeholder="低匹配岗位使用的默认问候语"></textarea></label>
+                <button class="button primary" type="submit">保存个人档案</button>
+              </form>
+            </section>
+            <aside class="panel guidance"><span class="guidance-mark">✓</span><h3>资料使用原则</h3><p>这些内容只保存在本机。生成简历时只会使用你确认过的真实信息。</p></aside>
+          </div>
+        </section>
+
+        <section id="projects-view" class="view library-view" data-kind="projects">
+          <div class="library-layout">
+            <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow">PROJECT KNOWLEDGE</p><h2>添加项目</h2></div></div>
+              <form class="data-form record-form">
+                <input type="hidden" name="recordId" />
+                <label>项目名称<input name="name" required placeholder="例如：企业知识库问答系统" /></label>
+                <label>GitHub 仓库<input name="repositoryUrl" type="url" placeholder="https://github.com/..." /></label>
+                <label>项目说明<textarea name="summary" rows="4" placeholder="项目解决了什么问题，你负责了什么"></textarea></label>
+                <label>标签<input name="tags" placeholder="RAG, Python, FastAPI, 系统设计" /></label>
+                <div class="form-actions"><button class="button primary" type="submit">保存项目</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div>
+              </form>
+            </section>
+            <section><div class="section-title"><div><p class="eyebrow">YOUR PROJECTS</p><h2>项目库</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
+          </div>
+        </section>
+
+        <section id="resumes-view" class="view library-view" data-kind="resumes">
+          <div class="library-layout">
+            <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow">RESUME LIBRARY</p><h2>添加简历资料</h2></div></div>
+              <form class="data-form record-form"><input type="hidden" name="recordId" /><label>简历名称<input name="name" required placeholder="例如：默认中文简历" /></label><label>格式<select name="format"><option>PDF</option><option>DOCX</option><option>Markdown</option></select></label><label>用途与备注<textarea name="notes" rows="5" placeholder="这份简历适合哪些岗位"></textarea></label><div class="form-actions"><button class="button primary" type="submit">保存简历资料</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div></form>
+            </section>
+            <section><div class="section-title"><div><p class="eyebrow">RESUME SETS</p><h2>简历库</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
+          </div>
+        </section>
+
+        <section id="rules-view" class="view library-view" data-kind="rules">
+          <div class="library-layout">
+            <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow">MATCHING POLICY</p><h2>添加匹配规则</h2></div></div>
+              <form class="data-form record-form"><input type="hidden" name="recordId" /><label>规则名称<input name="name" required placeholder="例如：名校学历偏好" /></label><label>关键词或语义描述<input name="pattern" placeholder="985, 211, 第一学历" /></label><label>命中后动作<select name="action"><option value="notify">仅提醒</option><option value="reduce_score">降低匹配分</option><option value="use_default_materials">使用默认材料继续投递</option><option value="block_delivery">禁止投递</option></select></label><div class="form-actions"><button class="button primary" type="submit">保存规则</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div></form>
+            </section>
+            <section><div class="section-title"><div><p class="eyebrow">ACTIVE RULES</p><h2>匹配规则</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
+          </div>
+        </section>
+
+        <section id="models-view" class="view library-view" data-kind="models">
+          <div class="library-layout">
+            <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow">MODEL PROVIDERS</p><h2>添加模型配置</h2></div></div>
+              <form class="data-form record-form"><input type="hidden" name="recordId" /><label>配置名称<input name="name" required placeholder="例如：主分析模型" /></label><label>服务商<select name="provider"><option>OpenAI</option><option>OpenAI Compatible</option><option>Anthropic</option><option>其他</option></select></label><label>模型名称<input name="model" placeholder="模型 ID" /></label><label>API Base URL<input name="baseUrl" type="url" placeholder="https://api.example.com/v1" /></label><p class="form-note">API Key 不在这里保存，后续通过系统钥匙串单独配置。</p><div class="form-actions"><button class="button primary" type="submit">保存模型配置</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div></form>
+            </section>
+            <section><div class="section-title"><div><p class="eyebrow">CONFIGURED MODELS</p><h2>模型配置</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
+          </div>
         </section>
 
         <div id="toast" class="toast" role="status" aria-live="polite"></div>

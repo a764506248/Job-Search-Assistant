@@ -16,12 +16,19 @@ from .domain.models import (
     JobEvaluationRequest,
     JobEvaluationResponse,
     JobListResponse,
+    LibraryListResponse,
+    LibraryRecord,
+    LibraryRecordInput,
+    ProfilePayload,
     RiskRuleInput,
 )
-from .repositories import JobRepository
+from .repositories import JobRepository, LibraryRepository
+from .repositories.library import ALLOWED_KINDS, LibraryKind
 
 
-def create_router(job_repository: JobRepository) -> APIRouter:
+def create_router(
+    job_repository: JobRepository, library_repository: LibraryRepository
+) -> APIRouter:
     router = APIRouter(prefix="/v1")
 
     @router.get("/health", response_model=HealthResponse)
@@ -87,5 +94,46 @@ def create_router(job_repository: JobRepository) -> APIRouter:
             )
         )
         return JobEvaluationResponse(analysis=analysis, decision=decision)
+
+    @router.get("/profile", response_model=ProfilePayload)
+    def get_profile() -> ProfilePayload:
+        return ProfilePayload(data=library_repository.get_profile())
+
+    @router.put("/profile", response_model=ProfilePayload)
+    def save_profile(request: ProfilePayload) -> ProfilePayload:
+        return ProfilePayload(data=library_repository.save_profile(request.data))
+
+    def valid_kind(kind: str) -> LibraryKind:
+        if kind not in ALLOWED_KINDS:
+            raise HTTPException(status_code=404, detail="library kind not found")
+        return kind  # type: ignore[return-value]
+
+    @router.get("/library/{kind}", response_model=LibraryListResponse)
+    def list_library(kind: str) -> LibraryListResponse:
+        return LibraryListResponse(items=library_repository.list(valid_kind(kind)))
+
+    @router.post("/library/{kind}", response_model=LibraryRecord, status_code=201)
+    def create_library_record(kind: str, request: LibraryRecordInput) -> LibraryRecord:
+        return LibraryRecord.model_validate(
+            library_repository.create(valid_kind(kind), request.name, request.data)
+        )
+
+    @router.put("/library/{kind}/{record_id}", response_model=LibraryRecord)
+    def update_library_record(
+        kind: str, record_id: int, request: LibraryRecordInput
+    ) -> LibraryRecord:
+        try:
+            result = library_repository.update(
+                valid_kind(kind), record_id, request.name, request.data
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="record not found") from error
+        return LibraryRecord.model_validate(result)
+
+    @router.delete("/library/{kind}/{record_id}", status_code=204)
+    def delete_library_record(kind: str, record_id: int) -> Response:
+        if not library_repository.delete(valid_kind(kind), record_id):
+            raise HTTPException(status_code=404, detail="record not found")
+        return Response(status_code=204)
 
     return router

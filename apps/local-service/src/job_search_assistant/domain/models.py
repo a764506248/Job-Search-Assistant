@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -170,3 +170,23 @@ class JobEvaluationRequest(DecisionRequest):
 class JobEvaluationResponse(ApiModel):
     analysis: JdAnalysisResponse
     decision: DecisionResponse
+
+
+class LibraryRecordInput(ApiModel):
+    name: str = Field(min_length=1, max_length=200)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class LibraryRecord(LibraryRecordInput):
+    id: int
+    kind: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LibraryListResponse(ApiModel):
+    items: list[LibraryRecord]
+
+
+class ProfilePayload(ApiModel):
+    data: dict[str, Any] = Field(default_factory=dict)
