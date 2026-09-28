@@ -1,4 +1,28 @@
 services:
+  local-service:
+    build:
+      context: ./apps/local-service
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      JSA_HOST: 0.0.0.0
+      JSA_PORT: 8765
+      JSA_DATA_DIR: /data
+      JSA_EMBEDDING_URL: http://embedding:8766
+      JSA_EMBEDDING_MODEL: jinaai/jina-embeddings-v2-base-zh
+    volumes:
+      - ./apps/local-service/data:/data
+    depends_on:
+      embedding:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   embedding:
     build:
       context: ./services/embedding
@@ -9,6 +33,12 @@ services:
       HF_HOME: /models/huggingface
     volumes:
       - embedding-models:/models/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
 volumes:

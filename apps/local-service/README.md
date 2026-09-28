@@ -2,10 +2,22 @@
 
 本地服务保存用户资料和知识库，并向浏览器扩展提供规则判断、RAG、材料生成和任务记录 API。
 
-开发启动：
+Docker 一键启动（推荐，在仓库根目录执行）：
 
 ```bash
-# 仓库根目录
+docker compose up -d --build
+```
+
+这会同时启动：
+
+- 本地管理服务：`127.0.0.1:8765`；
+- Embedding 服务：`127.0.0.1:8766`；
+- SQLite 数据文件：宿主机 `apps/local-service/data/jobs.sqlite3`，挂载到容器 `/data/jobs.sqlite3`。
+
+开发模式：
+
+```bash
+# 仓库根目录只启动 Embedding
 docker compose up -d --build embedding
 
 # apps/local-service 目录
