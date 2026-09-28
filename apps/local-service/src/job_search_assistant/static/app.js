@@ -86,7 +86,7 @@ async function loadRagStatus() {
   const status = await response.json()
   $('#embedding-status').textContent = status.embeddingAvailable ? '已连接' : '未启动'
   $('#embedding-status').className = status.embeddingAvailable ? 'status-good' : 'status-bad'
-  $('#embedding-model').textContent = status.model || status.embeddingService?.model || 'BAAI/bge-small-zh-v1.5'
+  $('#embedding-model').textContent = status.model || status.embeddingService?.model || 'jinaai/jina-embeddings-v2-base-zh'
   $('#rag-sources').textContent = String(status.sources)
   $('#rag-chunks').textContent = String(status.chunks)
   $('#rag-indexed-at').textContent = status.indexedAt ? `最后构建：${formatTime(status.indexedAt)}` : '尚未建立索引'
@@ -109,8 +109,10 @@ async function loadRagChunks() {
       return `
         <article class="vector-record">
           <div class="vector-record-head">
-            <div><span class="tag">${escapeHtml(sourceTypeLabel(item.sourceType))}</span><strong>${escapeHtml(item.sourceName)}</strong><small>分片 #${item.chunkIndex + 1}</small></div>
-            <span>${item.dimensions} 维</span>
+            <span class="tag">${escapeHtml(sourceTypeLabel(item.sourceType))}</span>
+            <strong>${escapeHtml(item.sourceName)}</strong>
+            <span class="vector-chip">分片 #${item.chunkIndex + 1}</span>
+            <span class="vector-chip">${item.dimensions} 维</span>
           </div>
           <p>${escapeHtml(item.content)}</p>
           <details>

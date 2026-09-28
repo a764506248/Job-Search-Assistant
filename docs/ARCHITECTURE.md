@@ -236,7 +236,7 @@ flowchart TD
 
 ### 7.1 本地向量检索
 
-- Embedding 模型：`BAAI/bge-small-zh-v1.5`；
+- Embedding 模型：`jinaai/jina-embeddings-v2-base-zh`（中英双语，768 维）；
 - 运行方式：Docker 中的 CPU/ONNX 推理服务，只监听 `127.0.0.1:8766`；
 - 索引来源：个人档案、项目库、简历库；
 - 分片策略：500 字符，80 字符重叠；

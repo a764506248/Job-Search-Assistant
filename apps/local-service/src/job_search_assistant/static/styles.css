@@ -149,13 +149,12 @@ td small { color: var(--muted); }
 .rag-score { color: var(--brand); font-size: 10px; font-weight: 700; }
 .vector-data-panel { margin-bottom: 22px; }
 .panel-heading-actions { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 10px; }
-.panel-description { margin: -4px 22px 14px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.panel-description { margin: 0; padding: 13px 22px 15px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .vector-record-list { padding: 0 22px 22px; display: grid; gap: 10px; }
 .vector-record { padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
-.vector-record-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.vector-record-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.vector-record-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vector-record-head small, .vector-record-head > span { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.vector-record-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vector-record-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vector-chip { padding: 3px 7px; border-radius: 999px; background: #eef2ef; color: var(--muted); font-size: 9px; white-space: nowrap; }
 .vector-record > p { margin: 11px 0; color: var(--text); font-size: 11px; line-height: 1.7; white-space: pre-wrap; }
 .vector-record details { border-top: 1px solid var(--line); padding-top: 9px; }
 .vector-record summary { color: var(--brand); cursor: pointer; font-size: 10px; font-weight: 700; }
@@ -234,4 +233,7 @@ td small { color: var(--muted); }
   .job-row { grid-template-columns: 1fr; gap: 5px; }
   .topbar { align-items: flex-end; }
   .metric-grid, .form-row { grid-template-columns: 1fr; }
+  .panel-heading { align-items: flex-start; gap: 12px; }
+  .panel-heading-actions { align-items: flex-end; flex-direction: column; }
+  .vector-record dl div { grid-template-columns: 1fr; gap: 3px; }
 }

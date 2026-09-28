@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastembed import TextEmbedding
 from pydantic import BaseModel, Field
 
-MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+MODEL_NAME = os.getenv("EMBEDDING_MODEL", "jinaai/jina-embeddings-v2-base-zh")
 model: TextEmbedding | None = None
 
 
