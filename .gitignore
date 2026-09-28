@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.cache/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+node_modules/
+.output/
+.wxt/
+dist/
+coverage/
+data/
+generated/

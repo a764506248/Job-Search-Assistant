@@ -1,0 +1,24 @@
+{
+  "name": "@job-search-assistant/extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "check": "vue-tsc --noEmit && tsc --noEmit -p tsconfig.json",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@job-search-assistant/contracts": "*",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.30",
+    "@vue/tsconfig": "^0.8.0",
+    "@wxt-dev/module-vue": "^1.0.0",
+    "typescript": "^5.9.0",
+    "vue-tsc": "^3.0.0",
+    "wxt": "^0.21.0"
+  }
+}

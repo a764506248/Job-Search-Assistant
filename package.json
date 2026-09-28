@@ -1,0 +1,17 @@
+{
+  "name": "job-search-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/extension",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:extension": "npm run dev --workspace @job-search-assistant/extension",
+    "build:extension": "npm run build --workspace @job-search-assistant/extension",
+    "check:extension": "npm run check --workspace @job-search-assistant/extension"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
