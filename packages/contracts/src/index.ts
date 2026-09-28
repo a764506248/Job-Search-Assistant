@@ -68,3 +68,40 @@ export interface JobCaptureResponse {
   accepted: number
   jobIds: string[]
 }
+
+export type RequirementLevel = 'required' | 'preferred' | 'neutral' | 'negated' | 'context'
+export type RequirementCategory = 'elite_school' | 'education_degree'
+
+export interface TextEvidence {
+  text: string
+  start: number
+  end: number
+}
+
+export interface ParsedRequirement {
+  category: RequirementCategory
+  level: RequirementLevel
+  normalizedValue: string
+  evidence: TextEvidence
+  explanation: string
+}
+
+export interface JdAnalysisRequest {
+  jobText: string
+}
+
+export interface JdAnalysisResponse {
+  requirements: ParsedRequirement[]
+  riskRequirements: ParsedRequirement[]
+  hasRiskSignals: boolean
+  parserVersion: string
+}
+
+export interface JobEvaluationRequest extends DecisionRequest {
+  eliteSchoolAction?: RuleAction
+}
+
+export interface JobEvaluationResponse {
+  analysis: JdAnalysisResponse
+  decision: DecisionResponse
+}

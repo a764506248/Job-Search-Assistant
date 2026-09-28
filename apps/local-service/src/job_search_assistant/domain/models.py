@@ -100,3 +100,63 @@ class JobCaptureRequest(ApiModel):
 class JobCaptureResponse(ApiModel):
     accepted: int
     job_ids: list[str]
+
+
+class RequirementLevel(StrEnum):
+    REQUIRED = "required"
+    PREFERRED = "preferred"
+    NEUTRAL = "neutral"
+    NEGATED = "negated"
+    CONTEXT = "context"
+
+
+class RequirementCategory(StrEnum):
+    ELITE_SCHOOL = "elite_school"
+    EDUCATION_DEGREE = "education_degree"
+
+
+class TextEvidence(ApiModel):
+    text: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "TextEvidence":
+        if self.end < self.start:
+            raise ValueError("evidence end must be greater than or equal to start")
+        return self
+
+
+class ParsedRequirement(ApiModel):
+    category: RequirementCategory
+    level: RequirementLevel
+    normalized_value: str
+    evidence: TextEvidence
+    explanation: str
+
+
+class JdAnalysisRequest(ApiModel):
+    job_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def normalize_job_text(self) -> "JdAnalysisRequest":
+        self.job_text = self.job_text.strip()
+        if not self.job_text:
+            raise ValueError("job_text must not be blank")
+        return self
+
+
+class JdAnalysisResponse(ApiModel):
+    requirements: list[ParsedRequirement]
+    risk_requirements: list[ParsedRequirement]
+    has_risk_signals: bool
+    parser_version: str
+
+
+class JobEvaluationRequest(DecisionRequest):
+    elite_school_action: RuleAction = RuleAction.NOTIFY
+
+
+class JobEvaluationResponse(ApiModel):
+    analysis: JdAnalysisResponse
+    decision: DecisionResponse

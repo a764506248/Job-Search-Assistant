@@ -417,7 +417,11 @@ POST /v1/jobs/{id}/analyze
 GET  /v1/jobs/{id}/analysis
 POST /v1/jobs/analyze-batch
 GET  /v1/tasks/{taskId}/events
+POST /v1/jd/analyze
+POST /v1/jobs/evaluate
 ```
+
+`/v1/jd/analyze` 只负责识别要求和风险信号；`/v1/jobs/evaluate` 再根据用户配置的规则动作决定使用定制材料、默认材料或禁止投递，避免把单个用户的偏好写死在解析器中。
 
 ### 16.6 材料生成
 

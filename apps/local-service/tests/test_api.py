@@ -51,3 +51,54 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
     assert first.json() == {"accepted": 1, "jobIds": ["job-123"]}
     assert second.status_code == 200
     assert second.json() == {"accepted": 0, "jobIds": []}
+
+
+def test_jd_analysis_returns_evidence_and_default_strategy(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    text = "熟悉Python。985、211院校优先。"
+
+    response = client.post("/v1/jd/analyze", json={"jobText": text})
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["hasRiskSignals"] is True
+    assert result["riskRequirements"][0]["level"] == "preferred"
+    evidence = result["riskRequirements"][0]["evidence"]
+    assert text[evidence["start"] : evidence["end"]] == evidence["text"]
+
+
+def test_job_evaluation_applies_user_elite_school_policy(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.post(
+        "/v1/jobs/evaluate",
+        json={
+            "jobText": "本科以上学历，985、211院校优先。",
+            "suitabilityScore": 90,
+            "customizationConfidence": 90,
+            "eliteSchoolAction": "use_default_materials",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["analysis"]["hasRiskSignals"] is True
+    assert result["decision"]["shouldDeliver"] is True
+    assert result["decision"]["materialStrategy"] == "default"
+
+
+def test_negated_elite_school_text_does_not_apply_policy(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.post(
+        "/v1/jobs/evaluate",
+        json={
+            "jobText": "不要求985、211背景，重视项目能力。",
+            "suitabilityScore": 90,
+            "customizationConfidence": 90,
+            "eliteSchoolAction": "use_default_materials",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["analysis"]["hasRiskSignals"] is False
+    assert result["decision"]["materialStrategy"] == "custom"

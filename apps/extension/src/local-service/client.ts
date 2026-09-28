@@ -4,6 +4,10 @@ import type {
   HealthResponse,
   JobCaptureRequest,
   JobCaptureResponse,
+  JdAnalysisRequest,
+  JdAnalysisResponse,
+  JobEvaluationRequest,
+  JobEvaluationResponse,
 } from '@job-search-assistant/contracts'
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8765'
@@ -27,6 +31,20 @@ export class LocalServiceClient {
 
   captureJobs(input: JobCaptureRequest): Promise<JobCaptureResponse> {
     return this.request('/v1/jobs/capture', {
+      method: 'POST',
+      body: input,
+    })
+  }
+
+  analyzeJd(input: JdAnalysisRequest): Promise<JdAnalysisResponse> {
+    return this.request('/v1/jd/analyze', {
+      method: 'POST',
+      body: input,
+    })
+  }
+
+  evaluateJob(input: JobEvaluationRequest): Promise<JobEvaluationResponse> {
+    return this.request('/v1/jobs/evaluate', {
       method: 'POST',
       body: input,
     })
