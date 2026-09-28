@@ -192,6 +192,17 @@ class ProfilePayload(ApiModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class ResumeImportResponse(ApiModel):
+    filename: str
+    profile_fields: list[str]
+    resume_id: int
+    project_ids: list[int]
+    extracted_characters: int
+    index_rebuilt: bool
+    indexed_chunks: int | None = None
+    index_error: str | None = None
+
+
 class RagStatus(ApiModel):
     chunks: int
     sources: int

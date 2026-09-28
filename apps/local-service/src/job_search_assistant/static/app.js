@@ -351,6 +351,35 @@ $('#profile-form').addEventListener('submit', async (event) => {
   showToast(response.ok ? '个人档案已保存' : '保存失败')
 })
 
+$('#resume-import-form').addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const form = event.currentTarget
+  const button = form.querySelector('button[type="submit"]')
+  const resultBox = $('#resume-import-result')
+  button.disabled = true
+  button.textContent = '正在解析并入库…'
+  resultBox.hidden = true
+  try {
+    const response = await fetch('/v1/resumes/import', { method: 'POST', body: new FormData(form) })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.detail || '简历导入失败')
+    const indexMessage = result.indexRebuilt
+      ? `已重建 ${result.indexedChunks} 个向量分片`
+      : `资料已入库，向量索引未重建：${result.indexError || 'Embedding 服务不可用'}`
+    resultBox.innerHTML = `<strong>${escapeHtml(result.filename)} 导入成功</strong><br>个人档案更新 ${result.profileFields.length} 个字段，新增 ${result.projectIds.length} 条项目、1 条简历资料，提取 ${result.extractedCharacters} 个字符。${escapeHtml(indexMessage)}`
+    resultBox.hidden = false
+    form.reset()
+    await Promise.all([loadLibrary('resumes'), loadProfile()])
+    showToast('简历已解析并分别写入本地资料库')
+  } catch (error) {
+    resultBox.textContent = error.message
+    resultBox.hidden = false
+  } finally {
+    button.disabled = false
+    button.textContent = '解析并直接入库'
+  }
+})
+
 $('#rebuild-index').addEventListener('click', async (event) => {
   const button = event.currentTarget
   button.disabled = true

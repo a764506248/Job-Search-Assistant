@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -135,6 +137,52 @@ class LibraryRepository:
                 (json.dumps(data, ensure_ascii=False), datetime.now(UTC).isoformat()),
             )
         return data
+
+    def import_resume(
+        self,
+        filename: str,
+        profile: dict[str, Any],
+        resume: dict[str, Any],
+        projects: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT data_json FROM profile WHERE singleton = 1"
+            ).fetchone()
+            current_profile = json.loads(row[0]) if row else {}
+            merged_profile = {**current_profile, **profile}
+            connection.execute(
+                """INSERT INTO profile(singleton, data_json, updated_at) VALUES (1, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    data_json = excluded.data_json,
+                    updated_at = excluded.updated_at""",
+                (json.dumps(merged_profile, ensure_ascii=False), now),
+            )
+            resume_cursor = connection.execute(
+                """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
+                VALUES ('resumes', ?, ?, ?, ?)""",
+                (filename, json.dumps(resume, ensure_ascii=False), now, now),
+            )
+            project_ids = []
+            for project in projects:
+                cursor = connection.execute(
+                    """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
+                    VALUES ('projects', ?, ?, ?, ?)""",
+                    (
+                        project["name"],
+                        json.dumps(project["data"], ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+                project_ids.append(cursor.lastrowid)
+        return {
+            "profile": merged_profile,
+            "resumeId": resume_cursor.lastrowid,
+            "projectIds": project_ids,
+        }
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)

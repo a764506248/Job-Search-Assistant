@@ -252,6 +252,14 @@ flowchart TD
 - PDF 由本地 Chrome 打印引擎生成 A4 页面，保证预览、换行和分页结果一致；
 - Chrome 不可用时才降级到 ReportLab，并可通过 `JSA_CHROME_PATH` 指定浏览器路径。
 
+### 7.3 简历文件导入
+
+- 支持 PDF、DOCX、TXT 和 Markdown，单文件最大 10 MB；
+- 文件只在本地服务中解析，不上传产品服务器；
+- 原文及文件元数据写入简历库，个人信息合并写入个人档案；
+- 识别到的项目经历写入项目库，数据库写入使用同一个 SQLite 事务；
+- 入库成功后自动尝试重建向量索引，Embedding 服务离线时保留资料并返回明确提示。
+
 ## 8. 扩展与本地服务通信
 
 - 链路：Boss 主世界采集脚本 → DOM `CustomEvent` → 内容脚本校验 → HTTP JSON → FastAPI → SQLite。

@@ -1,6 +1,8 @@
 from io import BytesIO
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from . import __version__
@@ -28,12 +30,14 @@ from .domain.models import (
     RagSearchRequest,
     RagSearchResponse,
     RagStatus,
+    ResumeImportResponse,
     RiskRuleInput,
 )
 from .rag import RagService
 from .repositories import JobRepository, LibraryRepository
 from .repositories.library import ALLOWED_KINDS, LibraryKind
 from .resume_html import build_resume_html
+from .resume_import import MAX_RESUME_BYTES, parse_resume
 from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
@@ -116,6 +120,37 @@ def create_router(
     @router.put("/profile", response_model=ProfilePayload)
     def save_profile(request: ProfilePayload) -> ProfilePayload:
         return ProfilePayload(data=library_repository.save_profile(request.data))
+
+    @router.post("/resumes/import", response_model=ResumeImportResponse, status_code=201)
+    async def import_resume(file: Annotated[UploadFile, File()]) -> ResumeImportResponse:
+        filename = Path((file.filename or "resume").replace("\\", "/")).name
+        try:
+            parsed = parse_resume(filename, await file.read(MAX_RESUME_BYTES + 1))
+            imported = library_repository.import_resume(
+                filename, parsed.profile, parsed.resume, parsed.projects
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        rebuilt = False
+        indexed_chunks = None
+        index_error = None
+        try:
+            index_result = rag_service.rebuild()
+            rebuilt = True
+            indexed_chunks = index_result["rebuilt"]
+        except RuntimeError as error:
+            index_error = str(error)
+        return ResumeImportResponse(
+            filename=filename,
+            profile_fields=sorted(parsed.profile),
+            resume_id=imported["resumeId"],
+            project_ids=imported["projectIds"],
+            extracted_characters=len(parsed.resume["rawText"]),
+            index_rebuilt=rebuilt,
+            indexed_chunks=indexed_chunks,
+            index_error=index_error,
+        )
 
     def valid_kind(kind: str) -> LibraryKind:
         if kind not in ALLOWED_KINDS:

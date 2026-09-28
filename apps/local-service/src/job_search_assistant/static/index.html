@@ -154,6 +154,7 @@
                 <label>姓名或称呼<input name="displayName" placeholder="例如：小林" /></label>
                 <label>目标岗位<input name="targetRoles" placeholder="例如：AI应用开发、Python后端" /></label>
                 <div class="form-row"><label>工作年限<input name="yearsExperience" type="number" min="0" placeholder="3" /></label><label>期望城市<input name="cities" placeholder="上海、杭州、远程" /></label></div>
+                <div class="form-row"><label>手机号<input name="phone" placeholder="用于简历联系方式" /></label><label>邮箱<input name="email" type="email" placeholder="name@example.com" /></label></div>
                 <label>个人简介<textarea name="summary" rows="4" placeholder="概括你的主要方向和优势"></textarea></label>
                 <label>默认问候语<textarea name="defaultGreeting" rows="3" placeholder="低匹配岗位使用的默认问候语"></textarea></label>
                 <button class="button primary" type="submit">保存个人档案</button>
@@ -180,6 +181,18 @@
         </section>
 
         <section id="resumes-view" class="view library-view" data-kind="resumes">
+          <section class="panel resume-import-panel">
+            <div class="panel-heading"><div><p class="eyebrow">RESUME IMPORT</p><h2>导入现有简历</h2></div></div>
+            <form id="resume-import-form" class="resume-import-form">
+              <label class="file-drop-zone">
+                <span>选择 PDF、DOCX、TXT 或 Markdown 简历</span>
+                <small>文件只在本机解析，最大 10 MB</small>
+                <input name="file" type="file" accept=".pdf,.docx,.txt,.md,.markdown" required />
+              </label>
+              <button class="button primary" type="submit">解析并直接入库</button>
+            </form>
+            <div id="resume-import-result" class="import-result" hidden></div>
+          </section>
           <div class="library-layout">
             <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow">RESUME LIBRARY</p><h2>添加简历资料</h2></div></div>
               <form class="data-form record-form"><input type="hidden" name="recordId" /><label>简历名称<input name="name" required placeholder="例如：默认中文简历" /></label><label>格式<select name="format"><option>PDF</option><option>DOCX</option><option>Markdown</option></select></label><label>用途与备注<textarea name="notes" rows="5" placeholder="这份简历适合哪些岗位"></textarea></label><div class="form-actions"><button class="button primary" type="submit">保存简历资料</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div></form>
