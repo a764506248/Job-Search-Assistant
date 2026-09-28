@@ -14,6 +14,7 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     KeepTogether,
+    PageBreak,
     PageTemplate,
     Paragraph,
     Spacer,
@@ -62,12 +63,12 @@ def build_resume_pdf(data: dict[str, Any]) -> bytes:
     header.setStyle(
         TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)])
     )
-    story.extend([header, Spacer(1, 4 * mm), _rule(), Spacer(1, 4 * mm)])
+    story.extend([header, Spacer(1, 5 * mm), _rule(), Spacer(1, 5 * mm)])
 
     story.extend([_section_title("个人优势", styles)])
     story.extend(_bullets(data["strengths"], styles))
 
-    story.extend([Spacer(1, 2 * mm), _section_title("技术栈", styles)])
+    story.extend([Spacer(1, 4 * mm), _section_title("技术栈", styles)])
     skill_rows = []
     groups = data["skillGroups"]
     for index in range(0, len(groups), 2):
@@ -85,7 +86,11 @@ def build_resume_pdf(data: dict[str, Any]) -> bytes:
     )
     story.append(skill_table)
 
-    story.extend([Spacer(1, 3 * mm), _section_title("项目经历", styles)])
+    story.extend([Spacer(1, 5 * mm), _section_title("AI Agent 项目实践", styles)])
+    story.append(_architecture_overview(styles))
+    story.append(PageBreak())
+
+    story.extend([_section_title("项目经历", styles)])
     for project in data["projects"]:
         story.append(
             _entry(
@@ -98,8 +103,20 @@ def build_resume_pdf(data: dict[str, Any]) -> bytes:
             )
         )
 
-    story.extend([Spacer(1, 2 * mm), _section_title("工作经历", styles)])
-    for item in data["experience"]:
+    story.extend([_section_title("工作经历", styles)])
+    for item in data["experience"][:1]:
+        story.append(
+            _entry(
+                item["role"],
+                item["company"],
+                item["period"],
+                item["summary"],
+                item["bullets"],
+                styles,
+            )
+        )
+    story.append(PageBreak())
+    for item in data["experience"][1:]:
         story.append(
             _entry(
                 item["role"],
@@ -138,22 +155,22 @@ def _styles() -> dict[str, ParagraphStyle]:
     font = FONT_NAME
     return {
         "name": ParagraphStyle(
-            "Name", parent=base["Normal"], fontName=font, fontSize=25, leading=30, textColor=NAVY
+            "Name", parent=base["Normal"], fontName=font, fontSize=29, leading=34, textColor=NAVY
         ),
         "headline": ParagraphStyle(
             "Headline",
             parent=base["Normal"],
             fontName=font,
-            fontSize=10,
-            leading=15,
+            fontSize=11,
+            leading=17,
             textColor=colors.HexColor("#007f8e"),
         ),
         "contact": ParagraphStyle(
             "Contact",
             parent=base["Normal"],
             fontName=font,
-            fontSize=8.5,
-            leading=13,
+            fontSize=9,
+            leading=14,
             textColor=MUTED,
             alignment=TA_LEFT,
         ),
@@ -161,28 +178,28 @@ def _styles() -> dict[str, ParagraphStyle]:
             "TechTop",
             parent=base["Normal"],
             fontName=font,
-            fontSize=8.5,
-            leading=13,
+            fontSize=9,
+            leading=14,
             textColor=NAVY,
         ),
         "section": ParagraphStyle(
             "Section",
             parent=base["Normal"],
             fontName=font,
-            fontSize=14,
-            leading=18,
+            fontSize=16,
+            leading=21,
             textColor=NAVY,
             spaceAfter=6,
         ),
         "body": ParagraphStyle(
-            "Body", parent=base["Normal"], fontName=font, fontSize=8.6, leading=13.2, textColor=NAVY
+            "Body", parent=base["Normal"], fontName=font, fontSize=9.5, leading=15, textColor=NAVY
         ),
         "summary": ParagraphStyle(
             "Summary",
             parent=base["Normal"],
             fontName=font,
-            fontSize=8.4,
-            leading=12.5,
+            fontSize=9.2,
+            leading=14.5,
             textColor=MUTED,
             spaceAfter=3,
         ),
@@ -190,20 +207,20 @@ def _styles() -> dict[str, ParagraphStyle]:
             "Bullet",
             parent=base["Normal"],
             fontName=font,
-            fontSize=8.5,
-            leading=13.2,
+            fontSize=9.3,
+            leading=15,
             leftIndent=8,
             firstLineIndent=-8,
             bulletIndent=0,
             textColor=NAVY,
-            spaceAfter=2,
+            spaceAfter=3.5,
         ),
         "entryTitle": ParagraphStyle(
             "EntryTitle",
             parent=base["Normal"],
             fontName=font,
-            fontSize=11,
-            leading=14,
+            fontSize=12.5,
+            leading=17,
             textColor=NAVY,
         ),
         "period": ParagraphStyle(
@@ -284,9 +301,43 @@ def _entry(
             heading,
             Paragraph(summary, styles["summary"]),
             *_bullets(bullets, styles),
-            Spacer(1, 3 * mm),
+            Spacer(1, 5 * mm),
         ]
     )
+
+
+def _architecture_overview(styles: dict[str, ParagraphStyle]) -> Table:
+    headings = ["业务输入", "处理与项目能力", "AI 资产", "线上应用"]
+    values = [
+        "商户与商品数据<br/>内容运营需求<br/>历史咨询数据",
+        "知识数据加工<br/>内容生产工作流<br/>数据清洗与微调",
+        "RAG 知识库<br/>LoRA 微调模型<br/>评测数据集",
+        "实时语音导购 Agent<br/>内容运营系统<br/>智能问答",
+    ]
+    table = Table(
+        [
+            [Paragraph(f"<b>{value}</b>", styles["body"]) for value in headings],
+            [Paragraph(value, styles["summary"]) for value in values],
+        ],
+        colWidths=[45 * mm] * 4,
+        rowHeights=[11 * mm, 52 * mm],
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef7f7")),
+                ("BOX", (0, 0), (-1, -1), 0.7, LINE),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE),
+                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+                ("VALIGN", (0, 1), (-1, 1), "TOP"),
+                ("TOPPADDING", (0, 1), (-1, 1), 14),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TEXTCOLOR", (0, 0), (-1, 0), TEAL),
+            ]
+        )
+    )
+    return table
 
 
 def _page_footer(canvas, document) -> None:  # noqa: ANN001

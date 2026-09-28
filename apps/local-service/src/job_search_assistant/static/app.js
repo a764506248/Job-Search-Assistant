@@ -109,13 +109,33 @@ function renderResumePreview() {
   if (!data) return
   const skills = data.skillGroups.map(([title, value]) => `<div><strong>${escapeHtml(title)}：</strong>${escapeHtml(value)}</div>`).join('')
   const education = data.education.map((item) => `<article class="resume-entry"><div class="resume-entry-heading"><h4>${escapeHtml(item.school)} <em>${escapeHtml(item.degree)}</em></h4><time>${escapeHtml(item.period)}</time></div></article>`).join('')
+  const architecture = ['业务输入', '处理与项目能力', 'AI 资产', '线上应用'].map((title, index) => {
+    const values = [
+      '商户与商品数据<br>内容运营需求<br>历史咨询数据',
+      '知识数据加工<br>内容生产工作流<br>数据清洗与微调',
+      'RAG 知识库<br>LoRA 微调模型<br>评测数据集',
+      '实时语音导购 Agent<br>内容运营系统<br>智能问答',
+    ]
+    return `<div><strong>${title}</strong><p>${values[index]}</p></div>`
+  }).join('')
   $('#resume-preview').innerHTML = `
-    <header class="resume-header"><div><h2>${escapeHtml(data.name)}</h2><strong>${escapeHtml(data.headline)}</strong></div><p>${data.contact.map(escapeHtml).join('<br>')}</p><p><b>核心技术</b><br>${escapeHtml(data.coreSkills)}</p></header>
-    ${resumeSection('个人优势', `<ul>${data.strengths.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`)}
-    ${resumeSection('技术栈', `<div class="resume-skills">${skills}</div>`)}
-    ${resumeSection('项目经历', data.projects.map(resumeEntry).join(''))}
-    ${resumeSection('工作经历', data.experience.map(resumeEntry).join(''))}
-    ${resumeSection('教育经历', education)}
+    <div class="resume-page">
+      <header class="resume-header"><div><h2>${escapeHtml(data.name)}</h2><strong>${escapeHtml(data.headline)}</strong></div><p>${data.contact.map(escapeHtml).join('<br>')}</p><p><b>核心技术</b><br>${escapeHtml(data.coreSkills)}</p></header>
+      ${resumeSection('个人优势', `<ul>${data.strengths.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`)}
+      ${resumeSection('技术栈', `<div class="resume-skills">${skills}</div>`)}
+      ${resumeSection('AI Agent 项目实践', `<div class="resume-architecture">${architecture}</div>`)}
+      <span class="resume-page-number">第 1 页</span>
+    </div>
+    <div class="resume-page">
+      ${resumeSection('项目经历', data.projects.map(resumeEntry).join(''))}
+      ${resumeSection('工作经历', resumeEntry(data.experience[0]))}
+      <span class="resume-page-number">第 2 页</span>
+    </div>
+    <div class="resume-page">
+      ${data.experience.slice(1).map(resumeEntry).join('')}
+      ${resumeSection('教育经历', education)}
+      <span class="resume-page-number">第 3 页</span>
+    </div>
   `
 }
 

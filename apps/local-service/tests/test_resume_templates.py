@@ -1,3 +1,5 @@
+import re
+
 from fastapi.testclient import TestClient
 
 from job_search_assistant.main import create_app
@@ -15,7 +17,7 @@ def test_resume_template_catalog_and_sample_pdf(tmp_path) -> None:
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert pdf.content.startswith(b"%PDF")
-    assert b"/Type /Page" in pdf.content
+    assert len(re.findall(rb"/Type /Page\b", pdf.content)) == 3
 
 
 def test_unknown_resume_template_returns_404(tmp_path) -> None:
