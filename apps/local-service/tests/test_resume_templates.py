@@ -13,6 +13,12 @@ def test_resume_template_catalog_and_sample_pdf(tmp_path) -> None:
     assert catalog.json()["items"][0]["id"] == "teal-professional"
     assert catalog.json()["sampleData"]["name"] == "林晓舟"
 
+    preview = client.get("/v1/resume-templates/teal-professional/sample")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("text/html")
+    assert "AI Agent 项目实践" in preview.text
+    assert preview.text.count('class="page"') == 3
+
     pdf = client.get("/v1/resume-templates/teal-professional/sample.pdf")
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"

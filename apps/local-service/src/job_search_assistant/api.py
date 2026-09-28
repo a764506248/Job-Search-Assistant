@@ -1,7 +1,7 @@
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from . import __version__
 from .domain import (
@@ -32,6 +32,7 @@ from .domain.models import (
 from .rag import RagService
 from .repositories import JobRepository, LibraryRepository
 from .repositories.library import ALLOWED_KINDS, LibraryKind
+from .resume_html import build_resume_html
 from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
@@ -169,6 +170,12 @@ def create_router(
     @router.get("/resume-templates")
     def list_resume_templates() -> dict[str, object]:
         return {"items": RESUME_TEMPLATES, "sampleData": SAMPLE_RESUME}
+
+    @router.get("/resume-templates/{template_id}/sample", response_class=HTMLResponse)
+    def preview_sample_resume(template_id: str) -> HTMLResponse:
+        if template_id != TEAL_PROFESSIONAL_ID:
+            raise HTTPException(status_code=404, detail="resume template not found")
+        return HTMLResponse(build_resume_html(SAMPLE_RESUME))
 
     @router.get("/resume-templates/{template_id}/sample.pdf")
     def download_sample_resume(template_id: str) -> StreamingResponse:

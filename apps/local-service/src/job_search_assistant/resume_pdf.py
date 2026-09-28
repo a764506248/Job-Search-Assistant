@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -22,6 +26,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from .resume_html import build_resume_html
+
 TEAL = colors.HexColor("#009c9c")
 NAVY = colors.HexColor("#08263a")
 MUTED = colors.HexColor("#526b7a")
@@ -30,6 +36,55 @@ FONT_NAME = "JsaChinese"
 
 
 def build_resume_pdf(data: dict[str, Any]) -> bytes:
+    chrome = _find_chrome()
+    if chrome:
+        try:
+            return _build_chromium_pdf(data, chrome)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            pass
+    return _build_reportlab_pdf(data)
+
+
+def _build_chromium_pdf(data: dict[str, Any], chrome: str) -> bytes:
+    with tempfile.TemporaryDirectory(prefix="jsa-resume-") as directory:
+        html_path = Path(directory) / "resume.html"
+        pdf_path = Path(directory) / "resume.pdf"
+        html_path.write_text(build_resume_html(data), encoding="utf-8")
+        result = subprocess.run(
+            [
+                chrome,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={pdf_path}",
+                html_path.as_uri(),
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if result.returncode != 0 or not pdf_path.exists():
+            raise RuntimeError(result.stderr.decode(errors="replace"))
+        return pdf_path.read_bytes()
+
+
+def _find_chrome() -> str | None:
+    configured = os.getenv("JSA_CHROME_PATH")
+    candidates = [
+        configured,
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+    ]
+    return next((path for path in candidates if path and Path(path).is_file()), None)
+
+
+def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
     _register_chinese_font()
     buffer = BytesIO()
     document = BaseDocTemplate(
