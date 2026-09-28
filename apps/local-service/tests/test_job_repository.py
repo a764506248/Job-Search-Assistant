@@ -25,3 +25,10 @@ def test_repository_keeps_changed_job_snapshots(tmp_path) -> None:
     assert repository.save_many([make_job()]) == []
     assert repository.save_many([make_job("负责 Agent 和 RAG 应用研发")]) == ["job-123"]
     assert repository.count() == 2
+    jobs = repository.list_recent()
+    assert jobs[0].description == "负责 Agent 和 RAG 应用研发"
+    assert jobs[0].skills == ["Python", "RAG"]
+
+    assert repository.delete(jobs[0].id) is True
+    assert repository.delete(jobs[0].id) is False
+    assert repository.count() == 1

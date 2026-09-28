@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Job Search Assistant 本地数据管理中心" />
+    <title>Job Search Assistant · 本地管理中心</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">J</span>
+          <div>
+            <strong>Job Search</strong>
+            <span>Assistant</span>
+          </div>
+        </div>
+
+        <nav aria-label="主要导航">
+          <button class="nav-item active" data-view="overview">
+            <span class="nav-icon">⌂</span>工作台
+          </button>
+          <button class="nav-item" data-view="jobs">
+            <span class="nav-icon">▤</span>职位快照
+          </button>
+          <button class="nav-item pending" disabled title="将在下一阶段接入">
+            <span class="nav-icon">◇</span>项目库<span class="soon">即将接入</span>
+          </button>
+          <button class="nav-item pending" disabled title="将在下一阶段接入">
+            <span class="nav-icon">▧</span>简历库<span class="soon">即将接入</span>
+          </button>
+          <button class="nav-item pending" disabled title="将在下一阶段接入">
+            <span class="nav-icon">⌁</span>匹配规则<span class="soon">即将接入</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span id="service-dot" class="status-dot"></span>
+          <div>
+            <strong id="service-status">正在连接本地服务</strong>
+            <span>数据仅保存在这台设备</span>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">本地知识库</p>
+            <h1 id="page-title">工作台</h1>
+          </div>
+          <button id="refresh-button" class="button secondary" type="button">刷新数据</button>
+        </header>
+
+        <section id="overview-view" class="view active-view">
+          <div class="intro-card">
+            <div>
+              <span class="pill">本地优先</span>
+              <h2>你的求职数据，由你自己掌控</h2>
+              <p>扩展采集到的 Boss 职位会进入这里。后续项目库、简历和匹配规则也会在本机统一管理。</p>
+            </div>
+            <div class="privacy-stamp">
+              <span>LOCAL</span>
+              <small>不上传产品服务器</small>
+            </div>
+          </div>
+
+          <div class="metric-grid" aria-label="数据概览">
+            <article class="metric-card">
+              <span>职位快照</span>
+              <strong id="metric-jobs">—</strong>
+              <small>已保存的 JD 版本</small>
+            </article>
+            <article class="metric-card">
+              <span>公司数量</span>
+              <strong id="metric-companies">—</strong>
+              <small>当前资料涉及的公司</small>
+            </article>
+            <article class="metric-card">
+              <span>今日采集</span>
+              <strong id="metric-today">—</strong>
+              <small>今天新增的职位快照</small>
+            </article>
+            <article class="metric-card accent-card">
+              <span>知识库状态</span>
+              <strong>待完善</strong>
+              <small>下一步接入项目与简历</small>
+            </article>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">RECENT CAPTURES</p>
+                <h2>最近采集的职位</h2>
+              </div>
+              <button class="text-button" data-open-jobs type="button">查看全部 →</button>
+            </div>
+            <div id="recent-jobs" class="job-list"></div>
+          </section>
+        </section>
+
+        <section id="jobs-view" class="view">
+          <div class="toolbar panel">
+            <label class="search-field">
+              <span class="sr-only">搜索职位</span>
+              <span aria-hidden="true">⌕</span>
+              <input id="job-search" type="search" placeholder="搜索职位、公司、技能或 JD 内容" />
+            </label>
+            <span id="result-count" class="result-count"></span>
+          </div>
+          <section class="panel table-panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>职位与公司</th>
+                    <th>薪资 / 地点</th>
+                    <th>要求</th>
+                    <th>采集时间</th>
+                    <th><span class="sr-only">操作</span></th>
+                  </tr>
+                </thead>
+                <tbody id="jobs-table-body"></tbody>
+              </table>
+            </div>
+            <div id="jobs-empty" class="empty-state" hidden>
+              <span class="empty-icon">▤</span>
+              <h3>还没有职位数据</h3>
+              <p>启动本地服务并打开 Boss 职位详情页，扩展会自动将 JD 保存到这里。</p>
+            </div>
+          </section>
+        </section>
+
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </main>
+    </div>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

@@ -27,3 +27,13 @@
 - 带原文证据位置的 JD 学历与名校背景解析；
 - 风险规则和定制/默认/阻止材料策略；
 - Python 测试及扩展类型、生产构建检查。
+
+## 本地管理后台
+
+```bash
+cd apps/local-service
+uv sync --dev
+uv run uvicorn job_search_assistant.main:app --port 8765
+```
+
+启动后打开 <http://127.0.0.1:8765>。当前可以查看数据概览、搜索和删除职位快照；个人资料、项目库、简历库、规则和模型配置将在后续迭代接入同一后台。

@@ -3,7 +3,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from ..domain.models import CapturedJob
+from ..domain.models import CapturedJob, StoredJob
 
 
 class JobRepository:
@@ -81,6 +81,29 @@ class JobRepository:
             row = connection.execute("SELECT COUNT(*) FROM job_postings").fetchone()
         return int(row[0]) if row else 0
 
+    def list_recent(self, limit: int = 100) -> list[StoredJob]:
+        self.initialize()
+        with self._connect() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT * FROM job_postings
+                ORDER BY captured_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def delete(self, snapshot_id: int) -> bool:
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM job_postings WHERE id = ?",
+                (snapshot_id,),
+            )
+        return cursor.rowcount > 0
+
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)
 
@@ -90,3 +113,25 @@ class JobRepository:
             [job.title, job.company_name, job.description, "|".join(job.skills)]
         )
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> StoredJob:
+        return StoredJob(
+            id=row["id"],
+            platform=row["platform"],
+            platform_job_id=row["platform_job_id"],
+            url=row["url"],
+            title=row["title"],
+            company_name=row["company_name"],
+            location=row["location"],
+            salary_text=row["salary_text"],
+            experience=row["experience"],
+            education=row["education"],
+            description=row["description"],
+            skills=json.loads(row["skills_json"]),
+            recruiter_name=row["recruiter_name"],
+            recruiter_title=row["recruiter_title"],
+            captured_at=row["captured_at"],
+            source=row["source"],
+            content_hash=row["content_hash"],
+        )

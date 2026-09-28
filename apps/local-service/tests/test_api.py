@@ -11,6 +11,15 @@ def test_health(tmp_path) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_dashboard_is_served(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "本地管理中心" in response.text
+
+
 def test_decision_api_accepts_camel_case_contract(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.post(
@@ -51,6 +60,15 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
     assert first.json() == {"accepted": 1, "jobIds": ["job-123"]}
     assert second.status_code == 200
     assert second.json() == {"accepted": 0, "jobIds": []}
+
+    listing = client.get("/v1/jobs")
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1
+    snapshot_id = listing.json()["items"][0]["id"]
+
+    deleted = client.delete(f"/v1/jobs/{snapshot_id}")
+    assert deleted.status_code == 204
+    assert client.get("/v1/jobs").json()["total"] == 0
 
 
 def test_jd_analysis_returns_evidence_and_default_strategy(tmp_path) -> None:

@@ -102,6 +102,16 @@ class JobCaptureResponse(ApiModel):
     job_ids: list[str]
 
 
+class StoredJob(CapturedJob):
+    id: int
+    content_hash: str
+
+
+class JobListResponse(ApiModel):
+    total: int
+    items: list[StoredJob]
+
+
 class RequirementLevel(StrEnum):
     REQUIRED = "required"
     PREFERRED = "preferred"

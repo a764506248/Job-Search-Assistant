@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from . import __version__
 from .domain import (
@@ -15,6 +15,7 @@ from .domain.models import (
     JobCaptureResponse,
     JobEvaluationRequest,
     JobEvaluationResponse,
+    JobListResponse,
     RiskRuleInput,
 )
 from .repositories import JobRepository
@@ -35,6 +36,19 @@ def create_router(job_repository: JobRepository) -> APIRouter:
     def capture_jobs(request: JobCaptureRequest) -> JobCaptureResponse:
         job_ids = job_repository.save_many(request.jobs)
         return JobCaptureResponse(accepted=len(job_ids), job_ids=job_ids)
+
+    @router.get("/jobs", response_model=JobListResponse)
+    def list_jobs(limit: int = Query(default=100, ge=1, le=500)) -> JobListResponse:
+        return JobListResponse(
+            total=job_repository.count(),
+            items=job_repository.list_recent(limit),
+        )
+
+    @router.delete("/jobs/{snapshot_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_job(snapshot_id: int) -> Response:
+        if not job_repository.delete(snapshot_id):
+            raise HTTPException(status_code=404, detail="job snapshot not found")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post("/jd/analyze", response_model=JdAnalysisResponse)
     def analyze_job_description(request: JdAnalysisRequest) -> JdAnalysisResponse:
