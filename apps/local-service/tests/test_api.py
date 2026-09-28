@@ -20,6 +20,26 @@ def test_dashboard_is_served(tmp_path) -> None:
     assert "本地管理中心" in response.text
 
 
+def test_dashboard_routes_support_direct_refresh(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+
+    for route in (
+        "/jobs",
+        "/profile",
+        "/projects",
+        "/resumes",
+        "/templates",
+        "/rules",
+        "/models",
+        "/knowledge",
+    ):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert "本地管理中心" in response.text
+
+    assert client.get("/not-a-dashboard-route").status_code == 404
+
+
 def test_decision_api_accepts_camel_case_contract(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.post(

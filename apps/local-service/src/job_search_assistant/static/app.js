@@ -1,5 +1,7 @@
 const state = { jobs: [], filter: '', libraries: {}, templates: [], sampleResume: null, selectedTemplate: null }
 const pageTitles = { overview: '工作台', jobs: '职位快照', profile: '个人档案', projects: '项目库', resumes: '简历库', templates: '简历模板', rules: '匹配规则', models: '模型配置', knowledge: '向量知识库' }
+const routeByView = { overview: '/', jobs: '/jobs', profile: '/profile', projects: '/projects', resumes: '/resumes', templates: '/templates', rules: '/rules', models: '/models', knowledge: '/knowledge' }
+const viewByRoute = Object.fromEntries(Object.entries(routeByView).map(([view, route]) => [route, view]))
 
 const $ = (selector) => document.querySelector(selector)
 const $$ = (selector) => document.querySelectorAll(selector)
@@ -24,13 +26,34 @@ function showToast(message) {
 }
 
 function showView(name) {
+  if (!pageTitles[name]) name = 'overview'
   $$('.view').forEach((node) => node.classList.toggle('active-view', node.id === `${name}-view`))
-  $$('.nav-item[data-view]').forEach((node) => node.classList.toggle('active', node.dataset.view === name))
+  $$('.nav-item[data-view]').forEach((node) => {
+    const active = node.dataset.view === name
+    node.classList.toggle('active', active)
+    if (active) node.setAttribute('aria-current', 'page')
+    else node.removeAttribute('aria-current')
+  })
   $('#page-title').textContent = pageTitles[name] || '工作台'
+  document.title = `${pageTitles[name]} · Job Search Assistant`
   if (name === 'profile') void loadProfile()
   if (name === 'knowledge') void Promise.all([loadRagStatus(), loadRagChunks()])
   if (name === 'templates') void loadTemplates()
   if ($(`#${name}-view`)?.classList.contains('library-view')) void loadLibrary(name)
+}
+
+function viewFromLocation() {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  return viewByRoute[path] || 'overview'
+}
+
+function navigateToView(name, { replace = false } = {}) {
+  const view = pageTitles[name] ? name : 'overview'
+  const route = routeByView[view]
+  if (window.location.pathname !== route) {
+    window.history[replace ? 'replaceState' : 'pushState']({ view }, '', route)
+  }
+  showView(view)
 }
 
 function displayData(kind, data) {
@@ -285,6 +308,7 @@ async function loadJobs() {
 }
 
 async function initialize() {
+  navigateToView(viewFromLocation(), { replace: true })
   try {
     const health = await fetch('/v1/health').then((response) => response.json())
     $('#service-dot').classList.add('online')
@@ -296,13 +320,16 @@ async function initialize() {
   }
 }
 
-$$('.nav-item[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)))
-$$('[data-open-jobs]').forEach((button) => button.addEventListener('click', () => showView('jobs')))
+$$('.nav-item[data-view]').forEach((button) => button.addEventListener('click', () => navigateToView(button.dataset.view)))
+$$('[data-open-jobs]').forEach((button) => button.addEventListener('click', () => navigateToView('jobs')))
+window.addEventListener('popstate', () => showView(viewFromLocation()))
 $('#refresh-button').addEventListener('click', async () => {
   const active = $('.view.active-view')
   try {
     if (active?.classList.contains('library-view')) await loadLibrary(active.dataset.kind)
     else if (active?.id === 'profile-view') await loadProfile()
+    else if (active?.id === 'knowledge-view') await Promise.all([loadRagStatus(), loadRagChunks()])
+    else if (active?.id === 'templates-view') await loadTemplates()
     else await loadJobs()
     showToast('数据已刷新')
   } catch (error) { showToast(error.message) }

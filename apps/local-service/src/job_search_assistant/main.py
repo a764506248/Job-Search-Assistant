@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +12,17 @@ from .config import settings
 from .embedding import Embedder, HttpEmbeddingClient
 from .rag import RagService
 from .repositories import JobRepository, LibraryRepository, VectorRepository
+
+DASHBOARD_ROUTES = {
+    "jobs",
+    "profile",
+    "projects",
+    "resumes",
+    "templates",
+    "rules",
+    "models",
+    "knowledge",
+}
 
 
 def create_app(database_path: Path | None = None, embedder: Embedder | None = None) -> FastAPI:
@@ -41,6 +52,12 @@ def create_app(database_path: Path | None = None, embedder: Embedder | None = No
 
     @application.get("/", include_in_schema=False)
     def dashboard() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
+    @application.get("/{view_name}", include_in_schema=False)
+    def dashboard_view(view_name: str) -> FileResponse:
+        if view_name not in DASHBOARD_ROUTES:
+            raise HTTPException(status_code=404, detail="page not found")
         return FileResponse(static_dir / "index.html")
 
     return application
