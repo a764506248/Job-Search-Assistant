@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import uvicorn
@@ -24,6 +25,10 @@ DASHBOARD_ROUTES = {
     "knowledge",
 }
 
+ALLOWED_EXTENSION_ORIGIN = re.compile(
+    r"^(?:(?:chrome|moz)-extension://.+|https://(?:[a-z0-9-]+\.)?zhipin\.com)$"
+)
+
 
 def create_app(database_path: Path | None = None, embedder: Embedder | None = None) -> FastAPI:
     application = FastAPI(
@@ -34,9 +39,10 @@ def create_app(database_path: Path | None = None, embedder: Embedder | None = No
     )
     application.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"^(chrome|moz)-extension://.+$",
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_origin_regex=ALLOWED_EXTENSION_ORIGIN.pattern,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-Local-Token"],
+        allow_private_network=True,
     )
     resolved_database_path = database_path or settings.data_dir / "jobs.sqlite3"
     job_repository = JobRepository(resolved_database_path)

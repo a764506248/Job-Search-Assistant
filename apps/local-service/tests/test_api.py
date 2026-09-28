@@ -11,6 +11,37 @@ def test_health(tmp_path) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_boss_content_script_origin_can_access_local_service(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.options(
+        "/v1/jobs/match",
+        headers={
+            "Origin": "https://www.zhipin.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://www.zhipin.com"
+    assert response.headers["access-control-allow-private-network"] == "true"
+
+
+def test_unrelated_web_origin_cannot_access_local_service(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.options(
+        "/v1/jobs/match",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_dashboard_is_served(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
 
