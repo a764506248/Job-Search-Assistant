@@ -6,8 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir \
+    "fastapi>=0.116,<1" \
+    "pydantic-settings>=2.10,<3" \
+    "pypdf>=6,<7" \
+    "python-docx>=1.2,<2" \
+    "python-multipart>=0.0.20,<1" \
+    "reportlab>=4.4,<5" \
+    "uvicorn>=0.35,<1"
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --no-deps .
 
 RUN mkdir -p /data
 

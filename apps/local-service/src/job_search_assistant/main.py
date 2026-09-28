@@ -12,7 +12,7 @@ from .api import create_router
 from .config import settings
 from .embedding import Embedder, HttpEmbeddingClient
 from .rag import RagService
-from .repositories import JobRepository, LibraryRepository, VectorRepository
+from .repositories import ClientLogRepository, JobRepository, LibraryRepository, VectorRepository
 
 DASHBOARD_ROUTES = {
     "jobs",
@@ -48,11 +48,14 @@ def create_app(database_path: Path | None = None, embedder: Embedder | None = No
     job_repository = JobRepository(resolved_database_path)
     library_repository = LibraryRepository(resolved_database_path)
     vector_repository = VectorRepository(resolved_database_path)
+    client_log_repository = ClientLogRepository(resolved_database_path)
     resolved_embedder = embedder or HttpEmbeddingClient(
         settings.embedding_url, settings.embedding_model
     )
     rag_service = RagService(library_repository, vector_repository, resolved_embedder)
-    application.include_router(create_router(job_repository, library_repository, rag_service))
+    application.include_router(
+        create_router(job_repository, library_repository, client_log_repository, rag_service)
+    )
     static_dir = Path(__file__).parent / "static"
     application.mount("/assets", StaticFiles(directory=static_dir), name="dashboard-assets")
 

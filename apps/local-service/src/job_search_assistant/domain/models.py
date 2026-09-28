@@ -75,6 +75,26 @@ class HealthResponse(ApiModel):
     version: str
 
 
+class ClientLogInput(ApiModel):
+    source: Literal["extension-content", "extension-background", "extension-page"]
+    level: Literal["warning", "error"] = "error"
+    event: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=2000)
+    page_url: str | None = Field(default=None, max_length=1000)
+    platform_job_id: str | None = Field(default=None, max_length=200)
+    details: dict[str, Any] = Field(default_factory=dict)
+    occurred_at: datetime
+
+
+class ClientLogRecord(ClientLogInput):
+    id: int
+    received_at: datetime
+
+
+class ClientLogListResponse(ApiModel):
+    items: list[ClientLogRecord]
+
+
 class CapturedJob(ApiModel):
     platform: Literal["boss"]
     platform_job_id: str = Field(min_length=1)

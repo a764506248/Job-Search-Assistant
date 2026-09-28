@@ -66,4 +66,24 @@ describe('LocalServiceClient', () => {
     expect(url).toBe('http://127.0.0.1:8765/v1/jobs/match')
     expect(init?.method).toBe('POST')
   })
+
+  it('reports extension errors to the local service', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 1 }), { status: 201 }),
+    )
+    const input = {
+      source: 'extension-content' as const,
+      level: 'error' as const,
+      event: 'job-analysis-failed',
+      message: 'request failed',
+      occurredAt: '2026-09-28T09:00:00Z',
+    }
+
+    await new LocalServiceClient('http://127.0.0.1:8765', 'secret').logClientError(input)
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('http://127.0.0.1:8765/v1/client-logs')
+    expect((init?.headers as Headers).has('X-Local-Token')).toBe(false)
+    expect(JSON.parse(init?.body as string)).toEqual(input)
+  })
 })

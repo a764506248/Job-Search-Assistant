@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +19,9 @@ from .domain import (
 from .domain.models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
+    ClientLogInput,
+    ClientLogListResponse,
+    ClientLogRecord,
     HealthResponse,
     JobCaptureRequest,
     JobCaptureResponse,
@@ -37,17 +41,20 @@ from .domain.models import (
     RiskRuleInput,
 )
 from .rag import RagService
-from .repositories import JobRepository, LibraryRepository
+from .repositories import ClientLogRepository, JobRepository, LibraryRepository
 from .repositories.library import ALLOWED_KINDS, LibraryKind
 from .resume_html import build_resume_html
 from .resume_import import MAX_RESUME_BYTES, parse_resume
 from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
+logger = logging.getLogger("job_search_assistant.client")
+
 
 def create_router(
     job_repository: JobRepository,
     library_repository: LibraryRepository,
+    client_log_repository: ClientLogRepository,
     rag_service: RagService,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
@@ -55,6 +62,25 @@ def create_router(
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse(version=__version__)
+
+    @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
+    def create_client_log(request: ClientLogInput) -> ClientLogRecord:
+        record = ClientLogRecord.model_validate(
+            client_log_repository.create(request.model_dump(by_alias=False))
+        )
+        logger.log(
+            logging.ERROR if request.level == "error" else logging.WARNING,
+            "client event=%s source=%s job=%s message=%s",
+            request.event,
+            request.source,
+            request.platform_job_id or "-",
+            request.message,
+        )
+        return record
+
+    @router.get("/client-logs", response_model=ClientLogListResponse)
+    def list_client_logs(limit: int = Query(default=100, ge=1, le=500)) -> ClientLogListResponse:
+        return ClientLogListResponse(items=client_log_repository.list_recent(limit))
 
     @router.post("/decisions/evaluate", response_model=DecisionResponse)
     def evaluate_decision(request: DecisionRequest) -> DecisionResponse:

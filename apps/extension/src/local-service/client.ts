@@ -1,6 +1,8 @@
 import type {
   AutomaticJobMatchRequest,
   AutomaticJobMatchResponse,
+  ClientLogInput,
+  ClientLogRecord,
   DecisionRequest,
   DecisionResponse,
   HealthResponse,
@@ -56,6 +58,14 @@ export class LocalServiceClient {
     return this.request('/v1/jobs/match', {
       method: 'POST',
       body: input,
+    })
+  }
+
+  logClientError(input: ClientLogInput): Promise<ClientLogRecord> {
+    return this.request('/v1/client-logs', {
+      method: 'POST',
+      body: input,
+      authenticated: false,
     })
   }
 

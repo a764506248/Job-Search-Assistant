@@ -42,6 +42,22 @@ export interface HealthResponse {
   version: string
 }
 
+export interface ClientLogInput {
+  source: 'extension-content' | 'extension-background' | 'extension-page'
+  level?: 'warning' | 'error'
+  event: string
+  message: string
+  pageUrl?: string
+  platformJobId?: string
+  details?: Record<string, unknown>
+  occurredAt: string
+}
+
+export interface ClientLogRecord extends ClientLogInput {
+  id: number
+  receivedAt: string
+}
+
 export interface CapturedJob {
   platform: 'boss'
   platformJobId: string

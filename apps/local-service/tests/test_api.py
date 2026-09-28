@@ -11,6 +11,28 @@ def test_health(tmp_path) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_extension_error_log_is_stored_locally(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    payload = {
+        "source": "extension-content",
+        "level": "error",
+        "event": "job-analysis-failed",
+        "message": "Local service request failed: 503",
+        "pageUrl": "https://www.zhipin.com/job_detail/example.html",
+        "platformJobId": "example",
+        "occurredAt": "2026-09-28T09:00:00Z",
+    }
+
+    created = client.post("/v1/client-logs", json=payload)
+    assert created.status_code == 201
+    assert created.json()["id"] == 1
+
+    listing = client.get("/v1/client-logs")
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["event"] == "job-analysis-failed"
+    assert listing.json()["items"][0]["message"] == payload["message"]
+
+
 def test_boss_content_script_origin_can_access_local_service(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.options(
