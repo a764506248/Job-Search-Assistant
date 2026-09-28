@@ -18,7 +18,6 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     KeepTogether,
-    PageBreak,
     PageTemplate,
     Paragraph,
     Spacer,
@@ -141,10 +140,7 @@ def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
     )
     story.append(skill_table)
 
-    story.extend([Spacer(1, 5 * mm), _section_title("AI Agent 项目实践", styles)])
-    story.append(_architecture_overview(styles))
-    story.append(PageBreak())
-
+    story.append(Spacer(1, 5 * mm))
     story.extend([_section_title("项目经历", styles)])
     for project in data["projects"]:
         story.append(
@@ -159,7 +155,7 @@ def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
         )
 
     story.extend([_section_title("工作经历", styles)])
-    for item in data["experience"][:1]:
+    for item in data["experience"]:
         story.append(
             _entry(
                 item["role"],
@@ -170,19 +166,6 @@ def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
                 styles,
             )
         )
-    story.append(PageBreak())
-    for item in data["experience"][1:]:
-        story.append(
-            _entry(
-                item["role"],
-                item["company"],
-                item["period"],
-                item["summary"],
-                item["bullets"],
-                styles,
-            )
-        )
-
     story.extend([Spacer(1, 2 * mm), _section_title("教育经历", styles)])
     for item in data["education"]:
         education = Table(
@@ -359,40 +342,6 @@ def _entry(
             Spacer(1, 5 * mm),
         ]
     )
-
-
-def _architecture_overview(styles: dict[str, ParagraphStyle]) -> Table:
-    headings = ["业务输入", "处理与项目能力", "AI 资产", "线上应用"]
-    values = [
-        "商户与商品数据<br/>内容运营需求<br/>历史咨询数据",
-        "知识数据加工<br/>内容生产工作流<br/>数据清洗与微调",
-        "RAG 知识库<br/>LoRA 微调模型<br/>评测数据集",
-        "实时语音导购 Agent<br/>内容运营系统<br/>智能问答",
-    ]
-    table = Table(
-        [
-            [Paragraph(f"<b>{value}</b>", styles["body"]) for value in headings],
-            [Paragraph(value, styles["summary"]) for value in values],
-        ],
-        colWidths=[45 * mm] * 4,
-        rowHeights=[11 * mm, 52 * mm],
-    )
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef7f7")),
-                ("BOX", (0, 0), (-1, -1), 0.7, LINE),
-                ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE),
-                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
-                ("VALIGN", (0, 1), (-1, 1), "TOP"),
-                ("TOPPADDING", (0, 1), (-1, 1), 14),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("TEXTCOLOR", (0, 0), (-1, 0), TEAL),
-            ]
-        )
-    )
-    return table
 
 
 def _page_footer(canvas, document) -> None:  # noqa: ANN001

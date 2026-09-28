@@ -161,7 +161,7 @@ td small { color: var(--muted); }
 .template-buttons { display: flex; gap: 7px; flex-wrap: wrap; }
 .template-buttons .button { font-size: 10px; text-decoration: none; }
 .resume-paper { width: 100%; max-width: 900px; margin: 0 auto; color: #08263a; overflow: visible; }
-.resume-preview-frame { display: block; width: 100%; min-height: 3600px; border: 0; background: transparent; overflow: hidden; }
+.resume-preview-frame { display: block; width: 100%; min-height: 1180px; border: 0; background: transparent; overflow: hidden; }
 .resume-page { position: relative; min-height: 1180px; padding: 38px 42px 52px; background: white; box-shadow: 0 12px 35px rgba(25,45,55,.1); }
 .resume-page-number { position: absolute; right: 42px; bottom: 24px; color: #758894; font-size: 8px; }
 .resume-header { display: grid; grid-template-columns: 1.2fr .85fr 1.25fr; gap: 22px; align-items: start; padding-bottom: 16px; border-bottom: 1px solid #cfdee4; }

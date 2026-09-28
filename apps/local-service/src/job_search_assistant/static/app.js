@@ -98,7 +98,7 @@ function renderResumePreview() {
   const container = $('#resume-preview')
   const frame = document.createElement('iframe')
   frame.className = 'resume-preview-frame'
-  frame.title = '简历模板完整三页预览'
+  frame.title = '简历模板连续预览'
   frame.src = `/v1/resume-templates/${encodeURIComponent(templateId)}/sample`
   frame.scrolling = 'no'
 
