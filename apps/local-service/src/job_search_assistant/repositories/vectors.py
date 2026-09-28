@@ -95,6 +95,34 @@ class VectorRepository:
             )
         return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
 
+    def list_all(self) -> list[dict[str, Any]]:
+        self.initialize()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT * FROM vector_chunks
+                ORDER BY source_type, source_name, chunk_index, id"""
+            ).fetchall()
+        items = []
+        for row in rows:
+            embedding = json.loads(row["embedding_json"])
+            items.append(
+                {
+                    "id": row["id"],
+                    "sourceType": row["source_type"],
+                    "sourceId": row["source_id"],
+                    "sourceName": row["source_name"],
+                    "chunkIndex": row["chunk_index"],
+                    "content": row["content"],
+                    "contentHash": row["content_hash"],
+                    "embedding": embedding,
+                    "dimensions": len(embedding),
+                    "model": row["model"],
+                    "indexedAt": row["indexed_at"],
+                }
+            )
+        return items
+
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:
         if len(left) != len(right) or not left:

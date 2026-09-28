@@ -28,7 +28,7 @@ function showView(name) {
   $$('.nav-item[data-view]').forEach((node) => node.classList.toggle('active', node.dataset.view === name))
   $('#page-title').textContent = pageTitles[name] || '工作台'
   if (name === 'profile') void loadProfile()
-  if (name === 'knowledge') void loadRagStatus()
+  if (name === 'knowledge') void Promise.all([loadRagStatus(), loadRagChunks()])
   if (name === 'templates') void loadTemplates()
   if ($(`#${name}-view`)?.classList.contains('library-view')) void loadLibrary(name)
 }
@@ -90,6 +90,44 @@ async function loadRagStatus() {
   $('#rag-sources').textContent = String(status.sources)
   $('#rag-chunks').textContent = String(status.chunks)
   $('#rag-indexed-at').textContent = status.indexedAt ? `最后构建：${formatTime(status.indexedAt)}` : '尚未建立索引'
+}
+
+function sourceTypeLabel(value) {
+  return ({ profile: '个人档案', projects: '项目库', resumes: '简历库' })[value] || value
+}
+
+async function loadRagChunks() {
+  const container = $('#rag-chunk-list')
+  container.innerHTML = '<div class="library-empty">正在读取本地向量数据…</div>'
+  try {
+    const response = await fetch('/v1/rag/chunks')
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.detail || '无法读取向量数据')
+    $('#rag-data-count').textContent = `${result.total} 个分片`
+    container.innerHTML = result.items.length ? result.items.map((item) => {
+      const vectorPreview = item.embedding.slice(0, 8).map((value) => Number(value).toFixed(4)).join(', ')
+      return `
+        <article class="vector-record">
+          <div class="vector-record-head">
+            <div><span class="tag">${escapeHtml(sourceTypeLabel(item.sourceType))}</span><strong>${escapeHtml(item.sourceName)}</strong><small>分片 #${item.chunkIndex + 1}</small></div>
+            <span>${item.dimensions} 维</span>
+          </div>
+          <p>${escapeHtml(item.content)}</p>
+          <details>
+            <summary>查看向量信息</summary>
+            <dl>
+              <div><dt>模型</dt><dd>${escapeHtml(item.model)}</dd></div>
+              <div><dt>向量预览</dt><dd>[${vectorPreview}${item.dimensions > 8 ? ', …' : ''}]</dd></div>
+              <div><dt>内容哈希</dt><dd>${escapeHtml(item.contentHash)}</dd></div>
+              <div><dt>索引时间</dt><dd>${escapeHtml(formatTime(item.indexedAt))}</dd></div>
+            </dl>
+          </details>
+        </article>`
+    }).join('') : '<div class="library-empty">向量库还没有数据，请先点击“重建本地索引”。</div>'
+  } catch (error) {
+    $('#rag-data-count').textContent = '读取失败'
+    container.innerHTML = `<div class="library-empty">${escapeHtml(error.message)}</div>`
+  }
 }
 
 function renderResumePreview() {
@@ -292,11 +330,13 @@ $('#rebuild-index').addEventListener('click', async (event) => {
     const response = await fetch('/v1/rag/rebuild', { method: 'POST' })
     const result = await response.json()
     if (!response.ok) throw new Error(result.detail || '索引构建失败')
-    await loadRagStatus()
+    await Promise.all([loadRagStatus(), loadRagChunks()])
     showToast(`已生成 ${result.rebuilt} 个本地向量分片`)
   } catch (error) { showToast(error.message) }
   finally { button.disabled = false; button.textContent = '重建本地索引' }
 })
+
+$('#refresh-rag-data').addEventListener('click', () => void loadRagChunks())
 
 $('#rag-search-form').addEventListener('submit', async (event) => {
   event.preventDefault()

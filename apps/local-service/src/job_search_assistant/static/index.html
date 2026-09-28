@@ -236,6 +236,11 @@
             </section>
             <aside class="panel guidance"><span class="guidance-mark">⌂</span><h3>数据留在本机</h3><p>Docker 只负责将项目和简历片段转成向量。原文、向量和检索结果都保存在本机 SQLite 中。</p></aside>
           </div>
+          <section class="panel vector-data-panel">
+            <div class="panel-heading"><div><p class="eyebrow">INDEXED DATA</p><h2>已索引的全部数据</h2></div><div class="panel-heading-actions"><span id="rag-data-count">读取中</span><button id="refresh-rag-data" class="button ghost" type="button">刷新数据</button></div></div>
+            <p class="panel-description">这里展示 SQLite 向量库中的全部文本分片。展开记录可查看模型、维度、向量预览、内容哈希和索引时间。</p>
+            <div id="rag-chunk-list" class="vector-record-list"><div class="library-empty">正在读取本地向量数据…</div></div>
+          </section>
           <section class="panel search-test-panel">
             <div class="panel-heading"><div><p class="eyebrow">RETRIEVAL TEST</p><h2>语义检索测试</h2></div></div>
             <form id="rag-search-form" class="rag-search-form">

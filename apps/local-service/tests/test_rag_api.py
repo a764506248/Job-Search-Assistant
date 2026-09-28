@@ -48,6 +48,16 @@ def test_rebuild_and_search_local_knowledge(tmp_path) -> None:
     assert status.json()["embeddingAvailable"] is True
     assert status.json()["sources"] == 3
 
+    chunks = client.get("/v1/rag/chunks")
+    assert chunks.status_code == 200
+    chunk_data = chunks.json()
+    assert chunk_data["total"] == 3
+    assert len(chunk_data["items"]) == 3
+    assert chunk_data["items"][0]["dimensions"] == 3
+    assert len(chunk_data["items"][0]["embedding"]) == 3
+    assert chunk_data["items"][0]["contentHash"]
+    assert chunk_data["items"][0]["model"] == "test/bge-small-zh"
+
     search = client.post("/v1/rag/search", json={"query": "Python 后端", "limit": 2})
     assert search.status_code == 200
     items = search.json()["items"]

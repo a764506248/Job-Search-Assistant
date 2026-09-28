@@ -225,3 +225,22 @@ class RagSearchResult(ApiModel):
 
 class RagSearchResponse(ApiModel):
     items: list[RagSearchResult]
+
+
+class RagChunk(ApiModel):
+    id: int
+    source_type: str
+    source_id: str
+    source_name: str
+    chunk_index: int
+    content: str
+    content_hash: str
+    embedding: list[float]
+    dimensions: int
+    model: str
+    indexed_at: datetime
+
+
+class RagChunkListResponse(ApiModel):
+    total: int
+    items: list[RagChunk]

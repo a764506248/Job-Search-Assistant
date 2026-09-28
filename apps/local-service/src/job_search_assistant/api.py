@@ -23,6 +23,7 @@ from .domain.models import (
     LibraryRecord,
     LibraryRecordInput,
     ProfilePayload,
+    RagChunkListResponse,
     RagRebuildResponse,
     RagSearchRequest,
     RagSearchResponse,
@@ -152,6 +153,11 @@ def create_router(
     @router.get("/rag/status", response_model=RagStatus)
     def rag_status() -> RagStatus:
         return RagStatus.model_validate(rag_service.status())
+
+    @router.get("/rag/chunks", response_model=RagChunkListResponse)
+    def list_rag_chunks() -> RagChunkListResponse:
+        items = rag_service.list_chunks()
+        return RagChunkListResponse(total=len(items), items=items)
 
     @router.post("/rag/rebuild", response_model=RagRebuildResponse)
     def rebuild_rag_index() -> RagRebuildResponse:

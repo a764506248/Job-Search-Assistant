@@ -41,6 +41,9 @@ class RagService:
         query_vector = self.embedder.embed([query])[0]
         return self.vectors.search(query_vector, limit)
 
+    def list_chunks(self) -> list[dict[str, Any]]:
+        return self.vectors.list_all()
+
     def _collect_chunks(self) -> list[dict[str, Any]]:
         sources: list[tuple[str, str, str, str]] = []
         profile = self.library.get_profile()
