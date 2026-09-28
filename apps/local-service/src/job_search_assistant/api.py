@@ -175,7 +175,7 @@ def create_router(
     def preview_sample_resume(template_id: str) -> HTMLResponse:
         if template_id != TEAL_PROFESSIONAL_ID:
             raise HTTPException(status_code=404, detail="resume template not found")
-        return HTMLResponse(build_resume_html(SAMPLE_RESUME))
+        return HTMLResponse(build_resume_html(SAMPLE_RESUME), headers={"Cache-Control": "no-store"})
 
     @router.get("/resume-templates/{template_id}/sample.pdf")
     def download_sample_resume(template_id: str) -> StreamingResponse:
@@ -186,7 +186,10 @@ def create_router(
             BytesIO(pdf),
             media_type="application/pdf",
             headers={
-                "Content-Disposition": ('inline; filename="job-search-assistant-sample-resume.pdf"')
+                "Content-Disposition": (
+                    'inline; filename="job-search-assistant-sample-resume.pdf"'
+                ),
+                "Cache-Control": "no-store",
             },
         )
 
