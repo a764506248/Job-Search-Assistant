@@ -95,7 +95,30 @@ async function loadRagStatus() {
 function renderResumePreview() {
   const templateId = state.selectedTemplate || state.templates[0]?.id
   if (!templateId) return
-  $('#resume-preview').innerHTML = `<iframe class="resume-preview-frame" title="简历模板预览" src="/v1/resume-templates/${encodeURIComponent(templateId)}/sample"></iframe>`
+  const container = $('#resume-preview')
+  const frame = document.createElement('iframe')
+  frame.className = 'resume-preview-frame'
+  frame.title = '简历模板完整三页预览'
+  frame.src = `/v1/resume-templates/${encodeURIComponent(templateId)}/sample`
+  frame.scrolling = 'no'
+
+  const fitPreviewHeight = () => {
+    const documentElement = frame.contentDocument?.documentElement
+    const body = frame.contentDocument?.body
+    const height = Math.max(
+      documentElement?.scrollHeight || 0,
+      documentElement?.offsetHeight || 0,
+      body?.scrollHeight || 0,
+      body?.offsetHeight || 0,
+    )
+    if (height > 0) frame.style.height = `${height}px`
+  }
+
+  frame.addEventListener('load', () => {
+    fitPreviewHeight()
+    window.setTimeout(fitPreviewHeight, 120)
+  })
+  container.replaceChildren(frame)
 }
 
 function renderTemplateList() {

@@ -28,7 +28,7 @@ def build_resume_html(data: dict[str, Any]) -> str:
     )
     contact = "<br>".join(escape(item) for item in data["contact"])
     return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>{escape(data["name"])} - 简历</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(data["name"])} - 简历</title>
 <style>{PRINT_CSS}</style></head><body>
 <main class="page">
   <header><div><h1>{escape(data["name"])}</h1><b>{escape(data["headline"])}</b></div>
