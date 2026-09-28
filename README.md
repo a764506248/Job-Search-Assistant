@@ -28,6 +28,18 @@
 - 风险规则和定制/默认/阻止材料策略；
 - Python 测试及扩展类型、生产构建检查。
 
+## 通信链路验证
+
+页面主世界脚本读取 Boss DOM，通过 `CustomEvent` 把结构化职位交给内容脚本；内容脚本校验载荷后，以 HTTP JSON 调用本地 FastAPI，服务最终写入 SQLite。
+
+```bash
+npm run test:extension
+cd apps/local-service
+UV_CACHE_DIR=.cache/uv uv run pytest -q
+```
+
+自动化测试覆盖 DOM 字段提取、页面事件载荷校验、HTTP 路径/请求体/本地令牌，以及 FastAPI 写入 SQLite 和重复快照去重。真实 Boss 登录页面仍需安装构建后的扩展进行现场冒烟测试。
+
 ## 本地管理后台
 
 ```bash

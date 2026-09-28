@@ -236,11 +236,22 @@ flowchart TD
 
 ## 8. 扩展与本地服务通信
 
+- 链路：Boss 主世界采集脚本 → DOM `CustomEvent` → 内容脚本校验 → HTTP JSON → FastAPI → SQLite。
 - 协议：HTTP JSON；需要任务进度时使用 SSE。
 - 地址：由本地服务启动时分配，仅监听 loopback。
 - 认证：首次配对生成高熵令牌，扩展后续请求携带令牌。
 - 跨域：本地服务只允许已配对的扩展 Origin。
 - 契约：OpenAPI 作为唯一接口事实来源，自动生成 TypeScript 客户端。
+
+### 8.1 当前验证覆盖
+
+| 边界 | 验证方式 | 状态 |
+| --- | --- | --- |
+| Boss DOM → 职位对象 | happy-dom 固定页面样本 | 已自动化 |
+| 页面事件 → 内容脚本 | 运行时类型守卫单元测试 | 已自动化 |
+| 内容脚本 → FastAPI | mock fetch 验证 URL、JSON、令牌 | 已自动化 |
+| FastAPI → SQLite | 临时数据库 API 集成测试 | 已自动化 |
+| 已登录 Boss 页面全链路 | Chrome 加载解压扩展后现场冒烟 | 待验证 |
 
 ## 9. 安全边界
 

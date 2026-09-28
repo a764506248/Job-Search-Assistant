@@ -7,6 +7,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "check": "vue-tsc --noEmit && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -17,7 +18,9 @@
     "@types/chrome": "^0.1.30",
     "@vue/tsconfig": "^0.8.0",
     "@wxt-dev/module-vue": "^1.0.0",
+    "happy-dom": "^18.0.0",
     "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
     "vue-tsc": "^3.0.0",
     "wxt": "^0.21.0"
   }
