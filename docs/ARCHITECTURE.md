@@ -242,7 +242,7 @@ flowchart TD
 - 分片策略：500 字符，80 字符重叠；
 - 向量存储：与业务数据相同的本地 SQLite，原文和向量均不上传；
 - 容器化：FastAPI 与 Embedding 由同一个 Compose 启动，SQLite 目录从宿主机绑定挂载到 `/data`；
-- 检索方式：余弦相似度，数据量增加后可替换为 FAISS 或 Qdrant。
+- 检索方式：SQLite FTS5/BM25 关键词召回与余弦向量召回加权融合（30%/70%）；数据量增加后可替换为 FAISS 或 Qdrant，并接入 Cross-Encoder Reranker。
 
 ### 7.2 简历模板与导出
 

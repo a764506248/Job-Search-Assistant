@@ -50,4 +50,20 @@ describe('LocalServiceClient', () => {
     const headers = call![1]?.headers as Headers
     expect(headers.has('X-Local-Token')).toBe(false)
   })
+
+  it('requests automatic hybrid matching for a job', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ suitabilityScore: 80, evidence: [] }), { status: 200 }),
+    )
+
+    await new LocalServiceClient('http://127.0.0.1:8765').matchJob({
+      jobText: '负责 Python 与 RAG 开发',
+      title: 'AI 应用开发工程师',
+      skills: ['Python', 'RAG'],
+    })
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('http://127.0.0.1:8765/v1/jobs/match')
+    expect(init?.method).toBe('POST')
+  })
 })

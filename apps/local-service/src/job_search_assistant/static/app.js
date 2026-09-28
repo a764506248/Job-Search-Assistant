@@ -291,6 +291,7 @@ function renderJobs() {
       </div></td>
       <td><time>${formatTime(job.capturedAt)}</time><br><small>${job.source === 'dom' ? '页面采集' : '页面数据'}</small></td>
       <td><div class="row-actions">
+        <button class="icon-button" data-match-id="${job.id}" type="button">自动匹配</button>
         <a class="icon-button" href="${escapeHtml(job.url)}" target="_blank" rel="noreferrer">打开</a>
         <button class="icon-button danger" data-delete-id="${job.id}" type="button">删除</button>
       </div></td>
@@ -336,12 +337,39 @@ $('#refresh-button').addEventListener('click', async () => {
 })
 $('#job-search').addEventListener('input', (event) => { state.filter = event.target.value; renderJobs() })
 $('#jobs-table-body').addEventListener('click', async (event) => {
+  const matchButton = event.target.closest('[data-match-id]')
+  if (matchButton) {
+    const job = state.jobs.find((item) => item.id === Number(matchButton.dataset.matchId))
+    if (!job) return
+    const panel = $('#job-match-result')
+    panel.hidden = false
+    panel.innerHTML = '<div class="library-empty">正在执行规则分析、关键词召回和向量检索…</div>'
+    try {
+      const response = await fetch('/v1/jobs/match', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: job.title, jobText: job.description, skills: job.skills || [] }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || '自动匹配失败')
+      const strategy = ({ custom: '定制简历 + 定制问候语', default: '默认简历 + 默认问候语', blocked: '不投递' })[result.decision.materialStrategy]
+      panel.innerHTML = `
+        <div class="panel-heading"><div><p class="eyebrow">LOCAL MATCH</p><h2>${escapeHtml(job.title)} · ${escapeHtml(job.companyName)}</h2></div><button class="icon-button" data-close-match type="button">关闭</button></div>
+        <div class="match-metrics"><div><span>岗位适合度</span><strong>${result.suitabilityScore}</strong></div><div><span>定制可信度</span><strong>${result.customizationConfidence}</strong></div><div><span>材料策略</span><strong>${escapeHtml(strategy)}</strong></div></div>
+        <div class="match-evidence"><h3>检索证据</h3>${result.evidence.slice(0, 5).map((item) => `<article><div><strong>${escapeHtml(item.sourceName)}</strong><span>综合 ${(item.score * 100).toFixed(1)}% · 向量 ${(item.vectorScore * 100).toFixed(1)}% · 关键词 ${(item.keywordScore * 100).toFixed(1)}%</span></div><p>${escapeHtml(item.content)}</p></article>`).join('') || '<p>暂无知识库证据，将使用默认材料。</p>'}</div>`
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } catch (error) { panel.innerHTML = `<div class="library-empty">${escapeHtml(error.message)}</div>` }
+    return
+  }
   const button = event.target.closest('[data-delete-id]')
   if (!button || !window.confirm('确定删除这条职位快照吗？此操作不会影响 Boss 上的数据。')) return
   const response = await fetch(`/v1/jobs/${button.dataset.deleteId}`, { method: 'DELETE' })
   if (!response.ok) return showToast('删除失败')
   await loadJobs()
   showToast('职位快照已删除')
+})
+
+$('#job-match-result').addEventListener('click', (event) => {
+  if (event.target.closest('[data-close-match]')) event.currentTarget.hidden = true
 })
 
 $('#profile-form').addEventListener('submit', async (event) => {
@@ -412,7 +440,7 @@ $('#rag-search-form').addEventListener('submit', async (event) => {
     container.innerHTML = result.items.length ? result.items.map((item) => `
       <article class="rag-result">
         <div><span class="tag">${escapeHtml(item.sourceType)}</span><strong>${escapeHtml(item.sourceName)}</strong></div>
-        <span class="rag-score">相似度 ${(item.score * 100).toFixed(1)}%</span>
+        <span class="rag-score">综合 ${(item.score * 100).toFixed(1)}% · 向量 ${(item.vectorScore * 100).toFixed(1)}% · 关键词 ${(item.keywordScore * 100).toFixed(1)}%</span>
         <p>${escapeHtml(item.content)}</p>
       </article>
     `).join('') : '<div class="library-empty">没有检索到资料，请先重建索引。</div>'

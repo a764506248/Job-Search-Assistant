@@ -1,4 +1,6 @@
 import type {
+  AutomaticJobMatchRequest,
+  AutomaticJobMatchResponse,
   DecisionRequest,
   DecisionResponse,
   HealthResponse,
@@ -45,6 +47,13 @@ export class LocalServiceClient {
 
   evaluateJob(input: JobEvaluationRequest): Promise<JobEvaluationResponse> {
     return this.request('/v1/jobs/evaluate', {
+      method: 'POST',
+      body: input,
+    })
+  }
+
+  matchJob(input: AutomaticJobMatchRequest): Promise<AutomaticJobMatchResponse> {
+    return this.request('/v1/jobs/match', {
       method: 'POST',
       body: input,
     })

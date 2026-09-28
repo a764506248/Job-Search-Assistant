@@ -39,7 +39,7 @@ class RagService:
 
     def search(self, query: str, limit: int) -> list[dict[str, Any]]:
         query_vector = self.embedder.embed([query])[0]
-        return self.vectors.search(query_vector, limit)
+        return self.vectors.search_hybrid(query, query_vector, limit)
 
     def list_chunks(self) -> list[dict[str, Any]]:
         return self.vectors.list_all()

@@ -171,6 +171,17 @@ td small { color: var(--muted); }
 .vector-record dl div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; font-size: 9px; }
 .vector-record dt { color: var(--muted); }
 .vector-record dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.match-result { margin-bottom: 18px; overflow: hidden; }
+.match-metrics { padding: 18px 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; border-bottom: 1px solid var(--line); }
+.match-metrics div { padding: 14px; border-radius: 10px; background: var(--surface-soft); display: grid; gap: 7px; }
+.match-metrics span { color: var(--muted); font-size: 10px; }
+.match-metrics strong { color: var(--brand); font-size: 15px; }
+.match-evidence { padding: 18px 22px 22px; display: grid; gap: 9px; }
+.match-evidence h3 { margin: 0 0 3px; }
+.match-evidence article { padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.match-evidence article > div { display: flex; justify-content: space-between; gap: 14px; }
+.match-evidence article span { color: var(--brand); font-size: 9px; }
+.match-evidence article p { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .template-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 22px; align-items: start; }
 .template-picker { position: sticky; top: 24px; overflow: hidden; }
 .template-list { padding: 14px; }

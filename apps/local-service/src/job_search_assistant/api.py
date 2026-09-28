@@ -12,9 +12,12 @@ from .domain import (
     JdAnalysisRequest,
     JdAnalysisResponse,
     analyze_jd,
+    build_automatic_match,
     evaluate_material_strategy,
 )
 from .domain.models import (
+    AutomaticJobMatchRequest,
+    AutomaticJobMatchResponse,
     HealthResponse,
     JobCaptureRequest,
     JobCaptureResponse,
@@ -112,6 +115,17 @@ def create_router(
             )
         )
         return JobEvaluationResponse(analysis=analysis, decision=decision)
+
+    @router.post("/jobs/match", response_model=AutomaticJobMatchResponse)
+    def match_job(request: AutomaticJobMatchRequest) -> AutomaticJobMatchResponse:
+        query = "\n".join(
+            part for part in [request.title, " ".join(request.skills), request.job_text] if part
+        )
+        try:
+            evidence = rag_service.search(query, 8)
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        return build_automatic_match(request, evidence)
 
     @router.get("/profile", response_model=ProfilePayload)
     def get_profile() -> ProfilePayload:

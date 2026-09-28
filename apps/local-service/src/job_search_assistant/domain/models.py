@@ -172,6 +172,18 @@ class JobEvaluationResponse(ApiModel):
     decision: DecisionResponse
 
 
+class AutomaticJobMatchRequest(ApiModel):
+    job_text: str = Field(min_length=1)
+    title: str = ""
+    skills: list[str] = Field(default_factory=list)
+    minimum_suitability_score: int = Field(default=75, ge=0, le=100)
+    minimum_customization_confidence: int = Field(default=80, ge=0, le=100)
+    rules: list[RiskRuleInput] = Field(default_factory=list)
+    elite_school_action: RuleAction = RuleAction.USE_DEFAULT_MATERIALS
+    duplicate: bool = False
+    company_blocked: bool = False
+
+
 class LibraryRecordInput(ApiModel):
     name: str = Field(min_length=1, max_length=200)
     data: dict[str, Any] = Field(default_factory=dict)
@@ -232,6 +244,17 @@ class RagSearchResult(ApiModel):
     chunk_index: int
     content: str
     score: float
+    vector_score: float = 0
+    keyword_score: float = 0
+
+
+class AutomaticJobMatchResponse(ApiModel):
+    analysis: JdAnalysisResponse
+    suitability_score: int
+    customization_confidence: int
+    decision: DecisionResponse
+    evidence: list[RagSearchResult]
+    scoring_version: str = "local-hybrid-v1"
 
 
 class RagSearchResponse(ApiModel):

@@ -105,3 +105,35 @@ export interface JobEvaluationResponse {
   analysis: JdAnalysisResponse
   decision: DecisionResponse
 }
+
+export interface RagSearchResult {
+  sourceType: string
+  sourceId: string
+  sourceName: string
+  chunkIndex: number
+  content: string
+  score: number
+  vectorScore: number
+  keywordScore: number
+}
+
+export interface AutomaticJobMatchRequest {
+  jobText: string
+  title?: string
+  skills?: string[]
+  minimumSuitabilityScore?: number
+  minimumCustomizationConfidence?: number
+  rules?: RiskRuleInput[]
+  eliteSchoolAction?: RuleAction
+  duplicate?: boolean
+  companyBlocked?: boolean
+}
+
+export interface AutomaticJobMatchResponse {
+  analysis: JdAnalysisResponse
+  suitabilityScore: number
+  customizationConfidence: number
+  decision: DecisionResponse
+  evidence: RagSearchResult[]
+  scoringVersion: string
+}
