@@ -1,4 +1,7 @@
+from io import BytesIO
+
 from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 
 from . import __version__
 from .domain import (
@@ -29,6 +32,8 @@ from .domain.models import (
 from .rag import RagService
 from .repositories import JobRepository, LibraryRepository
 from .repositories.library import ALLOWED_KINDS, LibraryKind
+from .resume_pdf import build_resume_pdf
+from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
 
 def create_router(
@@ -160,5 +165,22 @@ def create_router(
             return RagSearchResponse(items=rag_service.search(request.query, request.limit))
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @router.get("/resume-templates")
+    def list_resume_templates() -> dict[str, object]:
+        return {"items": RESUME_TEMPLATES, "sampleData": SAMPLE_RESUME}
+
+    @router.get("/resume-templates/{template_id}/sample.pdf")
+    def download_sample_resume(template_id: str) -> StreamingResponse:
+        if template_id != TEAL_PROFESSIONAL_ID:
+            raise HTTPException(status_code=404, detail="resume template not found")
+        pdf = build_resume_pdf(SAMPLE_RESUME)
+        return StreamingResponse(
+            BytesIO(pdf),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": ('inline; filename="job-search-assistant-sample-resume.pdf"')
+            },
+        )
 
     return router

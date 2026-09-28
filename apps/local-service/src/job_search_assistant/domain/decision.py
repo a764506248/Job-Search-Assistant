@@ -29,8 +29,7 @@ def evaluate_material_strategy(request: DecisionRequest) -> DecisionResponse:
     }
     effective_score = max(
         0,
-        request.suitability_score
-        - sum(penalties.get(match.rule_id, 0) for match in matches),
+        request.suitability_score - sum(penalties.get(match.rule_id, 0) for match in matches),
     )
 
     if any(match.action == RuleAction.BLOCK_DELIVERY for match in matches):
@@ -42,13 +41,10 @@ def evaluate_material_strategy(request: DecisionRequest) -> DecisionResponse:
             rule_matches=matches,
         )
 
-    force_default = any(
-        match.action == RuleAction.USE_DEFAULT_MATERIALS for match in matches
-    )
+    force_default = any(match.action == RuleAction.USE_DEFAULT_MATERIALS for match in matches)
     meets_threshold = (
         effective_score >= request.minimum_suitability_score
-        and request.customization_confidence
-        >= request.minimum_customization_confidence
+        and request.customization_confidence >= request.minimum_customization_confidence
     )
 
     if force_default:

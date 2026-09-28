@@ -34,6 +34,9 @@
           <button class="nav-item" data-view="resumes">
             <span class="nav-icon">▧</span>简历库
           </button>
+          <button class="nav-item" data-view="templates">
+            <span class="nav-icon">▥</span>简历模板
+          </button>
           <button class="nav-item" data-view="rules">
             <span class="nav-icon">⌁</span>匹配规则
           </button>
@@ -182,6 +185,19 @@
               <form class="data-form record-form"><input type="hidden" name="recordId" /><label>简历名称<input name="name" required placeholder="例如：默认中文简历" /></label><label>格式<select name="format"><option>PDF</option><option>DOCX</option><option>Markdown</option></select></label><label>用途与备注<textarea name="notes" rows="5" placeholder="这份简历适合哪些岗位"></textarea></label><div class="form-actions"><button class="button primary" type="submit">保存简历资料</button><button class="button ghost cancel-edit" type="button" hidden>取消编辑</button></div></form>
             </section>
             <section><div class="section-title"><div><p class="eyebrow">RESUME SETS</p><h2>简历库</h2></div><span class="library-count"></span></div><div class="record-grid"></div></section>
+          </div>
+        </section>
+
+        <section id="templates-view" class="view">
+          <div class="template-layout">
+            <aside class="panel template-picker">
+              <div class="panel-heading"><div><p class="eyebrow">RESUME TEMPLATES</p><h2>选择投递版式</h2></div></div>
+              <div id="template-list" class="template-list"><div class="library-empty">正在读取模板…</div></div>
+            </aside>
+            <section>
+              <div class="section-title"><div><p class="eyebrow">LIVE PREVIEW</p><h2>简历示例预览</h2></div><span id="selected-template-label" class="library-count"></span></div>
+              <article id="resume-preview" class="resume-paper"><div class="library-empty">请选择模板</div></article>
+            </section>
           </div>
         </section>
 

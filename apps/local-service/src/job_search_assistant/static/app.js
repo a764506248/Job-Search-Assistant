@@ -1,5 +1,5 @@
-const state = { jobs: [], filter: '', libraries: {} }
-const pageTitles = { overview: '工作台', jobs: '职位快照', profile: '个人档案', projects: '项目库', resumes: '简历库', rules: '匹配规则', models: '模型配置', knowledge: '向量知识库' }
+const state = { jobs: [], filter: '', libraries: {}, templates: [], sampleResume: null, selectedTemplate: null }
+const pageTitles = { overview: '工作台', jobs: '职位快照', profile: '个人档案', projects: '项目库', resumes: '简历库', templates: '简历模板', rules: '匹配规则', models: '模型配置', knowledge: '向量知识库' }
 
 const $ = (selector) => document.querySelector(selector)
 const $$ = (selector) => document.querySelectorAll(selector)
@@ -29,6 +29,7 @@ function showView(name) {
   $('#page-title').textContent = pageTitles[name] || '工作台'
   if (name === 'profile') void loadProfile()
   if (name === 'knowledge') void loadRagStatus()
+  if (name === 'templates') void loadTemplates()
   if ($(`#${name}-view`)?.classList.contains('library-view')) void loadLibrary(name)
 }
 
@@ -89,6 +90,60 @@ async function loadRagStatus() {
   $('#rag-sources').textContent = String(status.sources)
   $('#rag-chunks').textContent = String(status.chunks)
   $('#rag-indexed-at').textContent = status.indexedAt ? `最后构建：${formatTime(status.indexedAt)}` : '尚未建立索引'
+}
+
+function resumeSection(title, content) {
+  return `<section class="resume-section"><h3><span></span>${escapeHtml(title)}</h3>${content}</section>`
+}
+
+function resumeEntry(item) {
+  return `<article class="resume-entry">
+    <div class="resume-entry-heading"><h4>${escapeHtml(item.name || item.role)} <em>${escapeHtml(item.role && item.name ? item.role : item.company || '')}</em></h4><time>${escapeHtml(item.period)}</time></div>
+    <p>${escapeHtml(item.summary)}</p>
+    <ul>${item.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join('')}</ul>
+  </article>`
+}
+
+function renderResumePreview() {
+  const data = state.sampleResume
+  if (!data) return
+  const skills = data.skillGroups.map(([title, value]) => `<div><strong>${escapeHtml(title)}：</strong>${escapeHtml(value)}</div>`).join('')
+  const education = data.education.map((item) => `<article class="resume-entry"><div class="resume-entry-heading"><h4>${escapeHtml(item.school)} <em>${escapeHtml(item.degree)}</em></h4><time>${escapeHtml(item.period)}</time></div></article>`).join('')
+  $('#resume-preview').innerHTML = `
+    <header class="resume-header"><div><h2>${escapeHtml(data.name)}</h2><strong>${escapeHtml(data.headline)}</strong></div><p>${data.contact.map(escapeHtml).join('<br>')}</p><p><b>核心技术</b><br>${escapeHtml(data.coreSkills)}</p></header>
+    ${resumeSection('个人优势', `<ul>${data.strengths.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`)}
+    ${resumeSection('技术栈', `<div class="resume-skills">${skills}</div>`)}
+    ${resumeSection('项目经历', data.projects.map(resumeEntry).join(''))}
+    ${resumeSection('工作经历', data.experience.map(resumeEntry).join(''))}
+    ${resumeSection('教育经历', education)}
+  `
+}
+
+function renderTemplateList() {
+  $('#template-list').innerHTML = state.templates.map((template) => `
+    <article class="template-option ${state.selectedTemplate === template.id ? 'selected' : ''}">
+      <div class="template-swatch" style="--template-accent:${escapeHtml(template.accent)}"><span></span><span></span><span></span></div>
+      <div><h3>${escapeHtml(template.name)}</h3><p>${escapeHtml(template.description)}</p></div>
+      <div class="template-buttons">
+        <button class="button primary" data-select-template="${escapeHtml(template.id)}" type="button">${state.selectedTemplate === template.id ? '当前模板' : '选择模板'}</button>
+        <a class="button ghost" href="/v1/resume-templates/${escapeHtml(template.id)}/sample.pdf" target="_blank">查看 PDF 示例</a>
+      </div>
+    </article>
+  `).join('')
+  const selected = state.templates.find((item) => item.id === state.selectedTemplate)
+  $('#selected-template-label').textContent = selected ? selected.name : ''
+}
+
+async function loadTemplates() {
+  const [templates, profile] = await Promise.all([
+    fetch('/v1/resume-templates').then((response) => response.json()),
+    fetch('/v1/profile').then((response) => response.json()),
+  ])
+  state.templates = templates.items
+  state.sampleResume = templates.sampleData
+  state.selectedTemplate = profile.data?.resumeTemplateId || templates.items[0]?.id
+  renderTemplateList()
+  renderResumePreview()
 }
 
 function resetRecordForm(form) {
@@ -262,6 +317,20 @@ $('#rag-search-form').addEventListener('submit', async (event) => {
       </article>
     `).join('') : '<div class="library-empty">没有检索到资料，请先重建索引。</div>'
   } catch (error) { container.innerHTML = `<div class="library-empty">${escapeHtml(error.message)}</div>` }
+})
+
+$('#template-list').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-select-template]')
+  if (!button) return
+  const profile = await fetch('/v1/profile').then((response) => response.json())
+  const response = await fetch('/v1/profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { ...(profile.data || {}), resumeTemplateId: button.dataset.selectTemplate } }),
+  })
+  if (!response.ok) return showToast('模板选择保存失败')
+  state.selectedTemplate = button.dataset.selectTemplate
+  renderTemplateList()
+  showToast('已设为默认投递模板')
 })
 
 $$('.record-form').forEach((form) => {

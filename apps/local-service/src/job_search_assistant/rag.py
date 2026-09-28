@@ -54,10 +54,15 @@ class RagService:
         chunks = []
         for source_type, source_id, source_name, content in sources:
             for index, text in enumerate(self._chunk(content)):
-                chunks.append({
-                    "source_type": source_type, "source_id": source_id,
-                    "source_name": source_name, "chunk_index": index, "content": text,
-                })
+                chunks.append(
+                    {
+                        "source_type": source_type,
+                        "source_id": source_id,
+                        "source_name": source_name,
+                        "chunk_index": index,
+                        "content": text,
+                    }
+                )
         return chunks
 
     @staticmethod

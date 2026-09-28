@@ -50,10 +50,15 @@ class VectorRepository:
                 """,
                 [
                     (
-                        chunk["source_type"], chunk["source_id"], chunk["source_name"],
-                        chunk["chunk_index"], chunk["content"],
+                        chunk["source_type"],
+                        chunk["source_id"],
+                        chunk["source_name"],
+                        chunk["chunk_index"],
+                        chunk["content"],
                         hashlib.sha256(chunk["content"].encode()).hexdigest(),
-                        json.dumps(vector), model, now,
+                        json.dumps(vector),
+                        model,
+                        now,
                     )
                     for chunk, vector in zip(chunks, vectors, strict=True)
                 ],
@@ -78,11 +83,16 @@ class VectorRepository:
         for row in rows:
             vector = json.loads(row["embedding_json"])
             score = self._cosine(query_vector, vector)
-            scored.append({
-                "sourceType": row["source_type"], "sourceId": row["source_id"],
-                "sourceName": row["source_name"], "chunkIndex": row["chunk_index"],
-                "content": row["content"], "score": round(score, 6),
-            })
+            scored.append(
+                {
+                    "sourceType": row["source_type"],
+                    "sourceId": row["source_id"],
+                    "sourceName": row["source_name"],
+                    "chunkIndex": row["chunk_index"],
+                    "content": row["content"],
+                    "score": round(score, 6),
+                }
+            )
         return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
 
     @staticmethod

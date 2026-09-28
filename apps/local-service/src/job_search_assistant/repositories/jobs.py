@@ -109,9 +109,7 @@ class JobRepository:
 
     @staticmethod
     def _content_hash(job: CapturedJob) -> str:
-        content = "\n".join(
-            [job.title, job.company_name, job.description, "|".join(job.skills)]
-        )
+        content = "\n".join([job.title, job.company_name, job.description, "|".join(job.skills)])
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     @staticmethod
