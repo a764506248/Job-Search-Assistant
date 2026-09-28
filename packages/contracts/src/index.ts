@@ -41,3 +41,30 @@ export interface HealthResponse {
   service: 'job-search-assistant-local'
   version: string
 }
+
+export interface CapturedJob {
+  platform: 'boss'
+  platformJobId: string
+  url: string
+  title: string
+  companyName: string
+  location?: string
+  salaryText?: string
+  experience?: string
+  education?: string
+  description: string
+  skills: string[]
+  recruiterName?: string
+  recruiterTitle?: string
+  capturedAt: string
+  source: 'dom' | 'page-state'
+}
+
+export interface JobCaptureRequest {
+  jobs: CapturedJob[]
+}
+
+export interface JobCaptureResponse {
+  accepted: number
+  jobIds: string[]
+}

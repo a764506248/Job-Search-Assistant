@@ -2,6 +2,8 @@ import type {
   DecisionRequest,
   DecisionResponse,
   HealthResponse,
+  JobCaptureRequest,
+  JobCaptureResponse,
 } from '@job-search-assistant/contracts'
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8765'
@@ -18,6 +20,13 @@ export class LocalServiceClient {
 
   decide(input: DecisionRequest): Promise<DecisionResponse> {
     return this.request('/v1/decisions/evaluate', {
+      method: 'POST',
+      body: input,
+    })
+  }
+
+  captureJobs(input: JobCaptureRequest): Promise<JobCaptureResponse> {
+    return this.request('/v1/jobs/capture', {
       method: 'POST',
       body: input,
     })

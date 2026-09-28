@@ -1,18 +1,18 @@
 from fastapi.testclient import TestClient
 
-from job_search_assistant.main import app
-
-client = TestClient(app)
+from job_search_assistant.main import create_app
 
 
-def test_health() -> None:
+def test_health(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.get("/v1/health")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
-def test_decision_api_accepts_camel_case_contract() -> None:
+def test_decision_api_accepts_camel_case_contract(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.post(
         "/v1/decisions/evaluate",
         json={
@@ -24,3 +24,30 @@ def test_decision_api_accepts_camel_case_contract() -> None:
 
     assert response.status_code == 200
     assert response.json()["materialStrategy"] == "custom"
+
+
+def test_capture_job_is_idempotent(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    payload = {
+        "jobs": [
+            {
+                "platform": "boss",
+                "platformJobId": "job-123",
+                "url": "https://www.zhipin.com/job_detail/job-123.html",
+                "title": "AI 应用开发工程师",
+                "companyName": "示例公司",
+                "description": "负责 RAG 应用研发",
+                "skills": ["Python", "RAG"],
+                "capturedAt": "2026-09-28T08:00:00Z",
+                "source": "dom",
+            }
+        ]
+    }
+
+    first = client.post("/v1/jobs/capture", json=payload)
+    second = client.post("/v1/jobs/capture", json=payload)
+
+    assert first.status_code == 200
+    assert first.json() == {"accepted": 1, "jobIds": ["job-123"]}
+    assert second.status_code == 200
+    assert second.json() == {"accepted": 0, "jobIds": []}

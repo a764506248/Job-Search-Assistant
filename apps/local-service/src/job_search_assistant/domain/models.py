@@ -1,4 +1,6 @@
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -71,3 +73,30 @@ class HealthResponse(ApiModel):
     status: str = "ok"
     service: str = "job-search-assistant-local"
     version: str
+
+
+class CapturedJob(ApiModel):
+    platform: Literal["boss"]
+    platform_job_id: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    company_name: str = Field(min_length=1)
+    location: str | None = None
+    salary_text: str | None = None
+    experience: str | None = None
+    education: str | None = None
+    description: str = Field(min_length=1)
+    skills: list[str] = Field(default_factory=list)
+    recruiter_name: str | None = None
+    recruiter_title: str | None = None
+    captured_at: datetime
+    source: Literal["dom", "page-state"]
+
+
+class JobCaptureRequest(ApiModel):
+    jobs: list[CapturedJob] = Field(min_length=1, max_length=100)
+
+
+class JobCaptureResponse(ApiModel):
+    accepted: int
+    job_ids: list[str]
