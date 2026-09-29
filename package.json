@@ -3,10 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
+    "apps/web",
     "apps/extension",
     "packages/*"
   ],
   "scripts": {
+    "dev:web": "npm run dev --workspace @job-search-assistant/web",
+    "build:web": "npm run build --workspace @job-search-assistant/web",
+    "check:web": "npm run check --workspace @job-search-assistant/web",
     "dev:extension": "npm run dev --workspace @job-search-assistant/extension",
     "build:extension": "npm run build --workspace @job-search-assistant/extension",
     "check:extension": "npm run check --workspace @job-search-assistant/extension",

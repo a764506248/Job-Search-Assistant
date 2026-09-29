@@ -101,7 +101,9 @@ class CapturedJob(ApiModel):
     url: str = Field(min_length=1)
     title: str = Field(min_length=1)
     company_name: str = Field(min_length=1)
+    company_size: str | None = None
     location: str | None = None
+    work_address: str | None = None
     salary_text: str | None = None
     experience: str | None = None
     education: str | None = None
@@ -109,8 +111,45 @@ class CapturedJob(ApiModel):
     skills: list[str] = Field(default_factory=list)
     recruiter_name: str | None = None
     recruiter_title: str | None = None
+    has_communicated: bool = False
+    has_interview: bool = False
+    generated_greeting: str | None = Field(default=None, max_length=2000)
+    resume_variant: Literal["default", "optimized"] = "default"
+    generated_resume_id: int | None = None
+    resume_optimization: str | None = Field(default=None, max_length=5000)
     captured_at: datetime
-    source: Literal["dom", "page-state"]
+    source: Literal["dom", "page-state", "manual"]
+
+
+class ManualJobInput(ApiModel):
+    title: str = Field(min_length=1, max_length=300)
+    company_name: str = Field(min_length=1, max_length=300)
+    company_size: str | None = Field(default=None, max_length=100)
+    url: str | None = Field(default=None, max_length=2000)
+    location: str | None = Field(default=None, max_length=200)
+    work_address: str | None = Field(default=None, max_length=500)
+    salary_text: str | None = Field(default=None, max_length=100)
+    experience: str | None = Field(default=None, max_length=100)
+    education: str | None = Field(default=None, max_length=100)
+    description: str = Field(min_length=1)
+    skills: list[str] = Field(default_factory=list, max_length=100)
+    recruiter_name: str | None = Field(default=None, max_length=200)
+    recruiter_title: str | None = Field(default=None, max_length=200)
+    has_communicated: bool = False
+    has_interview: bool = False
+    generated_greeting: str | None = Field(default=None, max_length=2000)
+    resume_variant: Literal["default", "optimized"] = "default"
+    generated_resume_id: int | None = None
+    resume_optimization: str | None = Field(default=None, max_length=5000)
+
+
+class JobTrackingUpdate(ApiModel):
+    has_communicated: bool
+    has_interview: bool
+    generated_greeting: str | None = Field(default=None, max_length=2000)
+    resume_variant: Literal["default", "optimized"] = "default"
+    generated_resume_id: int | None = None
+    resume_optimization: str | None = Field(default=None, max_length=5000)
 
 
 class JobCaptureRequest(ApiModel):
@@ -130,6 +169,36 @@ class StoredJob(CapturedJob):
 class JobListResponse(ApiModel):
     total: int
     items: list[StoredJob]
+
+
+class DeliveryRecordInput(ApiModel):
+    platform: Literal["boss"] = "boss"
+    platform_job_id: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=300)
+    company_name: str = Field(min_length=1, max_length=300)
+    salary_text: str | None = Field(default=None, max_length=100)
+    location: str | None = Field(default=None, max_length=200)
+    recruiter_name: str | None = Field(default=None, max_length=200)
+    status: Literal[
+        "delivered", "greeting_sent", "failed", "skipped", "blocked", "fatal_limit"
+    ]
+    decision: str | None = Field(default=None, max_length=50)
+    reason: str | None = Field(default=None, max_length=2000)
+    greeting_text: str | None = Field(default=None, max_length=2000)
+    detail: str | None = Field(default=None, max_length=2000)
+    applied_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeliveryRecord(DeliveryRecordInput):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class DeliveryListResponse(ApiModel):
+    total: int
+    items: list[DeliveryRecord]
 
 
 class RequirementLevel(StrEnum):
@@ -233,6 +302,14 @@ class ResumeImportResponse(ApiModel):
     index_rebuilt: bool
     indexed_chunks: int | None = None
     index_error: str | None = None
+    ai_extraction_used: bool
+    ai_project_count: int = 0
+    ai_extraction_error: str | None = None
+    ai_model_record_id: int | None = None
+    ai_model_name: str | None = None
+    ai_model_id: str | None = None
+    ai_attempt_errors: list[str] = Field(default_factory=list)
+    ai_profile_extracted: bool = False
 
 
 class RagStatus(ApiModel):
@@ -261,6 +338,9 @@ class RagSearchResult(ApiModel):
     source_type: str
     source_id: str
     source_name: str
+    knowledge_type: str = ""
+    entity_id: str = ""
+    tags: list[str] = Field(default_factory=list)
     chunk_index: int
     content: str
     score: float
@@ -277,6 +357,31 @@ class AutomaticJobMatchResponse(ApiModel):
     scoring_version: str = "local-hybrid-v1"
 
 
+class MaterialPreviewRequest(ApiModel):
+    model_record_id: int | None = None
+
+
+class ResumeCompositionPreview(ApiModel):
+    headline: str
+    summary: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+    work_experience: list[str] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list)
+    optimization_notes: list[str] = Field(default_factory=list)
+
+
+class MaterialPreviewResponse(ApiModel):
+    job_id: int
+    model_record_id: int
+    model_name: str
+    model_id: str
+    default_greeting: str
+    greeting: str
+    resume: ResumeCompositionPreview
+    match: AutomaticJobMatchResponse
+
+
 class RagSearchResponse(ApiModel):
     items: list[RagSearchResult]
 
@@ -286,6 +391,9 @@ class RagChunk(ApiModel):
     source_type: str
     source_id: str
     source_name: str
+    knowledge_type: str = ""
+    entity_id: str = ""
+    tags: list[str] = Field(default_factory=list)
     chunk_index: int
     content: str
     content_hash: str

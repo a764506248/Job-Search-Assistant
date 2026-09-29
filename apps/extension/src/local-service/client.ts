@@ -22,8 +22,8 @@ export class LocalServiceClient {
     private readonly token?: string,
   ) {}
 
-  health(): Promise<HealthResponse> {
-    return this.request('/v1/health', { authenticated: false })
+  health(timeoutMs = 2000): Promise<HealthResponse> {
+    return this.request('/v1/health', { authenticated: false, timeoutMs })
   }
 
   decide(input: DecisionRequest): Promise<DecisionResponse> {
@@ -75,17 +75,27 @@ export class LocalServiceClient {
       method?: 'GET' | 'POST'
       body?: unknown
       authenticated?: boolean
+      timeoutMs?: number
     } = {},
   ): Promise<T> {
     const headers = new Headers({ Accept: 'application/json' })
     if (options.body !== undefined) headers.set('Content-Type', 'application/json')
     if (options.authenticated !== false && this.token) headers.set('X-Local-Token', this.token)
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: options.method ?? 'GET',
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000)
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: options.method ?? 'GET',
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: controller.signal,
+      })
+    }
+    finally {
+      clearTimeout(timeout)
+    }
 
     if (!response.ok) {
       throw new Error(`Local service request failed: ${response.status}`)

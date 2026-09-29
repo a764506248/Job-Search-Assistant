@@ -2,35 +2,45 @@ import re
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import create_router
 from .config import settings
 from .embedding import Embedder, HttpEmbeddingClient
+from .project_extraction import (
+    CloudGreetingGenerator,
+    CloudMaterialPreviewGenerator,
+    CloudModelConnectionTester,
+    CloudProjectExtractor,
+    GreetingGenerator,
+    MaterialPreviewGenerator,
+    ModelConnectionTester,
+    ProjectExtractor,
+)
 from .rag import RagService
-from .repositories import ClientLogRepository, JobRepository, LibraryRepository, VectorRepository
-
-DASHBOARD_ROUTES = {
-    "jobs",
-    "profile",
-    "projects",
-    "resumes",
-    "templates",
-    "rules",
-    "models",
-    "knowledge",
-}
+from .repositories import (
+    ClientLogRepository,
+    DeliveryRepository,
+    JobRepository,
+    LibraryRepository,
+    VectorRepository,
+)
 
 ALLOWED_EXTENSION_ORIGIN = re.compile(
     r"^(?:(?:chrome|moz)-extension://.+|https://(?:[a-z0-9-]+\.)?zhipin\.com)$"
 )
 
 
-def create_app(database_path: Path | None = None, embedder: Embedder | None = None) -> FastAPI:
+def create_app(
+    database_path: Path | None = None,
+    embedder: Embedder | None = None,
+    project_extractor: ProjectExtractor | None = None,
+    model_tester: ModelConnectionTester | None = None,
+    material_preview_generator: MaterialPreviewGenerator | None = None,
+    greeting_generator: GreetingGenerator | None = None,
+) -> FastAPI:
     application = FastAPI(
         title="Job Search Assistant Local Service",
         version=__version__,
@@ -49,26 +59,30 @@ def create_app(database_path: Path | None = None, embedder: Embedder | None = No
     library_repository = LibraryRepository(resolved_database_path)
     vector_repository = VectorRepository(resolved_database_path)
     client_log_repository = ClientLogRepository(resolved_database_path)
+    delivery_repository = DeliveryRepository(resolved_database_path)
     resolved_embedder = embedder or HttpEmbeddingClient(
         settings.embedding_url, settings.embedding_model
     )
     rag_service = RagService(library_repository, vector_repository, resolved_embedder)
-    application.include_router(
-        create_router(job_repository, library_repository, client_log_repository, rag_service)
+    resolved_project_extractor = project_extractor or CloudProjectExtractor(library_repository)
+    resolved_model_tester = model_tester or CloudModelConnectionTester()
+    resolved_material_generator = material_preview_generator or CloudMaterialPreviewGenerator(
+        library_repository
     )
-    static_dir = Path(__file__).parent / "static"
-    application.mount("/assets", StaticFiles(directory=static_dir), name="dashboard-assets")
-
-    @application.get("/", include_in_schema=False)
-    def dashboard() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
-
-    @application.get("/{view_name}", include_in_schema=False)
-    def dashboard_view(view_name: str) -> FileResponse:
-        if view_name not in DASHBOARD_ROUTES:
-            raise HTTPException(status_code=404, detail="page not found")
-        return FileResponse(static_dir / "index.html")
-
+    resolved_greeting_generator = greeting_generator or CloudGreetingGenerator(library_repository)
+    application.include_router(
+        create_router(
+            job_repository,
+            library_repository,
+            client_log_repository,
+            delivery_repository,
+            rag_service,
+            resolved_project_extractor,
+            resolved_model_tester,
+            resolved_material_generator,
+            resolved_greeting_generator,
+        )
+    )
     return application
 
 

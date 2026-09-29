@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCapturedJob } from './messages'
+import { isCapturedJob, isCaptureDiagnostic } from './messages'
 
 const validJob = {
   platform: 'boss',
@@ -25,5 +25,20 @@ describe('isCapturedJob', () => {
     { ...validJob, skills: ['Vue', 1] },
   ])('rejects an invalid or forged payload', (payload) => {
     expect(isCapturedJob(payload)).toBe(false)
+  })
+})
+
+describe('isCaptureDiagnostic', () => {
+  it('accepts a structured capture diagnostic', () => {
+    expect(isCaptureDiagnostic({
+      level: 'warning',
+      code: 'capture-incomplete',
+      message: '缺少字段',
+      details: { missingFields: ['platformJobId'] },
+    })).toBe(true)
+  })
+
+  it('rejects malformed diagnostics', () => {
+    expect(isCaptureDiagnostic({ level: 'info', code: 'x', message: 'x', details: {} })).toBe(false)
   })
 })

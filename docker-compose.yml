@@ -1,9 +1,26 @@
 services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:8765:80"
+    depends_on:
+      local-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   local-service:
     build:
       context: ./apps/local-service
-    ports:
-      - "127.0.0.1:8765:8765"
+    expose:
+      - "8765"
     environment:
       JSA_HOST: 0.0.0.0
       JSA_PORT: 8765

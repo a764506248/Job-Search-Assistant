@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,6 +71,8 @@ class LibraryRepository:
                 (kind, name, json.dumps(data, ensure_ascii=False), now, now),
             )
             record_id = cursor.lastrowid
+            if kind == "models":
+                self._make_model_role_exclusive(connection, int(record_id), data)
         return self.get(kind, int(record_id))
 
     def get(self, kind: LibraryKind, record_id: int) -> dict[str, Any]:
@@ -104,6 +107,8 @@ class LibraryRepository:
                     record_id,
                 ),
             )
+            if kind == "models" and cursor.rowcount:
+                self._make_model_role_exclusive(connection, record_id, data)
         if cursor.rowcount == 0:
             raise KeyError(record_id)
         return self.get(kind, record_id)
@@ -122,10 +127,11 @@ class LibraryRepository:
         self.initialize()
         with self._connect() as connection:
             row = connection.execute("SELECT data_json FROM profile WHERE singleton = 1").fetchone()
-        return json.loads(row[0]) if row else {}
+        return self._structure_profile(json.loads(row[0])) if row else {}
 
     def save_profile(self, data: dict[str, Any]) -> dict[str, Any]:
         self.initialize()
+        data = self._structure_profile(data)
         with self._connect() as connection:
             connection.execute(
                 """
@@ -152,7 +158,7 @@ class LibraryRepository:
                 "SELECT data_json FROM profile WHERE singleton = 1"
             ).fetchone()
             current_profile = json.loads(row[0]) if row else {}
-            merged_profile = {**current_profile, **profile}
+            merged_profile = self._structure_profile({**current_profile, **profile})
             connection.execute(
                 """INSERT INTO profile(singleton, data_json, updated_at) VALUES (1, ?, ?)
                 ON CONFLICT(singleton) DO UPDATE SET
@@ -165,8 +171,51 @@ class LibraryRepository:
                 VALUES ('resumes', ?, ?, ?, ?)""",
                 (filename, json.dumps(resume, ensure_ascii=False), now, now),
             )
-            project_ids = []
-            for project in projects:
+            project_ids = self._upsert_projects(connection, projects, now)
+        return {
+            "profile": merged_profile,
+            "resumeId": resume_cursor.lastrowid,
+            "projectIds": project_ids,
+        }
+
+    def upsert_projects(self, projects: list[dict[str, Any]]) -> list[int]:
+        """Persist structured projects and return their stable entity IDs."""
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            return self._upsert_projects(connection, projects, now)
+
+    @staticmethod
+    def _upsert_projects(
+        connection: sqlite3.Connection,
+        projects: list[dict[str, Any]],
+        now: str,
+    ) -> list[int]:
+        project_ids: list[int] = []
+        existing_projects = connection.execute(
+            "SELECT id, data_json FROM library_records WHERE kind = 'projects'"
+        ).fetchall()
+        projects_by_source_key = {
+            data.get("sourceKey"): record_id
+            for record_id, data_json in existing_projects
+            if (data := json.loads(data_json)).get("sourceKey")
+        }
+        for project in projects:
+            source_key = project["data"].get("sourceKey")
+            existing_id = projects_by_source_key.get(source_key)
+            if existing_id:
+                connection.execute(
+                    """UPDATE library_records SET name = ?, data_json = ?, updated_at = ?
+                    WHERE kind = 'projects' AND id = ?""",
+                    (
+                        project["name"],
+                        json.dumps(project["data"], ensure_ascii=False),
+                        now,
+                        existing_id,
+                    ),
+                )
+                project_ids.append(existing_id)
+            else:
                 cursor = connection.execute(
                     """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
                     VALUES ('projects', ?, ?, ?, ?)""",
@@ -177,15 +226,121 @@ class LibraryRepository:
                         now,
                     ),
                 )
-                project_ids.append(cursor.lastrowid)
-        return {
-            "profile": merged_profile,
-            "resumeId": resume_cursor.lastrowid,
-            "projectIds": project_ids,
-        }
+                project_id = int(cursor.lastrowid)
+                project_ids.append(project_id)
+                if source_key:
+                    projects_by_source_key[source_key] = project_id
+        return project_ids
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)
+
+    @staticmethod
+    def _structure_profile(data: dict[str, Any]) -> dict[str, Any]:
+        """Keep editable text fields while materializing stable entities for RAG."""
+        structured = dict(data)
+        summary = str(structured.get("summary", "")).strip()
+        if summary and not structured.get("strengths"):
+            strength_lines = LibraryRepository._until_heading(
+                LibraryRepository._content_lines(summary),
+                (r"^技术栈$", r"^项目经历$", r"^工作经历$", r"^教育经历$"),
+            )
+            structured["strengths"] = [
+                {"id": f"strength-{index}", "content": line}
+                for index, line in enumerate(strength_lines, 1)
+            ]
+
+        tech_stack = str(structured.get("techStack", "")).strip()
+        if tech_stack and not structured.get("techStackGroups"):
+            groups: list[dict[str, Any]] = []
+            tech_lines = LibraryRepository._until_heading(
+                LibraryRepository._content_lines(tech_stack),
+                (
+                    r"^(?:项目|项⽬).*(?:实践|经历)",
+                    r"^工作经历$",
+                    r"^教育经历$",
+                    r"^早期工作与项目$",
+                ),
+            )
+            for line in tech_lines:
+                parts = re.split(r"[：:]", line, maxsplit=1)
+                if len(parts) == 2:
+                    name, values = parts
+                    groups.append(
+                        {
+                            "id": f"tech-{len(groups) + 1}",
+                            "name": name.strip(),
+                            "items": LibraryRepository._items(values),
+                        }
+                    )
+                elif groups:
+                    groups[-1]["items"] = list(
+                        dict.fromkeys([*groups[-1]["items"], *LibraryRepository._items(line)])
+                    )
+                else:
+                    groups.append(
+                        {
+                            "id": "tech-1",
+                            "name": "技术栈",
+                            "items": LibraryRepository._items(line),
+                        }
+                    )
+            structured["techStackGroups"] = groups
+
+        for source_key, target_key, prefix in (
+            ("workExperience", "workExperiences", "work"),
+            ("education", "educations", "education"),
+        ):
+            value = str(structured.get(source_key, "")).strip()
+            if value and not structured.get(target_key):
+                structured[target_key] = [
+                    {"id": f"{prefix}-1", "content": value}
+                ]
+        return structured
+
+    @staticmethod
+    def _make_model_role_exclusive(
+        connection: sqlite3.Connection, record_id: int, data: dict[str, Any]
+    ) -> None:
+        role = str(data.get("usageRole", "available"))
+        if role not in ("primary", "fallback"):
+            return
+        rows = connection.execute(
+            "SELECT id, data_json FROM library_records WHERE kind = 'models' AND id != ?",
+            (record_id,),
+        ).fetchall()
+        now = datetime.now(UTC).isoformat()
+        for other_id, raw_data in rows:
+            other = json.loads(raw_data)
+            if other.get("usageRole") == role:
+                other["usageRole"] = "available"
+                connection.execute(
+                    "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(other, ensure_ascii=False), now, other_id),
+                )
+
+    @staticmethod
+    def _content_lines(value: str) -> list[str]:
+        return [
+            re.sub(r"^[•·▪◦*-]\s*", "", line).strip()
+            for line in value.splitlines()
+            if re.sub(r"^[•·▪◦*-]\s*", "", line).strip()
+        ]
+
+    @staticmethod
+    def _until_heading(lines: list[str], heading_patterns: tuple[str, ...]) -> list[str]:
+        for index, line in enumerate(lines):
+            if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in heading_patterns):
+                return lines[:index]
+        return lines
+
+    @staticmethod
+    def _items(value: str) -> list[str]:
+        return [
+            item.strip()
+            for item in re.split(r"[,，、/|]", value)
+            if item.strip()
+        ]
 
     @staticmethod
     def _validate_kind(kind: str) -> None:

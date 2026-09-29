@@ -5,7 +5,16 @@ export interface JobAnalysisPanel {
   showLoading(job: CapturedJob): void
   showResult(job: CapturedJob, result: AutomaticJobMatchResponse): void
   showError(job: CapturedJob | null, message: string): void
+  reportDiagnostic(diagnostic: PanelDiagnostic): void
+  clearDiagnostic(code: string): void
   destroy(): void
+}
+
+export interface PanelDiagnostic {
+  level: 'warning' | 'error'
+  code: string
+  message: string
+  details?: Record<string, unknown>
 }
 
 const strategyLabels = {
@@ -32,7 +41,23 @@ export function mountJobAnalysisPanel(document: Document): JobAnalysisPanel {
       button { border: 0; cursor: pointer; font: inherit; }
       .toggle { width: 28px; height: 28px; border-radius: 8px; background: rgba(255,255,255,.1); color: #fff; }
       .body { padding: 15px 16px 17px; }
-      .panel.collapsed .body { display: none; }
+      .tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid #e6ece8; background: #fff; }
+      .tab { padding: 7px 10px; border-bottom: 2px solid transparent; background: transparent; color: #687870; font-size: 11px; }
+      .tab.active { border-bottom-color: #14775d; color: #14775d; font-weight: 700; }
+      .tab .badge { display: inline-grid; min-width: 17px; height: 17px; margin-left: 4px; padding: 0 4px; place-items: center; border-radius: 9px; background: #b8493f; color: #fff; font-size: 9px; }
+      .diagnostics { display: none; padding: 12px 16px 17px; }
+      .diagnostics.active, .body.active { display: block; }
+      .body:not(.active) { display: none; }
+      .panel.collapsed .body, .panel.collapsed .tabs, .panel.collapsed .diagnostics { display: none; }
+      .diagnostic-empty { margin: 0; color: #687870; font-size: 11px; }
+      .diagnostic { padding: 9px 0; border-top: 1px solid #e6ece8; }
+      .diagnostic:first-child { border-top: 0; }
+      .diagnostic header { display: flex; justify-content: space-between; gap: 8px; }
+      .diagnostic strong { color: #9a4e24; font-size: 11px; }
+      .diagnostic.error strong { color: #a23d35; }
+      .diagnostic time { color: #87958e; font-size: 9px; }
+      .diagnostic p { margin: 5px 0 0; color: #586a61; font-size: 10px; overflow-wrap: anywhere; }
+      .diagnostic code { display: block; margin-top: 5px; color: #7b8982; font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
       .status { margin: 0; color: #687870; font-size: 12px; }
       .loading::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 7px; border: 2px solid #bdd8cd; border-top-color: #14775d; border-radius: 50%; animation: spin .75s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
@@ -56,14 +81,27 @@ export function mountJobAnalysisPanel(document: Document): JobAnalysisPanel {
     </style>
     <section class="panel" aria-label="Job Search Assistant 职位分析">
       <header class="head"><span class="logo">J</span><div class="heading"><strong>Job Search Assistant</strong><span id="job-title">等待职位信息</span></div><button class="toggle" type="button" aria-label="收起分析面板">−</button></header>
-      <main class="body"><p class="status">打开 Boss 职位详情后，将自动分析当前岗位。</p></main>
+      <nav class="tabs"><button class="tab active" data-tab="analysis" type="button">分析</button><button class="tab" data-tab="errors" type="button">告警<span class="badge" hidden>0</span></button></nav>
+      <main class="body active"><p class="status">打开 Boss 职位详情后，将自动分析当前岗位。</p></main>
+      <aside class="diagnostics"><p class="diagnostic-empty">暂无告警</p></aside>
     </section>`
   document.documentElement.append(host)
 
   const panel = shadow.querySelector<HTMLElement>('.panel')!
   const title = shadow.querySelector<HTMLElement>('#job-title')!
   const body = shadow.querySelector<HTMLElement>('.body')!
+  const diagnosticsBody = shadow.querySelector<HTMLElement>('.diagnostics')!
+  const tabButtons = Array.from(shadow.querySelectorAll<HTMLButtonElement>('.tab'))
+  const badge = shadow.querySelector<HTMLElement>('.badge')!
   const toggle = shadow.querySelector<HTMLButtonElement>('.toggle')!
+  const diagnostics: Array<PanelDiagnostic & { occurredAt: Date }> = []
+
+  const selectTab = (name: string) => {
+    tabButtons.forEach((button) => button.classList.toggle('active', button.dataset.tab === name))
+    body.classList.toggle('active', name === 'analysis')
+    diagnosticsBody.classList.toggle('active', name === 'errors')
+  }
+  tabButtons.forEach((button) => button.addEventListener('click', () => selectTab(button.dataset.tab ?? 'analysis')))
   toggle.addEventListener('click', () => {
     const collapsed = panel.classList.toggle('collapsed')
     toggle.textContent = collapsed ? '+' : '−'
@@ -79,6 +117,49 @@ export function mountJobAnalysisPanel(document: Document): JobAnalysisPanel {
     paragraph.className = className
     paragraph.textContent = message
     body.append(paragraph)
+  }
+  const renderDiagnostics = () => {
+    diagnosticsBody.replaceChildren()
+    badge.textContent = String(diagnostics.length)
+    badge.hidden = diagnostics.length === 0
+    if (!diagnostics.length) {
+      const empty = document.createElement('p')
+      empty.className = 'diagnostic-empty'
+      empty.textContent = '暂无告警'
+      diagnosticsBody.append(empty)
+      return
+    }
+    for (const item of diagnostics.slice(0, 20)) {
+      const article = document.createElement('article')
+      article.className = `diagnostic ${item.level}`
+      const header = document.createElement('header')
+      const code = document.createElement('strong')
+      code.textContent = item.code
+      const time = document.createElement('time')
+      time.textContent = item.occurredAt.toLocaleTimeString('zh-CN', { hour12: false })
+      header.append(code, time)
+      const message = document.createElement('p')
+      message.textContent = item.message
+      article.append(header, message)
+      if (item.details && Object.keys(item.details).length) {
+        const details = document.createElement('code')
+        details.textContent = JSON.stringify(item.details)
+        article.append(details)
+      }
+      diagnosticsBody.append(article)
+    }
+  }
+  const reportDiagnostic = (diagnostic: PanelDiagnostic) => {
+    const previous = diagnostics[0]
+    if (previous?.code === diagnostic.code && previous.message === diagnostic.message) return
+    diagnostics.unshift({ ...diagnostic, occurredAt: new Date() })
+    renderDiagnostics()
+  }
+  const clearDiagnostic = (code: string) => {
+    const remaining = diagnostics.filter((item) => item.code !== code)
+    if (remaining.length === diagnostics.length) return
+    diagnostics.splice(0, diagnostics.length, ...remaining)
+    renderDiagnostics()
   }
 
   return {
@@ -161,7 +242,10 @@ export function mountJobAnalysisPanel(document: Document): JobAnalysisPanel {
     showError(job, message) {
       setTitle(job)
       setMessage(message, 'status error')
+      reportDiagnostic({ level: 'error', code: 'analysis-error', message })
     },
+    reportDiagnostic,
+    clearDiagnostic,
     destroy() { host.remove() },
   }
 }

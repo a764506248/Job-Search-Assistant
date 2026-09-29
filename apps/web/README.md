@@ -1,0 +1,30 @@
+# Web
+
+本目录是基于 Vue 3、Vite 和 Ant Design Vue 的独立本地管理端。它不依赖 Python 包，也不直接访问 SQLite。
+
+- `src/app/`：应用壳、导航、服务状态和路由出口；
+- `src/router/`：Vue Router 路由表；
+- `src/views/`：按 `dashboard/jobs/profile/library/resume/knowledge` 业务域分类的页面；
+- `src/components/`：按业务域分类的可复用组件；
+- `src/services/`：统一的后端 API 客户端；
+- `src/composables/`：可复用的 Composition API 状态逻辑；
+- `src/types/`：前后端数据契约类型；
+- `src/utils/`：无状态格式化工具；
+- `src/styles/`：全局视觉样式及 Ant Design Vue 适配；
+- `src/main.ts`：Vite 应用入口；
+- `nginx.conf`：SPA 路由回退，并将 `/v1`、`/docs`、`/openapi.json` 转发到 FastAPI；
+- `Dockerfile`：构建只包含静态资源的 Web 镜像。
+
+从仓库根目录启动：
+
+```bash
+docker compose up -d --build
+```
+
+浏览器访问 <http://127.0.0.1:8765>。页面和 API 使用同一源地址，浏览器扩展及已有调用方不需要修改端口。
+
+单独调试前端：
+
+```bash
+npm run dev:web
+```

@@ -1,0 +1,61 @@
+# Version control and editor metadata
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+
+# Local dependencies and package-manager caches
+node_modules
+**/node_modules
+.cache
+**/.cache
+
+# Generated frontend and extension artifacts
+dist
+**/dist
+.output
+**/.output
+coverage
+**/coverage
+
+# Python caches and virtual environments
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+**/.pytest_cache
+.ruff_cache
+**/.ruff_cache
+.mypy_cache
+**/.mypy_cache
+.venv
+**/.venv
+venv
+**/venv
+
+# Runtime output and temporary files
+output
+tmp
+*.log
+*.pid
+
+# Local secrets; keep distributable examples
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Local databases and user data must not enter build contexts
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+apps/local-service/data
+
+# Local model/download caches
+models
+**/models
+huggingface
+**/huggingface

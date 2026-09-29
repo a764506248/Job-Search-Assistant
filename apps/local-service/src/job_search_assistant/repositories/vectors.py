@@ -22,6 +22,9 @@ class VectorRepository:
                     source_type TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     source_name TEXT NOT NULL,
+                    knowledge_type TEXT NOT NULL DEFAULT '',
+                    entity_id TEXT NOT NULL DEFAULT '',
+                    tags_json TEXT NOT NULL DEFAULT '[]',
                     chunk_index INTEGER NOT NULL,
                     content TEXT NOT NULL,
                     content_hash TEXT NOT NULL,
@@ -32,6 +35,16 @@ class VectorRepository:
                 )
                 """
             )
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(vector_chunks)").fetchall()
+            }
+            for name, definition in (
+                ("knowledge_type", "TEXT NOT NULL DEFAULT ''"),
+                ("entity_id", "TEXT NOT NULL DEFAULT ''"),
+                ("tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE vector_chunks ADD COLUMN {name} {definition}")
             connection.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS vector_chunks_fts
@@ -52,15 +65,19 @@ class VectorRepository:
             connection.executemany(
                 """
                 INSERT INTO vector_chunks(
-                    source_type, source_id, source_name, chunk_index, content,
+                    source_type, source_id, source_name, knowledge_type, entity_id,
+                    tags_json, chunk_index, content,
                     content_hash, embedding_json, model, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         chunk["source_type"],
                         chunk["source_id"],
                         chunk["source_name"],
+                        chunk["knowledge_type"],
+                        chunk["entity_id"],
+                        json.dumps(chunk["tags"], ensure_ascii=False),
                         chunk["chunk_index"],
                         chunk["content"],
                         hashlib.sha256(chunk["content"].encode()).hexdigest(),
@@ -103,6 +120,9 @@ class VectorRepository:
                     "sourceType": row["source_type"],
                     "sourceId": row["source_id"],
                     "sourceName": row["source_name"],
+                    "knowledgeType": row["knowledge_type"],
+                    "entityId": row["entity_id"],
+                    "tags": json.loads(row["tags_json"]),
                     "chunkIndex": row["chunk_index"],
                     "content": row["content"],
                     "score": round(score, 6),
@@ -144,6 +164,9 @@ class VectorRepository:
                     "sourceType": row["source_type"],
                     "sourceId": row["source_id"],
                     "sourceName": row["source_name"],
+                    "knowledgeType": row["knowledge_type"],
+                    "entityId": row["entity_id"],
+                    "tags": json.loads(row["tags_json"]),
                     "chunkIndex": row["chunk_index"],
                     "content": row["content"],
                     "score": round(combined, 6),
@@ -179,6 +202,9 @@ class VectorRepository:
                     "sourceType": row["source_type"],
                     "sourceId": row["source_id"],
                     "sourceName": row["source_name"],
+                    "knowledgeType": row["knowledge_type"],
+                    "entityId": row["entity_id"],
+                    "tags": json.loads(row["tags_json"]),
                     "chunkIndex": row["chunk_index"],
                     "content": row["content"],
                     "contentHash": row["content_hash"],
@@ -189,6 +215,13 @@ class VectorRepository:
                 }
             )
         return items
+
+    def delete(self, chunk_id: int) -> bool:
+        self.initialize()
+        with sqlite3.connect(self.database_path) as connection:
+            cursor = connection.execute("DELETE FROM vector_chunks WHERE id = ?", (chunk_id,))
+            connection.execute("DELETE FROM vector_chunks_fts WHERE rowid = ?", (chunk_id,))
+        return cursor.rowcount > 0
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:

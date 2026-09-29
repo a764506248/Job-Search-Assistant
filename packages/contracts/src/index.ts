@@ -64,7 +64,9 @@ export interface CapturedJob {
   url: string
   title: string
   companyName: string
+  companySize?: string
   location?: string
+  workAddress?: string
   salaryText?: string
   experience?: string
   education?: string

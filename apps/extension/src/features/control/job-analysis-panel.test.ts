@@ -71,4 +71,21 @@ describe('job analysis panel', () => {
     panel.showError(job, '本地服务不可用')
     expect(shadow?.textContent).toContain('本地服务不可用')
   })
+
+  it('shows structured errors in a dedicated tab', () => {
+    const panel = mountJobAnalysisPanel(document)
+    panel.reportDiagnostic({
+      level: 'warning',
+      code: 'capture-incomplete',
+      message: '当前页面缺少采集字段：platformJobId',
+      details: { missingFields: ['platformJobId'] },
+    })
+    const shadow = document.querySelector('#job-search-assistant-host')?.shadowRoot
+    expect(shadow?.textContent).toContain('告警')
+    expect(shadow?.textContent).toContain('capture-incomplete')
+    expect(shadow?.textContent).toContain('platformJobId')
+    panel.clearDiagnostic('capture-incomplete')
+    expect(shadow?.textContent).not.toContain('capture-incomplete')
+    expect(shadow?.textContent).toContain('暂无告警')
+  })
 })

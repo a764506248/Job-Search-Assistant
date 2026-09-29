@@ -2,9 +2,10 @@
 
 ## 1. 架构目标
 
-系统采用“浏览器扩展 + 本地服务 + 云端模型”的结构：
+系统采用“浏览器扩展 + 独立 Web 前端 + 本地 API + 云端模型”的结构：
 
 - 浏览器扩展只负责招聘网站适配、交互和受控投递。
+- Web 前端只负责本地资料管理和结果展示，通过同源 `/v1` 调用 API。
 - 本地服务负责敏感数据、知识库、RAG、文件生成和决策编排。
 - 云端模型负责结构化语义理解和文案生成，不保存系统主数据。
 
@@ -14,7 +15,9 @@
 flowchart LR
     U["用户"] --> EXT["浏览器扩展"]
     EXT --> BOSS["Boss 直聘页面与接口"]
-    EXT --> API["本地 API 服务"]
+    EXT --> WEB["Web 入口 / Nginx :8765"]
+    U --> WEB
+    WEB --> API["FastAPI 本地 API :8765（容器内）"]
 
     API --> DB["SQLite/PostgreSQL 本地数据库"]
     API --> VEC["本地向量索引"]
@@ -48,7 +51,16 @@ flowchart LR
 
 本地服务默认监听 `127.0.0.1`，不允许局域网访问。
 
-### 3.3 本地存储
+### 3.3 Web 前端
+
+- 页面代码位于 `apps/web`，使用 Vue 3、Vite 与 Ant Design Vue，并与 Python 包完全分离；
+- Vue Router 管理页面路由，Composition API 管理接口状态、表单与列表；页面不依赖 DOM 查询或手工拼接 HTML；
+- Nginx 提供静态页面和 SPA history fallback，直接刷新 `/models`、`/projects` 等路由仍可打开；
+- `/v1/*`、`/docs` 与 `/openapi.json` 转发给 FastAPI；
+- 宿主机只暴露 Web 的 `127.0.0.1:8765`，FastAPI 仅在 Compose 内网可见；
+- 外部端口与 API 路径保持不变，浏览器扩展和 Skill 无需修改。
+
+### 3.4 本地存储
 
 MVP 建议：
 
@@ -64,6 +76,10 @@ MVP 建议：
 
 ```text
 apps/
+├── web/                    # 独立管理端前端与 Nginx 入口
+│   ├── src/                # Vue 组件、样式与业务控制器
+│   ├── package.json        # Vite / Vue / Ant Design Vue 构建配置
+│   └── nginx.conf          # SPA fallback 与 /v1 反向代理
 ├── extension/              # WXT 浏览器扩展
 │   ├── entrypoints/        # background/content/page scripts
 │   ├── platform/boss/      # Boss 页面与接口适配
@@ -84,7 +100,7 @@ packages/
 └── resume-templates/       # PDF/DOCX 模板
 ```
 
-以上为目标结构，正式脚手架应在技术方案确认后创建。
+`apps/web`、`apps/extension` 与 `apps/local-service` 已分别构建和运行；领域包的进一步拆分按功能迭代逐步进行。
 
 ## 5. 关键流程
 
@@ -265,7 +281,7 @@ flowchart TD
 
 - 链路：Boss 主世界采集脚本 → DOM `CustomEvent` → 内容脚本校验 → HTTP JSON → FastAPI → SQLite。
 - 协议：HTTP JSON；需要任务进度时使用 SSE。
-- 地址：由本地服务启动时分配，仅监听 loopback。
+- 地址：统一使用 `http://127.0.0.1:8765`；Nginx 将 `/v1` 转发到只在 Compose 内网开放的 FastAPI。
 - 认证：首次配对生成高熵令牌，扩展后续请求携带令牌。
 - 跨域：本地服务只允许已配对的扩展 Origin。
 - 契约：OpenAPI 作为唯一接口事实来源，自动生成 TypeScript 客户端。
@@ -278,6 +294,7 @@ flowchart TD
 | 页面事件 → 内容脚本 | 运行时类型守卫单元测试 | 已自动化 |
 | 内容脚本 → FastAPI | mock fetch 验证 URL、JSON、令牌 | 已自动化 |
 | FastAPI → SQLite | 临时数据库 API 集成测试 | 已自动化 |
+| Web → Nginx → FastAPI | Compose 健康检查与 HTTP 冒烟测试 | 已自动化/启动时验证 |
 | 已登录 Boss 页面全链路 | Chrome 加载解压扩展后现场冒烟 | 待验证 |
 
 当前扩展已在 Boss 页面挂载 Shadow DOM 职位分析浮层，可显示本地混合检索得到的岗位适合度、定制可信度、风险提示、材料策略与证据；自动沟通和投递控制尚未接入。
