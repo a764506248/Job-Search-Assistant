@@ -29,7 +29,10 @@ from urllib.request import urlopen
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 用户画像文件
-USER_PROFILE_FILE = os.path.join(SKILL_DIR, "user_profile.json")
+USER_PROFILE_FILE = os.environ.get(
+    "BOSS_PROFILE_FILE",
+    os.path.join(SKILL_DIR, "user_profile.json"),
+)
 
 # 工作目录: 优先环境变量，否则使用当前目录
 #   SKILL.md 指导用户 cd $workdir 后运行脚本，os.getcwd() 即为工作目录
@@ -81,7 +84,7 @@ DOMAIN_DESCRIPTION = USER_PROFILE.get("domain_description", "")
 
 # --- 求职目标 ---
 TARGET_CITY = (AUTOMATION_CONFIG.get("targetCities") or [USER_PROFILE.get("target_city", "")])[0]
-CITY_CODE = USER_PROFILE.get("city_code", "")
+CITY_CODE = str(AUTOMATION_CONFIG.get("cityCode") or USER_PROFILE.get("city_code", "")).strip()
 MIN_SALARY_K = AUTOMATION_CONFIG.get("minimumSalaryK", USER_PROFILE.get("min_salary_k", 0))
 
 # --- 投递参数 ---

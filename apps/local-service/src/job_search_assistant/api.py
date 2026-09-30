@@ -142,7 +142,19 @@ def create_router(
     def automation_config() -> AutomationConfigResponse:
         profile = library_repository.get_profile()
         target_roles = string_list(profile.get("targetRoles"))
+        target_cities = string_list(profile.get("cities"))
         keywords = string_list(profile.get("searchKeywords")) or target_roles
+        boss_city_codes = {
+            "北京": "101010100",
+            "上海": "101020100",
+            "广州": "101280100",
+            "深圳": "101280600",
+            "杭州": "101210100",
+        }
+        explicit_city_code = str(profile.get("bossCityCode", "")).strip()
+        city_code = explicit_city_code or (
+            boss_city_codes.get(target_cities[0], "") if target_cities else ""
+        )
         try:
             library_repository.get_default_resume_image()
             image_available = True
@@ -150,7 +162,8 @@ def create_router(
             image_available = False
         return AutomationConfigResponse(
             target_roles=target_roles,
-            target_cities=string_list(profile.get("cities")),
+            target_cities=target_cities,
+            city_code=city_code,
             search_keywords=keywords,
             minimum_salary_k=int(profile.get("minimumSalaryK", 20) or 20),
             daily_target=int(profile.get("dailyTarget", 20) or 20),

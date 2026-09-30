@@ -60,6 +60,8 @@ def _default_page_state():
         "page_delivered_count": 0,       # 本页面投递成功数
         "page_start_delivered": 0,       # 本页面开始时的累计投递数
         "evolved_keywords": [],          # AI进化生成的新关键词
+        "completed_extracted": 0,        # 已切换页面的累计提取数
+        "completed_scrolls": 0,          # 已切换页面的累计滚动数
     }
 
 

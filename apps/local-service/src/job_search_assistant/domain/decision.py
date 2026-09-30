@@ -51,7 +51,12 @@ def evaluate_material_strategy(request: DecisionRequest) -> DecisionResponse:
         reasons = ["命中风险规则，使用默认简历和默认问候语"]
         strategy = MaterialStrategy.DEFAULT
     elif not meets_threshold:
-        reasons = ["岗位适合度或定制可信度未达到阈值"]
+        unmet = []
+        if effective_score < request.minimum_suitability_score:
+            unmet.append("岗位适合度未达阈值")
+        if request.customization_confidence < request.minimum_customization_confidence:
+            unmet.append("定制可信度未达阈值")
+        reasons = ["，".join(unmet) + "，改用默认材料"]
         strategy = MaterialStrategy.DEFAULT
     else:
         reasons = ["岗位适合度和定制可信度均达到阈值"]

@@ -5,6 +5,7 @@
         <label>姓名或称呼<input v-model="profile.displayName" placeholder="例如：小林" /></label>
         <label>目标岗位<input v-model="profile.targetRoles" placeholder="例如：AI应用开发、Python后端" /></label>
         <div class="form-row"><label>工作年限<input v-model="profile.yearsExperience" type="number" min="0" placeholder="3" /></label><label>期望城市<input v-model="profile.cities" placeholder="上海、杭州、远程" /></label></div>
+        <label>BOSS 城市编码（可选）<input v-model.trim="profile.bossCityCode" placeholder="例如：北京 101010100" /></label>
         <div class="form-row"><label>手机号<input v-model="profile.phone" placeholder="用于简历联系方式" /></label><label>邮箱<input v-model="profile.email" type="email" placeholder="name@example.com" /></label></div>
         <label>个人优势<textarea v-model="profile.summary" rows="5" placeholder="概括你的核心能力、业务优势和可验证成果"></textarea></label>
         <label>技术栈<textarea v-model="profile.techStack" rows="3" placeholder="例如：Python、FastAPI、LangGraph、RAG、PostgreSQL"></textarea></label>

@@ -277,6 +277,9 @@ def step_navigate_search(keyword, city_code=_PROFILE_CITY):
         print("[搜索] ERROR: WebBridge 不可达")
         return False
 
+    # 切换页面前先归档当前页统计，避免 reset_state() 把总数清零。
+    previous_batch_state = get_state()
+
     # 导航到搜索页
     ok, clean_kw = navigate_to_search(keyword, city_code)
     if not ok:
@@ -292,6 +295,14 @@ def step_navigate_search(keyword, city_code=_PROFILE_CITY):
     page_state['page_type'] = 'search'
     page_state['current_keyword'] = keyword
     page_state['pages_processed'] = page_state.get('pages_processed', 0) + 1
+    page_state['completed_extracted'] = (
+        page_state.get('completed_extracted', 0)
+        + previous_batch_state.get('total_extracted', 0)
+    )
+    page_state['completed_scrolls'] = (
+        page_state.get('completed_scrolls', 0)
+        + previous_batch_state.get('total_scrolls', 0)
+    )
 
     # 记录本页面开始时的投递数
     pm = ProgressManager(PROGRESS_FILE)
@@ -690,6 +701,25 @@ def step_finish():
         target_check = check_delivery_target(PROGRESS_FILE)
         page_state = load_page_state()
         batch_state = get_state()
+        cached_job_count = 0
+        if os.path.exists(SURFACE_CACHE):
+            try:
+                with open(SURFACE_CACHE, 'r', encoding='utf-8') as f:
+                    cached_jobs = json.load(f) or []
+                cached_job_count = len({
+                    job.get('jobId') for job in cached_jobs if job.get('jobId')
+                })
+            except (OSError, json.JSONDecodeError):
+                cached_job_count = 0
+        total_extracted = max(
+            cached_job_count,
+            page_state.get('completed_extracted', 0)
+            + batch_state.get('total_extracted', 0),
+        )
+        total_scrolls = (
+            page_state.get('completed_scrolls', 0)
+            + batch_state.get('total_scrolls', 0)
+        )
 
         print(f"\n{'='*60}")
         print(f"最终统计")
@@ -699,16 +729,18 @@ def step_finish():
         print(f"目标达成: {'是' if target_check['target_met'] else '否'}")
         print(f"处理页面数: {page_state.get('pages_processed', 0)}")
         print(f"已尝试关键词: {len(page_state.get('tried_keywords', []))} 个")
-        print(f"总提取岗位: {batch_state.get('total_extracted', 0)} 条")
-        print(f"总滚动次数: {batch_state.get('total_scrolls', 0)} 次")
+        print(f"总提取岗位: {total_extracted} 条")
+        print(f"总滚动次数: {total_scrolls} 次")
 
         progress = load_serial_progress()
         if progress.get('fatal_stop'):
             print(f"停止原因: 致命错误 - {progress.get('fatal_reason', '')}")
         elif progress.get('target_met'):
             print(f"停止原因: 投递目标达成")
-        else:
+        elif batch_state.get('exhausted'):
             print(f"停止原因: 页面穷尽且无新关键词")
+        else:
+            print(f"停止原因: 手动停止或流程中断")
 
         print(f"{'='*60}")
     else:

@@ -363,6 +363,7 @@ class AutomaticJobMatchResponse(ApiModel):
 class AutomationConfigResponse(ApiModel):
     target_roles: list[str] = Field(default_factory=list)
     target_cities: list[str] = Field(default_factory=list)
+    city_code: str = ""
     search_keywords: list[str] = Field(default_factory=list)
     minimum_salary_k: int = Field(default=20, ge=0)
     daily_target: int = Field(default=20, ge=1, le=500)

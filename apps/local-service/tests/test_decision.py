@@ -26,6 +26,7 @@ def test_low_match_falls_back_and_still_delivers() -> None:
 
     assert result.should_deliver is True
     assert result.material_strategy == MaterialStrategy.DEFAULT
+    assert result.reasons == ["岗位适合度未达阈值，定制可信度未达阈值，改用默认材料"]
 
 
 def test_risk_rule_uses_default_materials_and_still_delivers() -> None:

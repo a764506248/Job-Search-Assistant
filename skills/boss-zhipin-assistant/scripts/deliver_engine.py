@@ -30,6 +30,7 @@
 import json
 import time
 import random
+import re
 import sys
 import os
 
@@ -317,6 +318,43 @@ def _visible_message_count(text):
     """) or 0)
 
 
+def _restore_source_page(source_url):
+    """从聊天页恢复到本次投递前的搜索列表。
+
+    只允许返回 BOSS 岗位列表 URL，避免将页面导航到未验证的外部地址。
+    """
+    source_url = str(source_url or '').strip()
+    if '/web/geek/jobs' not in source_url:
+        return False, '投递前页面不是可恢复的岗位列表'
+    result = navigate(source_url, wait_range=(3, 5))
+    if not result.get('ok'):
+        return False, '返回搜索页的导航请求失败'
+    restored_url = str(evaluate('window.location.href') or '')
+    if '/web/geek/jobs' not in restored_url:
+        return False, f'返回后仍不在搜索页: {restored_url}'
+    return True, '已返回搜索页'
+
+
+def _normalize_company_name(value):
+    """将工商全称和 BOSS 聊天页品牌简称归一化。"""
+    value = re.sub(r'[\(（].*?[\)）]', '', str(value or ''))
+    value = re.sub(r'(?:北京|上海|广州|深圳|杭州)(?:市)?', '', value)
+    value = re.sub(r'(?:股份)?有限公司|有限责任公司|集团|科技|网络', '', value)
+    return re.sub(r'[^\w\u4e00-\u9fff]', '', value).lower()
+
+
+def _company_names_match(expected, candidate):
+    expected = _normalize_company_name(expected)
+    candidate = _normalize_company_name(candidate)
+    if not expected or not candidate:
+        return False
+    if expected == candidate:
+        return True
+    return min(len(expected), len(candidate)) >= 4 and (
+        expected in candidate or candidate in expected
+    )
+
+
 def _send_verified_greeting(job_info, greeting_text=None):
     """仅在当前聊天明确对应目标岗位时，发送且只发送一次问候语。"""
     job_info = job_info or {}
@@ -331,22 +369,42 @@ def _send_verified_greeting(job_info, greeting_text=None):
     (function(){{
         var title = {expected_title};
         var company = {expected_company};
-        var visibleExact = function(text) {{
-            return Array.from(document.querySelectorAll('*')).some(function(el) {{
-                if (el.children.length !== 0 || (el.textContent || '').trim() !== text) return false;
+        var visibleLeaves = function() {{
+            return Array.from(document.querySelectorAll('*')).filter(function(el) {{
+                if (el.children.length !== 0) return false;
                 var r = el.getBoundingClientRect();
                 var s = window.getComputedStyle(el);
                 return r.width > 0 && r.height > 0 && r.left > window.innerWidth * 0.28 &&
                        s.display !== 'none' && s.visibility !== 'hidden';
             }});
         }};
-        return {{url: location.href, titleOk: visibleExact(title), companyOk: visibleExact(company)}};
+        var leaves = visibleLeaves();
+        var visibleExact = function(text) {{
+            return leaves.some(function(el) {{ return (el.textContent || '').trim() === text; }});
+        }};
+        return {{
+            url: location.href,
+            titleOk: visibleExact(title),
+            visibleTexts: leaves.map(function(el) {{ return (el.textContent || '').trim(); }})
+        }};
     }})()
     """) or {}
+    company_match = next(
+        (
+            candidate for candidate in identity.get('visibleTexts', [])
+            if _company_names_match(company, candidate)
+        ),
+        '',
+    )
+    identity['companyOk'] = bool(company_match)
+    identity['companyMatch'] = company_match
     if '/web/geek/chat' not in str(identity.get('url', '')):
         return False, '尚未进入聊天页，无法安全发送问候语'
     if not identity.get('titleOk') or not identity.get('companyOk'):
-        return False, f"目标会话校验失败: title={identity.get('titleOk')}, company={identity.get('companyOk')}"
+        return False, (
+            f"目标会话校验失败: title={identity.get('titleOk')}, "
+            f"company={identity.get('companyOk')}, matched={identity.get('companyMatch', '')}"
+        )
 
     greeting = str(greeting_text or GREETING_TEXT or '').strip()
     if not greeting:
@@ -493,6 +551,7 @@ def deliver_inplace(job_id, job_info=None, greeting_text=None, send_resume_image
         status: 'success' | 'fatal_limit' | 'login_expired' | 'skip' | 'fail' | 'unknown'
     """
     title = (job_info or {}).get('title', '')[:25] if job_info else job_id
+    source_url = str(evaluate('window.location.href') or '')
 
     # 1. 点击卡片
     click_result = click_card_inplace(job_id, verify=True, max_wait=5)
@@ -551,11 +610,19 @@ def deliver_inplace(job_id, job_info=None, greeting_text=None, send_resume_image
         time.sleep(1)
         greeting_ok, greeting_detail = _send_verified_greeting(job_info, greeting_text)
         if not greeting_ok:
-            return 'fail', greeting_detail
-        image_ok, image_detail = _send_default_resume_image(send_resume_image)
-        if not image_ok:
-            return 'fail', f"{greeting_detail}；{image_detail}"
-        return 'success', f"{greeting_detail}；{image_detail}"
+            status, detail = 'fail', greeting_detail
+        else:
+            image_ok, image_detail = _send_default_resume_image(send_resume_image)
+            status = 'success' if image_ok else 'fail'
+            detail = f"{greeting_detail}；{image_detail}"
+        restored, restore_detail = _restore_source_page(source_url)
+        if not restored and status == 'success':
+            detail = f"{detail}；警告: {restore_detail}"
+        elif not restored:
+            detail = f"{detail}；{restore_detail}"
+        else:
+            detail = f"{detail}；{restore_detail}"
+        return status, detail
 
     # 4. 处理打招呼弹窗
     popup = handle_greet_popup(greeting_text)

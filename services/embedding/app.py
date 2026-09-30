@@ -6,13 +6,14 @@ from fastembed import TextEmbedding
 from pydantic import BaseModel, Field
 
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "jinaai/jina-embeddings-v2-base-zh")
+CACHE_DIR = os.getenv("FASTEMBED_CACHE_DIR", "/tmp/fastembed_cache")
 model: TextEmbedding | None = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global model
-    model = TextEmbedding(model_name=MODEL_NAME)
+    model = TextEmbedding(model_name=MODEL_NAME, cache_dir=CACHE_DIR)
     yield
     model = None
 

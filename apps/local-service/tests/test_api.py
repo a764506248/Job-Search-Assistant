@@ -496,8 +496,21 @@ def test_automation_config_uses_profile_and_library_rules(tmp_path) -> None:
     result = response.json()
     assert result["searchKeywords"] == ["AI Agent 工程师"]
     assert result["targetCities"] == ["北京"]
+    assert result["cityCode"] == "101010100"
     assert result["minimumSuitabilityScore"] == 60
     assert result["matchingRules"][0]["patterns"] == ["外包", "驻场"]
+
+
+def test_automation_config_prefers_explicit_boss_city_code(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.put(
+        "/v1/profile",
+        json={"data": {"cities": ["北京"], "bossCityCode": "custom-code"}},
+    )
+
+    result = client.get("/v1/automation/config").json()
+
+    assert result["cityCode"] == "custom-code"
 
 
 def test_analyze_and_plan_atomically_saves_matches_and_generates_greeting(tmp_path) -> None:

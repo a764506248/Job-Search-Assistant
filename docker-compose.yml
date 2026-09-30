@@ -47,9 +47,11 @@ services:
       - "127.0.0.1:8766:8766"
     environment:
       EMBEDDING_MODEL: jinaai/jina-embeddings-v2-base-zh
-      HF_HOME: /models/huggingface
+      FASTEMBED_CACHE_DIR: /models/fastembed
+      HF_HOME: /models/fastembed/huggingface
+      HF_HUB_DISABLE_XET: "1"
     volumes:
-      - embedding-models:/models/huggingface
+      - embedding-models:/models/fastembed
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=3)"]
       interval: 10s
