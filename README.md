@@ -2,6 +2,10 @@
 
 面向 Boss 直聘的智能求职辅助产品。通过浏览器扩展获取职位 JD，由本地知识库检索用户的真实项目与简历资料，再结合云端大模型生成匹配分析、定制简历和个性化问候语。
 
+![Job Search Assistant 动漫风简历库产品展示](docs/assets/job-search-assistant-dashboard-anime.png)
+
+> 产品功能示意图已经过去敏与动漫化处理；其中人物、简历、文件名和模型信息均为虚构内容，不对应真实用户或企业。
+
 ## 许可证
 
 本项目以 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供源码：允许个人学习、研究、实验、修改和其他非商业用途，也可在保留许可证的前提下分发；**不允许商业使用**。
@@ -108,11 +112,18 @@ docker compose up -d --build
 
 仓库通过 GitHub Actions 将 Web、本地 API 和 Embedding 服务分别发布到 GHCR。三个镜像不是让用户分别手动启动的；推荐使用仓库提供的 `docker-compose.release.yml` 一次性拉取、编排和启动：
 
-| Compose 服务 | GHCR 镜像 | 作用 | 对外端口 |
+#### Docker 地址
+
+- 管理后台：<http://127.0.0.1:8765>
+- 本地 API：<http://127.0.0.1:8765/v1>
+- Embedding 健康检查：<http://127.0.0.1:8766/health>
+- GHCR 镜像命名空间：`ghcr.io/a764506248`
+
+| Compose 服务 | 完整 GHCR 镜像地址 | 作用 | 对外端口 |
 |---|---|---|---|
-| `web` | `job-search-assistant-web` | Vue 管理后台，并将同源 `/v1` 请求反向代理到本地 API | `127.0.0.1:8765` |
-| `local-service` | `job-search-assistant-local-service` | FastAPI、SQLite、简历处理、规则与投递记录 | 仅 Compose 内部访问 |
-| `embedding` | `job-search-assistant-embedding` | 本地向量模型和语义检索 | `127.0.0.1:8766` |
+| `web` | `ghcr.io/a764506248/job-search-assistant-web:latest` | Vue 管理后台，并将同源 `/v1` 请求反向代理到本地 API | `127.0.0.1:8765` |
+| `local-service` | `ghcr.io/a764506248/job-search-assistant-local-service:latest` | FastAPI、SQLite、简历处理、规则与投递记录 | 仅 Compose 内部访问 |
+| `embedding` | `ghcr.io/a764506248/job-search-assistant-embedding:latest` | 本地向量模型和语义检索 | `127.0.0.1:8766` |
 
 ![Docker Compose 三容器部署架构](docs/assets/docker-deployment.svg)
 
