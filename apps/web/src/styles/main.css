@@ -220,7 +220,11 @@ td small { color: var(--muted); }
 .vector-record-content { min-height: 0; flex: 1; margin: 14px 0; padding: 12px 14px; border: 1px solid #e5ebe7; border-radius: 8px; background: #fff; color: var(--text); font-size: 11px; line-height: 1.75; white-space: pre-wrap; overflow: hidden; overflow-wrap: anywhere; mask-image: linear-gradient(to bottom, #000 82%, transparent); }
 .vector-record footer { padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); color: var(--brand); font-size: 9px; font-weight: 700; }
 .match-result { margin-bottom: 18px; overflow: hidden; }
-.job-tracking-panel { margin-bottom: 18px; overflow: hidden; }
+.job-tracking-modal .ant-modal { max-width: calc(100vw - 32px); }
+.job-tracking-modal .ant-modal-content { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 80px rgba(17, 39, 31, .22); }
+.job-tracking-modal .ant-modal-header { margin: 0; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); }
+.job-tracking-modal .ant-modal-body { padding: 0; }
+.job-tracking-modal .ant-modal-close { top: 17px; right: 18px; }
 .job-detail-panel { margin-bottom: 18px; overflow: hidden; }
 .job-detail-panel .panel-heading p { margin: 5px 0 0; color: var(--muted); }
 .snapshot-detail-grid { padding: 18px 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; border-bottom: 1px solid var(--line); }

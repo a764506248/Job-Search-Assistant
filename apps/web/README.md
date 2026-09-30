@@ -13,6 +13,8 @@
 - `src/styles/`：全局视觉样式及 Ant Design Vue 适配；
 - `src/main.ts`：Vite 应用入口；
 
+职位快照页面的“跟进”操作使用 Ant Design Vue 弹窗。当前表单连接旧版 `/v1/jobs/{id}/tracking` 兼容接口；目标模型是“求职申请 + 阶段事件时间线”，在对应数据库表和 API 完成前，不得把两个布尔字段描述为完整投递反馈闭环。
+
 开发约束：本项目当前在 `src/main.ts` 中按需全局注册 Ant Design Vue 组件。模板新增 `a-*` 标签时，必须同步导入并 `.use(...)` 注册对应组件；生产构建通过并不能证明未注册组件已经正常渲染。完整检查规则见项目根目录 `AGENTS.md`。
 - `nginx.conf`：SPA 路由回退，并将 `/v1`、`/docs`、`/openapi.json` 转发到 FastAPI；
 - `Dockerfile`：构建只包含静态资源的 Web 镜像。

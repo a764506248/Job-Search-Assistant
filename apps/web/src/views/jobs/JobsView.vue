@@ -50,16 +50,16 @@
       </div>
     </section>
 
-    <section v-if="editingJob" class="panel job-tracking-panel">
-      <div class="panel-heading"><div><p class="eyebrow">APPLICATION OUTCOME</p><h2>{{ editingJob.title }} · 投递跟进</h2></div><a-button size="small" @click="editingJob = null">关闭</a-button></div>
-      <form class="data-form job-tracking-form" @submit.prevent="saveTracking">
+    <a-modal v-model:open="trackingOpen" width="720px" wrap-class-name="job-tracking-modal" :footer="null" centered destroy-on-close @after-close="closeTracking">
+      <template #title><div v-if="editingJob" class="snapshot-modal-title"><strong>{{ editingJob.title }} · 投递跟进</strong><span>{{ editingJob.companyName }}</span></div></template>
+      <form v-if="editingJob" class="data-form job-tracking-form" @submit.prevent="saveTracking">
         <div class="tracking-switches"><label><input v-model="trackingForm.hasCommunicated" type="checkbox" /> 已产生沟通</label><label><input v-model="trackingForm.hasInterview" type="checkbox" /> 已获得面试</label></div>
         <label>生成的问候语<textarea v-model.trim="trackingForm.generatedGreeting" rows="3" placeholder="保存实际生成或发送给招聘者的问候语"></textarea></label>
         <div class="form-row"><label>投递简历类型<select v-model="trackingForm.resumeVariant"><option value="default">默认简历</option><option value="optimized">针对 JD 优化简历</option></select></label><label>关联简历 ID<input v-model.number="trackingForm.generatedResumeId" type="number" min="1" placeholder="简历库记录 ID" /></label></div>
         <label>简历优化说明<textarea v-model.trim="trackingForm.resumeOptimization" rows="4" placeholder="例如：突出 LangGraph、RAG、FastAPI 项目，弱化与 JD 无关经历"></textarea></label>
-        <div class="form-actions"><a-button type="primary" html-type="submit" :loading="savingTracking">保存跟进数据</a-button></div>
+        <div class="form-actions"><a-button @click="trackingOpen = false">取消</a-button><a-button type="primary" html-type="submit" :loading="savingTracking">保存跟进数据</a-button></div>
       </form>
-    </section>
+    </a-modal>
 
     <section class="panel table-panel">
       <div v-if="loading" class="library-empty">正在读取职位数据…</div>
@@ -100,6 +100,7 @@ const match = ref<{ job: StoredJob; result: JobMatch } | null>(null)
 const showCreate = ref(false)
 const creating = ref(false)
 const editingJob = ref<StoredJob | null>(null)
+const trackingOpen = ref(false)
 const savingTracking = ref(false)
 const detailJob = ref<StoredJob | null>(null)
 const detailOpen = ref(false)
@@ -204,7 +205,10 @@ function editTracking(job: StoredJob) {
     generatedResumeId: job.generatedResumeId,
     resumeOptimization: job.resumeOptimization || '',
   })
+  trackingOpen.value = true
 }
+
+function closeTracking() { editingJob.value = null }
 
 async function saveTracking() {
   if (!editingJob.value) return
@@ -217,7 +221,7 @@ async function saveTracking() {
       resumeOptimization: trackingForm.resumeOptimization || undefined,
     })
     await load()
-    editingJob.value = null
+    trackingOpen.value = false
     message.success('投递跟进数据已保存')
   } catch (error) { message.error((error as Error).message) }
   finally { savingTracking.value = false }

@@ -15,3 +15,13 @@ coverage/
 data/
 generated/
 output/
+
+# BOSS automation runtime state (generated in the selected work directory)
+/batch_state.json
+/current_jd.json
+/delivery_outbox.json
+/jd_to_read.json
+/page_state.json
+/serial_progress.json
+/stream_progress.json
+/surface_cache.json
