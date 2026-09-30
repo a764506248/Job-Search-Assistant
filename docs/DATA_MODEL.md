@@ -30,6 +30,9 @@ erDiagram
     DELIVERY_PLAN ||--o{ DELIVERY_ITEM : contains
     DELIVERY_ITEM }o--|| JOB_POSTING : targets
     DELIVERY_ITEM }o--o| GENERATED_ARTIFACT : uses
+    JOB_POSTING ||--o| APPLICATION : tracked_as
+    APPLICATION ||--o{ APPLICATION_EVENT : records
+    APPLICATION }o--o| DELIVERY_ITEM : originates_from
 ```
 
 ## 3. 用户档案
@@ -196,6 +199,8 @@ erDiagram
 ```
 
 定制简历作为生成物保存，不覆盖默认简历。
+
+默认投递图片是简历记录派生出的 PDF 首页 PNG，不是任意文件路径。当前配置接口用 `defaultResumeImageAvailable` 表示是否已有可发送默认图片，用 `sendResumeImage` 表示用户是否明确允许随投递发送；二者必须同时为 `true` 才能进入图片发送流程。
 
 ## 9. 默认问候语
 
@@ -365,17 +370,22 @@ erDiagram
 - `blocked`
 - `paused_risk`
 
-## 16. 本地 API 草案
+## 16. 本地 API
+
+本节区分当前已实现接口与目标接口。当前运行时契约以 FastAPI `/openapi.json` 为准；未实现的计划/申请接口不能作为现有调用依据。
 
 ### 16.1 配对与健康检查
 
 ```text
 GET  /v1/health
-POST /v1/pairing/start
-POST /v1/pairing/complete
+GET  /v1/automation/config
 ```
 
+`GET /v1/automation/config` 返回目标岗位、城市、关键词、最低薪资、每日目标、双阈值、规则、默认问候语、`sendResumeImage` 和 `defaultResumeImageAvailable`。配对接口仍是目标设计，当前尚未形成完整服务端认证闭环。
+
 ### 16.2 用户和求职目标
+
+以下 `career-targets` 接口是目标设计，当前求职目标仍保存在 profile/library 数据中，尚未提供独立 REST 资源：
 
 ```text
 GET    /v1/profile
@@ -387,6 +397,8 @@ DELETE /v1/career-targets/{id}
 ```
 
 ### 16.3 项目库
+
+以下 GitHub 同步与事实确认接口是目标设计；当前实现通过 `/v1/library/projects` 管理项目记录：
 
 ```text
 POST /v1/projects/import/github
@@ -402,28 +414,34 @@ PUT  /v1/projects/{id}/tags
 
 ```text
 POST /v1/resumes/import
-GET  /v1/resumes
-POST /v1/resumes/{id}/set-default
-GET  /v1/greetings
-POST /v1/greetings
-PUT  /v1/greetings/{id}
+GET  /v1/resumes/default-image
+GET  /v1/resumes/{id}/preview-image
+PUT  /v1/resumes/{id}/default-image
+POST /v1/resumes/{id}/extract-projects
+GET  /v1/library/{kind}
+POST /v1/library/{kind}
+PUT  /v1/library/{kind}/{id}
+DELETE /v1/library/{kind}/{id}
 ```
+
+`GET /v1/resumes/default-image` 只返回数据库中已选默认简历的派生首页图片。不存在时返回 404；扩展和 Skill 不得回退为读取任意本地路径。
 
 ### 16.5 职位分析
 
 ```text
 POST /v1/jobs/capture
-POST /v1/jobs/{id}/analyze
-GET  /v1/jobs/{id}/analysis
-POST /v1/jobs/analyze-batch
-GET  /v1/tasks/{taskId}/events
 POST /v1/jd/analyze
 POST /v1/jobs/evaluate
+POST /v1/jobs/match
+POST /v1/jobs/analyze-and-plan
+POST /v1/jobs/{id}/material-preview
 ```
 
-`/v1/jd/analyze` 只负责识别要求和风险信号；`/v1/jobs/evaluate` 再根据用户配置的规则动作决定使用定制材料、默认材料或禁止投递，避免把单个用户的偏好写死在解析器中。
+`/v1/jobs/analyze-and-plan` 是自动投递的原子入口，一次完成职位快照幂等落库、JD 解析、规则判断、RAG 匹配、双阈值决策、问候语计划和默认图片可用性返回。`/v1/jd/analyze`、`/v1/jobs/evaluate` 与 `/v1/jobs/match` 保留为单能力接口。
 
 ### 16.6 材料生成
+
+以下通用 artifact 接口是目标设计。当前已实现的是 `POST /v1/jobs/{id}/material-preview` 以及简历模板示例接口：
 
 ```text
 POST /v1/analyses/{id}/artifacts
@@ -431,20 +449,27 @@ GET  /v1/artifacts/{id}
 POST /v1/artifacts/{id}/regenerate
 ```
 
-### 16.7 投递计划
+### 16.7 当前投递记录
 
 ```text
-POST /v1/delivery-plans
-GET  /v1/delivery-plans/{id}
-POST /v1/delivery-plans/{id}/start
-POST /v1/delivery-plans/{id}/pause
-POST /v1/delivery-plans/{id}/resume
-POST /v1/delivery-plans/{id}/stop
-POST /v1/delivery-items/{id}/result
-POST /v1/delivery-plans/{id}/pause-risk
+POST /v1/deliveries
+GET  /v1/deliveries
 ```
 
-本地服务只生成计划和记录结果，不能直接持有 Boss 登录凭据。实际投递由扩展在 Boss 页面上下文中执行。
+本地服务只分析、计划单条材料并记录结果，不能持有 Boss 登录凭据。当前批次与断点由 Skill 工作目录中的状态文件管理；实际投递由 Kimi 在 BOSS 页面执行，默认简历图片由项目 Chrome 扩展注入。完整 `delivery-plans` 状态机仍是目标设计，尚未实现为 API。
+
+### 16.8 职位快照与诊断
+
+```text
+GET    /v1/jobs
+POST   /v1/jobs
+PUT    /v1/jobs/{id}/tracking
+DELETE /v1/jobs/{id}
+POST   /v1/client-logs
+GET    /v1/client-logs
+```
+
+当前跟进弹窗仍写入兼容 tracking 字段；申请与阶段事件接口见第 21 节，属于下一阶段正式契约。
 
 ## 17. 标准错误结构
 
@@ -481,6 +506,8 @@ POST /v1/delivery-plans/{id}/pause-risk
 ## 19. 投递反馈闭环
 
 `has_communicated` 和 `has_interview` 只能用于快速展示，不能作为分析的唯一事实来源。正式统计需要保存阶段事件和实际使用的材料版本。
+
+职位快照页面中的“跟进”是该模型的人工录入入口：点击后打开弹窗，读取当前职位关联的活动申请及事件时间线。弹窗保存的是新增或更正后的申请/阶段事件，不直接把两个布尔字段当作完整业务状态。关闭或取消弹窗不得产生写入。
 
 ### 19.1 求职申请
 
@@ -531,6 +558,19 @@ POST /v1/delivery-plans/{id}/pause-risk
 
 浏览器可自动确认的事件标记为 `source=browser`；面试结果和 Offer 默认由用户手动确认，禁止模型自行推断。
 
+### 19.3 兼容汇总字段
+
+- `has_communicated = true`：存在 `delivered` 或后续任一有效申请事件。
+- `has_interview = true`：存在 `interview_invited`、`interview_round_completed` 或 `offer_received` 事件。
+- 两个字段由事件聚合刷新，仅用于列表筛选和快速展示；分析、统计和时间线必须查询原始事件。
+- 旧版仅有布尔值的数据迁移时，可创建 `source=legacy` 的对应事件，并保留迁移时间与原始值。
+
+### 19.4 跟进弹窗数据契约
+
+弹窗至少读取以下数据：职位摘要、活动申请、实际使用的简历与问候语、当前阶段、完整事件时间线。新增事件请求必须包含 `stage`、`occurred_at`、`source`，并可按事件类型携带 `result`、`round` 和 `notes`。
+
+保存事件与刷新申请当前状态应在同一事务中完成。事件采用追加写入；需要纠错时记录更正关系或审计信息，不静默覆盖已经用于统计的历史事实。
+
 ## 20. 统计口径
 
 所有比率必须同时返回分子、分母、时间范围和筛选条件，样本过小时展示“样本不足”，不得只展示百分比。
@@ -555,9 +595,11 @@ POST /v1/delivery-plans/{id}/pause-risk
 - 使用的项目、个人优势与向量证据实体 ID；
 - 默认/定制问候语和材料策略。
 
-## 21. 反馈分析接口规划
+## 21. 申请跟进与反馈分析接口
 
 ```text
+GET  /v1/jobs/{job_posting_id}/application
+POST /v1/jobs/{job_posting_id}/application
 POST /v1/applications/{id}/events
 GET  /v1/applications/{id}/timeline
 GET  /v1/analytics/funnel
@@ -565,5 +607,7 @@ GET  /v1/analytics/interviews
 GET  /v1/analytics/job-patterns
 POST /v1/analytics/resume-recommendations
 ```
+
+其中申请与事件接口属于跟进弹窗的正式数据契约；分析接口可分阶段实现。旧的 `PUT /v1/jobs/{id}/tracking` 只作为迁移期兼容接口，不应继续扩展新业务字段。
 
 `resume-recommendations` 只能基于已保存的投递材料快照和结果事件提出建议，输出受影响的简历字段、项目实体 ID、支持样本和反例；不得自动覆盖个人档案、项目库或默认简历。

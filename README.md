@@ -8,7 +8,7 @@
 
 由于包含非商业限制，本项目属于“源码可用（source-available）”，不属于 OSI 定义的开源软件。第三方依赖仍分别适用其自身许可证。
 
-当前阶段：MVP 基础开发。已建立浏览器扩展、本地服务、材料策略决策和 Boss JD 快照采集链路。
+当前阶段：MVP 基础开发。已建立浏览器扩展、本地服务、材料策略决策和 Boss JD 快照采集链路。Chrome 扩展当前发布为 `v0.2.3-resume-image-test`：原职位采集、分析和同步入口暂时停用，优先验证默认简历图片发送链路；相关源码仍保留，后续可恢复。职位快照跟进目前使用弹窗和兼容汇总字段，申请阶段事件模型尚在建设中。
 
 ## 产品原则
 
@@ -29,7 +29,9 @@
 
 项目内已经包含与当前本地 API 架构配套的
 [`boss-zhipin-assistant`](skills/boss-zhipin-assistant/SKILL.md) Skill。它负责流程编排，Kimi
-浏览器扩展只负责读取页面、点击和安全发送；个人档案、匹配规则、RAG、职位快照、问候语和投递记录均由本地服务管理。
+浏览器扩展负责读取页面和点击，项目自身的 Chrome 扩展负责安全发送默认简历图片；个人档案、匹配规则、RAG、职位快照、问候语和投递记录均由本地服务管理。
+
+当前 Skill 版本为 `v5.10.0`。当自动化配置同时满足 `sendResumeImage=true` 和 `defaultResumeImageAvailable=true` 时，Skill 会调用 Chrome 扩展完成“加载预览 → 确认发送”，不再使用需要本地文件访问权限的 WebBridge `upload`。确认投递配置时会明确显示“默认简历图片：已配置/未配置”；插件缺失、版本过低、预览失败或发送状态不明确时不会回退到其他文件。
 
 使用自动投递前，请先安装
 [Kimi Browser Extension](https://www.kimi.com/products/kimi-browser-extension)，再按照
@@ -37,18 +39,46 @@
 
 ## 当前能力
 
-- WXT Chrome MV3 扩展骨架；
-- Boss 职位详情 DOM 采集与变更监听；
-- 扩展到本地 FastAPI 服务的消息链路；
+- WXT Chrome MV3 扩展 `v0.2.3-resume-image-test`；
+- 从本地服务读取默认简历首页图片，并注入当前 BOSS 聊天的图片控件；
+- 图片发送前本地预览与明确确认；
+- 可拖拽、可折叠的紧凑操作面板，折叠后仍保留“加载”和“发送”按钮；
+- Skill 可在展开或折叠状态下稳定调用 `.load` / `.send` 操作入口；
+- Boss 职位详情 DOM 采集与变更监听源码已保留，测试版暂不启动；
+- 扩展到本地 FastAPI 服务的消息链路源码已保留，测试版仅启用默认简历图片接口；
 - SQLite 职位版本快照；
+- 职位快照跟进弹窗，以及沟通/面试兼容汇总字段；
 - 带原文证据位置的 JD 学历与名校背景解析；
 - 风险规则和定制/默认/阻止材料策略；
 - 可选择的简历模板、网页预览与 A4 PDF 示例；
 - Python 测试及扩展类型、生产构建检查。
 
+## Chrome 扩展：简历图片测试版
+
+每次代码推送到 GitHub 后，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
+
+先构建并在 Chrome 中加载产物：
+
+```bash
+npm run build:extension
+```
+
+1. 打开 `chrome://extensions` 并启用“开发者模式”。
+2. 点击“加载已解压的扩展程序”，选择 `apps/extension/.output/chrome-mv3`。
+3. 每次重新构建后，在扩展卡片上点击“重新加载”，随后刷新 BOSS 页面。
+4. 打开 BOSS“消息”页并选中目标联系人。
+5. 点击“仅加载图片预览”；这一步不会触碰 BOSS 上传控件。
+6. 核对图片和当前联系人后，点击“确认并发送给当前联系人”。BOSS 会在图片注入后立即发送，不会再出现第二个确认弹窗。
+
+如果不需要本地构建，也可以进入 GitHub 仓库的 **Actions → Build Chrome Extension → Artifacts**，下载 `job-search-assistant-chrome-mv3`，解压 ZIP 后选择解压目录加载。
+
+面板可以拖拽到页面其他位置；点击标题栏的 `−` 可折叠，折叠状态仍提供“加载”和“发送”按钮。拖拽时请按住标题栏空白区域，按钮点击不会触发拖动。
+
+默认图片来自 `GET http://127.0.0.1:8765/v1/resumes/default-image`。管理后台必须已选定默认简历图片；自动投递还需显式开启“随投递发送简历图片”，该开关默认关闭。
+
 ## 通信链路验证
 
-页面主世界脚本读取 Boss DOM，通过 `CustomEvent` 把结构化职位交给内容脚本；内容脚本校验载荷后，以 HTTP JSON 调用本地 FastAPI，服务最终写入 SQLite。
+完整模式下，页面主世界脚本读取 Boss DOM，通过 `CustomEvent` 把结构化职位交给内容脚本；内容脚本校验载荷后，以 HTTP JSON 调用本地 FastAPI，服务最终写入 SQLite。当前图片测试版不会注入该主世界采集脚本，只挂载简历图片操作面板。
 
 ```bash
 npm run test:extension
@@ -69,6 +99,8 @@ docker compose up -d --build
 启动后打开 <http://127.0.0.1:8765>。Compose 会同时启动基于 Vue 3 + Ant Design Vue 的独立 Web 前端、FastAPI 本地服务与 Embedding 服务。Web 容器通过同源 `/v1` 反向代理访问 FastAPI，因此扩展、Skill 和已有接口地址仍保持 `http://127.0.0.1:8765` 不变。SQLite 文件继续通过 `apps/local-service/data:/data` 挂载到服务容器，现有数据无需迁移。
 
 当前可以管理个人档案、项目、简历资料、匹配规则、模型配置和职位快照；所有修改都会持久化到本地 SQLite。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将识别结果分别写入个人档案、项目库和简历库，随后自动重建向量索引。“简历模板”提供投递版式选择、网页预览和 PDF 示例，“向量知识库”可使用 768 维的 `jinaai/jina-embeddings-v2-base-zh` 重建本地索引并测试语义检索。
+
+职位快照的“跟进”入口已经改为弹窗。当前弹窗仍通过旧版 `has_communicated`、`has_interview` 等字段保存快速摘要；PRD 目标是迁移到“求职申请 + 追加阶段事件 + 时间线”，相关数据库表和 API 尚未完成，详见 [数据模型与接口约定](docs/DATA_MODEL.md#19-投递反馈闭环)。
 
 Embedding 服务运行在 Docker 中，仅监听 `127.0.0.1:8766`。模型文件保存在 Docker 持久化卷，首次启动需要下载，后续启动会直接复用。原始资料、文本分片和向量都保存在本机。
 

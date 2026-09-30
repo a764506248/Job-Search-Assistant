@@ -2,20 +2,26 @@
 
 ## 1. 架构目标
 
-系统采用“浏览器扩展 + 独立 Web 前端 + 本地 API + 云端模型”的结构：
+系统采用“自动投递 Skill + Kimi WebBridge + 项目 Chrome 扩展 + 独立 Web 前端 + 本地 API + 云端模型”的结构：
 
-- 浏览器扩展只负责招聘网站适配、交互和受控投递。
+- BOSS Skill 负责编排搜索、采集、原子分析、投递和收尾报告。
+- Kimi WebBridge 负责使用真实登录会话读取和点击 BOSS 页面，并安全发送问候语。
+- 项目 Chrome 扩展当前只负责默认简历图片预览与发送；旧采集链路暂时停用。
 - Web 前端只负责本地资料管理和结果展示，通过同源 `/v1` 调用 API。
-- 本地服务负责敏感数据、知识库、RAG、文件生成和决策编排。
+- 本地服务负责敏感数据、知识库、RAG、文件生成、决策编排以及申请阶段事件的事务性存储。
 - 云端模型负责结构化语义理解和文案生成，不保存系统主数据。
 
 ## 2. 系统组件
 
 ```mermaid
 flowchart LR
-    U["用户"] --> EXT["浏览器扩展"]
-    EXT --> BOSS["Boss 直聘页面与接口"]
-    EXT --> WEB["Web 入口 / Nginx :8765"]
+    U["用户"] --> SKILL["BOSS Skill v5.10+"]
+    SKILL --> KIMI["Kimi WebBridge :10086"]
+    KIMI --> BOSS["Boss 直聘页面"]
+    SKILL --> IMGEXT["图片扩展 v0.2.3+"]
+    IMGEXT --> BOSS
+    IMGEXT --> WEB["Web 入口 / Nginx :8765"]
+    SKILL --> WEB
     U --> WEB
     WEB --> API["FastAPI 本地 API :8765（容器内）"]
 
@@ -40,6 +46,8 @@ flowchart LR
 - 将 Boss 相关代码封装为平台适配器。
 
 不建议直接复制原项目的工作流和数据结构，应重新定义产品领域模型，并保留开源许可证声明要求。
+
+当前部署的是 `v0.2.3-resume-image-test`。Content Script 只挂载 Shadow DOM 图片面板，后台脚本读取默认简历图片；不注入旧 `boss.js`，也不启动职位采集、分析或同步。面板可拖拽、可折叠，并始终保留供 Skill 调用的 `.load` / `.send` 主操作入口。
 
 ### 3.2 本地服务
 
@@ -104,7 +112,7 @@ packages/
 
 ## 5. 关键流程
 
-### 5.1 扩展启动
+### 5.1 图片扩展启动（当前实现）
 
 ```mermaid
 sequenceDiagram
@@ -112,11 +120,14 @@ sequenceDiagram
     participant Ext as 浏览器扩展
     participant Local as 本地服务
 
-    Ext->>Local: 健康检查与配对认证
-    Local-->>Ext: 本地用户及配置摘要
-    Ext->>Page: 注入页面适配脚本
-    Page-->>Ext: 职位列表、详情和页面事件
-    Ext->>Ext: 挂载 Shadow DOM UI
+    Ext->>Page: 挂载 Shadow DOM 图片面板
+    User->>Ext: 加载默认图片预览
+    Ext->>Local: GET /v1/resumes/default-image
+    Local-->>Ext: 默认简历首页图片
+    Ext-->>User: 仅在扩展面板显示预览
+    User->>Ext: 确认发送
+    Ext->>Page: File + DataTransfer 注入聊天图片控件
+    Page-->>User: 图片消息立即发送并显示
 ```
 
 ### 5.2 项目导入与知识库建立
@@ -192,16 +203,17 @@ flowchart TD
     I --> J
 ```
 
-### 5.6 任务启动和自动投递
+### 5.6 当前自动投递流程
 
-1. 本地服务创建投递计划，状态为 `draft`。
-2. 扩展展示职位、分数、风险、材料策略和证据。
-3. 用户启动整批任务，计划进入 `running`。
-4. 扩展按顺序执行 Boss 沟通请求，不再逐项确认。
-5. 成功后自动发送对应的问候语。
-6. 记录接口结果、时间和错误。
-7. 用户可以随时暂停、继续或停止。
-8. 检测到平台风控、频率限制或账号上限时，计划进入 `paused_risk`，停止后续任务。
+1. Skill 读取 `GET /v1/automation/config`，展示目标、城市、薪资、双阈值、规则、默认问候语、默认图片配置状态和图片发送开关；用户确认后才开始。
+2. Skill 必须先按 `searchKeywords` 搜索，再分批读取岗位卡；禁止直接消费无关键词推荐页。
+3. 每个完整 JD 交给 `POST /v1/jobs/analyze-and-plan`，原子完成快照落库、规则、RAG、双阈值决策和问候语计划。
+4. APPROVE 后，Kimi 点击“立即沟通”，进入聊天后重新校验目标公司和岗位。
+5. Kimi 填写并显式发送问候语；只有目标会话出现相同消息气泡且输入框清空才算成功。
+6. 若 `sendResumeImage=true` 且 `defaultResumeImageAvailable=true`，Skill 点击图片扩展 `.load`，等待“尚未发送”，再点击 `.send`。BOSS 在文件注入后立即发送。
+7. 图片插件缺失、版本过低、预览失败或状态不明确时，本条记录失败，不回退到 WebBridge 本地文件上传或其他文件。
+8. Skill 将结果写入 `POST /v1/deliveries`；服务不可用时进入本地 outbox，后续重试。
+9. 达到每日目标、遇到平台上限、关键词穷尽或用户停止时，强制生成 HTML 投递汇总。
 
 ## 6. 匹配评分
 
@@ -278,9 +290,11 @@ flowchart TD
 - 识别到的项目经历写入项目库，数据库写入使用同一个 SQLite 事务；
 - 入库成功后自动尝试重建向量索引，Embedding 服务离线时保留资料并返回明确提示。
 
-## 8. 扩展与本地服务通信
+## 8. 浏览器执行层与本地服务通信
 
-- 链路：Boss 主世界采集脚本 → DOM `CustomEvent` → 内容脚本校验 → HTTP JSON → FastAPI → SQLite。
+- 当前图片链路：扩展后台 → `GET /v1/resumes/default-image` → base64 扩展消息 → Content Script `File/DataTransfer` → BOSS 图片控件。
+- 当前投递链路：Skill → Kimi WebBridge → BOSS 页面；Skill → `/v1/jobs/analyze-and-plan` 与 `/v1/deliveries` → SQLite。
+- 保留但暂停的采集链路：Boss 主世界采集脚本 → DOM `CustomEvent` → 内容脚本校验 → HTTP JSON → FastAPI → SQLite。
 - 协议：HTTP JSON；需要任务进度时使用 SSE。
 - 地址：统一使用 `http://127.0.0.1:8765`；Nginx 将 `/v1` 转发到只在 Compose 内网开放的 FastAPI。
 - 认证目标：首次配对生成高熵令牌，扩展后续请求携带令牌。当前 MVP 已定义 `JSA_LOCAL_TOKEN`/`X-Local-Token` 字段，但服务端认证闭环尚未完成，现阶段仍依赖回环地址和 CORS 限制，禁止对局域网或公网暴露。
@@ -298,7 +312,7 @@ flowchart TD
 | Web → Nginx → FastAPI | Compose 健康检查与 HTTP 冒烟测试 | 已自动化/启动时验证 |
 | 已登录 Boss 页面全链路 | Chrome 加载解压扩展后现场冒烟 | 待验证 |
 
-当前扩展已在 Boss 页面挂载 Shadow DOM 职位分析浮层，可显示本地混合检索得到的岗位适合度、定制可信度、风险提示、材料策略与证据；自动沟通和投递控制尚未接入。
+当前已现场验证默认简历图片能够发送到指定 BOSS 会话。职位分析浮层源码与测试仍保留，但图片测试版不会挂载该浮层。自动沟通由 Skill + Kimi 执行，不由项目扩展独立执行。
 
 ## 9. 安全边界
 
@@ -322,21 +336,24 @@ flowchart TD
 | Boss 页面结构变化 | 停止自动操作并提示适配器异常 |
 | Boss 频率限制 | 立即暂停整批任务 |
 | 问候语发送失败 | 记录失败，不重复建立沟通关系 |
+| 图片扩展缺失或版本过低 | 本条失败，提示加载 v0.2.3+ 并刷新 BOSS 页面，不回退其他上传方式 |
+| 默认图片未配置 | 不发送图片并明确提示；禁止选择任意本地文件代替 |
+| 图片预览或发送状态不明确 | 停止本条图片流程，保留诊断，不重复盲发 |
 
 ## 11. 技术验证项
 
 进入正式开发前需要制作最小验证原型：
 
-1. 扩展能否稳定读取 Boss 新旧职位页面的 JD。
-2. Boss 是否支持按职位切换附件简历或发送 PDF/DOCX。
-3. 本地服务与扩展配对在 Chrome/Edge 中是否稳定。
+1. Skill 能否稳定读取 Boss 新旧职位页面的 JD 和公司规模。
+2. 默认简历首页图片能否在不同 BOSS 页面版本中稳定注入并确认送达。
+3. Kimi、项目图片扩展和本地服务在 Chrome/Edge 中是否稳定协作且不会重复发送。
 4. PDF/DOCX 导入后能否可靠保留事实和段落来源。
 5. 中文 Embedding 与混合检索对真实 JD 的效果。
 6. “985/211 优先、仅限、不限、团队背景”四类语句的识别效果。
 
 ## 12. 投递反馈与简历优化闭环
 
-后续分析链路以职位快照和申请阶段事件为事实源：
+投递跟进与后续分析链路以职位快照和申请阶段事件为事实源：
 
 ```mermaid
 flowchart LR
@@ -366,3 +383,13 @@ flowchart LR
 5. AI 只负责归纳高频 JD 特征、成功/失败差异和优化建议；面试结果必须来自用户确认或可验证页面状态。
 6. 优化建议先形成草稿，明确引用相关 JD、项目和样本数量，经用户确认后才能更新档案、项目或默认简历。
 7. 样本不足时返回分子/分母和低置信度提示，不能把相关性描述成因果关系。
+
+### 12.1 职位快照跟进入口
+
+- 职位快照列表中的“跟进”按钮打开独立弹窗，不改变列表布局，也不在页面顶部展开表单。
+- 弹窗加载职位关联的活动申请、投递材料摘要和阶段事件时间线。
+- 用户追加事件后，本地 API 在一个事务内写入事件并刷新申请当前阶段；前端随后重新加载列表摘要与时间线。
+- 关闭或取消仅丢弃本次未保存编辑，不写数据库。
+- `has_communicated`、`has_interview` 是兼容汇总字段；漏斗、面试结果和优化分析必须基于阶段事件。
+
+当前实现状态：职位快照已经使用弹窗承载旧版跟进表单，但后端仍以 `PUT /v1/jobs/{id}/tracking` 和两个布尔字段为主。申请表、阶段事件表、时间线 API 与新版弹窗字段仍属于待实现工作，不能在 README 或界面中标记为已完成。

@@ -181,3 +181,47 @@ def test_deliver_inplace_uses_webbridge_click_for_chat_button(monkeypatch) -> No
 
     assert status == "fail"
     assert selectors == [".op-btn-chat"]
+
+
+def test_send_default_resume_image_uses_extension_preview_then_send(monkeypatch) -> None:
+    responses = iter([
+        {"ok": True, "version": "0.2.2"},
+        {"ready": True, "text": "已在扩展内加载 resume.png，尚未发送。"},
+        True,
+        "已将图片交给 BOSS 发送，请在聊天记录中确认图片消息已出现。",
+    ])
+    monkeypatch.setattr(deliver_engine, "evaluate", lambda _code: next(responses))
+    monkeypatch.setattr(deliver_engine.time, "sleep", lambda _seconds: None)
+
+    ok, detail = deliver_engine._send_default_resume_image(True)
+
+    assert ok is True
+    assert detail == "默认简历图片已通过插件发送（v0.2.2）"
+
+
+def test_send_default_resume_image_does_not_fallback_when_plugin_missing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        deliver_engine,
+        "evaluate",
+        lambda _code: {"ok": False, "reason": "plugin_missing"},
+    )
+
+    ok, detail = deliver_engine._send_default_resume_image(True)
+
+    assert ok is False
+    assert "plugin_missing" in detail
+    assert "v0.2.3" in detail
+
+
+def test_send_default_resume_image_rejects_old_plugin(monkeypatch) -> None:
+    monkeypatch.setattr(
+        deliver_engine,
+        "evaluate",
+        lambda _code: {"ok": False, "reason": "plugin_too_old", "version": "0.2.2"},
+    )
+
+    ok, detail = deliver_engine._send_default_resume_image(True)
+
+    assert ok is False
+    assert "plugin_too_old" in detail
+    assert "v0.2.3" in detail

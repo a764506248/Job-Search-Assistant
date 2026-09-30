@@ -9,8 +9,8 @@
 | 管理后台与本地数据库 | Docker Desktop、Docker Compose v2、端口 8765 可用 |
 | 向量知识库 | Embedding 容器、端口 8766 可用、首次下载模型所需网络 |
 | 简历 AI 识别、项目提取、问候语和定制材料 | 管理后台中配置并验证可用的大模型 |
-| 项目自带 Chrome 扩展采集 | Node.js 22+、npm、Chrome 开发者模式、已登录 BOSS |
-| Skill 自动投递 | 已安装 BOSS Skill、Kimi Browser Extension/WebBridge、已登录 BOSS |
+| 项目自带 Chrome 简历图片扩展 | Node.js 22+、npm、Chrome 开发者模式、本地服务、已登录 BOSS |
+| Skill 自动投递 | 已安装 BOSS Skill、Kimi Browser Extension/WebBridge、项目自带图片扩展、已登录 BOSS |
 | 网页样式一致的 PDF 导出 | FastAPI 运行环境内可执行的 Chromium；否则自动降级 ReportLab |
 
 ## 2. 基础环境
@@ -95,7 +95,15 @@ http://host.docker.internal:端口
 
 同时需要保证该模型服务允许来自 Docker 的连接。互联网模型 API 可以直接使用其 HTTPS 地址。
 
-## 4. 项目自带浏览器扩展
+## 4. 项目自带浏览器扩展（v0.2.3 图片测试版）
+
+### 4.1 从 GitHub Actions 下载
+
+仓库每次 push 都会触发 `Build Chrome Extension` 工作流，构建 `@job-search-assistant/extension` 并上传品牌化 artifact：`job-search-assistant-chrome-mv3`。下载 artifact 后，再解压其中的 `job-search-assistant-chrome-mv3.zip`；Chrome 应加载 ZIP 的解压目录，而不是 ZIP 文件本身。
+
+下载路径：GitHub 仓库 **Actions → Build Chrome Extension → 对应运行记录 → Artifacts**。Actions artifact 默认保留 30 天，适合测试和阶段性交付；正式长期发布可在后续增加基于版本标签的 GitHub Release。
+
+### 4.2 本地构建
 
 不能把 `apps/extension` 源码目录直接加载到 Chrome。先在仓库根目录构建：
 
@@ -108,15 +116,24 @@ npm run build:extension
 
 1. 开启“开发者模式”；
 2. 点击“加载已解压的扩展程序”；
-3. 选择 `apps/extension/.output/chrome-mv3`；
+3. 本地构建时选择 `apps/extension/.output/chrome-mv3`；从 Actions 下载时选择 `job-search-assistant-chrome-mv3.zip` 的解压目录；
 4. 确认本地服务已启动；
-5. 登录 BOSS 直聘后再进行页面采集验证。
+5. 登录 BOSS 直聘并打开“消息”页；
+6. 重新构建后必须在扩展卡片上点击“重新加载”，再刷新 BOSS 页面。
 
-扩展依赖 `https://www.zhipin.com/*` 和 `http://127.0.0.1/*` 权限。BOSS 页面结构发生变化时，采集字段可能缺失，应当停止自动操作并查看扩展错误面板和 `/v1/client-logs`。
+当前版本只启用默认简历图片发送面板，原职位采集、分析和同步入口暂时停用，但源码和测试仍保留。面板支持拖拽和折叠；折叠后仍显示“加载”和“发送”按钮。完整手工流程为：
+
+1. 在 BOSS 消息页选中目标联系人；
+2. 点击“仅加载图片预览”，确认扩展状态包含“尚未发送”；
+3. 核对图片及联系人后点击“确认并发送给当前联系人”；
+4. 图片写入 BOSS 上传控件后会立即发送，不要再寻找或点击页面上的第二个发送按钮；
+5. 在聊天记录或联系人摘要中确认图片消息出现。
+
+扩展依赖 `https://www.zhipin.com/*` 和 `http://127.0.0.1/*` 权限，通过后台脚本读取 `GET /v1/resumes/default-image`，不需要开启 Chrome 的“允许访问文件网址”。若页面中未出现面板、找不到聊天图片控件或图片未发送，应停止自动投递并检查扩展是否已重新加载、本地服务是否在线以及 BOSS 页面结构是否变化。
 
 ## 5. Skill 与 Kimi 自动投递
 
-自动投递推荐使用 BOSS Skill 编排，由 Kimi WebBridge 负责浏览器操作，本地 API 负责档案、规则、RAG、职位快照、材料和投递记录。
+自动投递使用 BOSS Skill 编排：Kimi WebBridge 负责页面读取、联系人/岗位点击和问候语发送；项目自带 Chrome 扩展负责默认简历图片的读取、预览和注入；本地 API 负责档案、规则、RAG、职位快照、材料决策和投递记录。
 
 ### 5.1 安装 Kimi 浏览器扩展
 
@@ -165,12 +182,14 @@ python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
 - Kimi Browser Extension 已安装并连接；
 - WebBridge daemon 可通过 `http://127.0.0.1:10086` 访问；
 - Chrome 中已登录 BOSS；
-- `boss-zhipin-deliver` Skill 已安装；
+- `boss-zhipin-deliver` Skill v5.10.0 或更高版本已安装；
+- 项目自带 Chrome 扩展 v0.2.3 或更高版本已加载并刷新 BOSS 页面；
 - Skill 的本地服务地址为 `http://127.0.0.1:8765`；
 - 已在后台配置个人档案、匹配规则、默认问候语和模型；
-- 发送简历图片前，已重新导入 PDF、生成第一页图片并选为默认投递图片。
+- 发送简历图片前，已重新导入 PDF、生成第一页图片并选为默认投递图片；
+- `GET /v1/automation/config` 返回 `defaultResumeImageAvailable=true`；需要随投递发送时，还必须由用户明确设置 `sendResumeImage=true`。
 
-不要让项目自带扩展和 Kimi 同时执行自动点击或发送。两者可以同时读取和展示信息，但必须只有一个浏览器写操作执行者，否则可能重复采集、重复沟通或发送到错误会话。
+Kimi 与项目扩展可以同时存在，但职责必须固定：Kimi 不再调用 WebBridge `upload` 上传本地图片，项目扩展不执行职位选择或问候语发送。Skill 只通过扩展稳定的 `.load` / `.send` 入口触发图片流程，面板是否折叠、是否被拖动不影响调用。
 
 默认简历图片包含个人信息，自动发送默认关闭，必须由用户明确启用。真实投递前还需要完成一次受控的 BOSS 页面冒烟测试。
 
@@ -235,7 +254,9 @@ docker compose start local-service web
 | Embedding 长时间 starting | 首次模型下载网络、Docker 内存、`docker compose logs embedding` |
 | 模型验证超时 | Base URL、Key、模型 ID、本地模型是否使用 `host.docker.internal` |
 | Chrome 提示清单文件缺失 | 加载了源码目录；应重新构建并加载 `.output/chrome-mv3` |
-| 扩展一直显示连接中 | `http://127.0.0.1:8765/v1/health`、扩展权限和浏览器控制台 |
+| BOSS 页面没有图片面板 | 扩展是否为 v0.2.3+、是否点击“重新加载”、BOSS 页面是否已刷新 |
+| 图片一直加载失败 | `/v1/resumes/default-image`、默认图片配置、本地服务、扩展后台控制台 |
+| 找不到聊天图片控件 | 是否已进入“消息”并选中联系人、BOSS 页面结构是否变化 |
 | 简历 AI 识别回退本地解析 | 选中模型不可用、超时或未配置兜底模型 |
 | PDF 与网页预览不一致 | Docker 中没有 Chromium，当前使用 ReportLab 降级 |
 | Kimi 无法控制浏览器 | WebBridge 10086、扩展连接状态、BOSS 登录状态 |

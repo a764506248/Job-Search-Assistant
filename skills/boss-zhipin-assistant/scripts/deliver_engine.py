@@ -38,8 +38,6 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SKILL_DIR)
 
 from scripts.profile_loader import WORK_DIR, DAILY_TARGET, GREETING_TEXT, SEND_RESUME_IMAGE
-from scripts.local_service_client import download_default_resume_image
-
 from scripts.webbridge_client import (
     SESSION, api, click as webbridge_click, fill as webbridge_fill, evaluate, navigate, handle_popup,
     ensure_active_tab, health_check,
@@ -544,69 +542,81 @@ def _send_verified_greeting(job_info, greeting_text=None):
 
 
 def _send_default_resume_image(enabled=None):
-    """发送用户明确启用且在简历库中选中的默认简历首页图。"""
+    """通过已安装的 Chrome 测试插件发送默认简历首页图。"""
     if enabled is None:
         enabled = SEND_RESUME_IMAGE
     if not enabled:
         return True, '简历图片发送未启用'
 
-    image_path, detail = download_default_resume_image()
-    if not image_path:
-        return False, detail
-    try:
-        prepared = evaluate("""
+    prepared = evaluate("""
+    (function(){
+        var host = document.querySelector('#job-search-assistant-image-test-host');
+        var root = host && host.shadowRoot;
+        if (!root) return {ok:false, reason:'plugin_missing'};
+        var version = (host.dataset && host.dataset.version) || '0.0.0';
+        var parts = version.split('.').map(function(value){ return parseInt(value, 10) || 0; });
+        var compatible = parts[0] > 0 || parts[1] > 2 || (parts[1] === 2 && parts[2] >= 3);
+        if (!compatible) return {ok:false, reason:'plugin_too_old', version:version};
+        var load = root.querySelector('button.load');
+        var send = root.querySelector('button.send');
+        if (!load || !send) return {ok:false, reason:'plugin_incompatible'};
+        load.click();
+        return {ok:true, version:version};
+    })()
+    """) or {}
+    if not prepared.get('ok'):
+        reason = prepared.get('reason', 'unknown')
+        return False, f'简历图片插件不可用（{reason}），请加载 v0.2.3 或更高版本并刷新 BOSS 页面'
+
+    ready = False
+    load_error = ''
+    for _ in range(20):
+        time.sleep(0.5)
+        state = evaluate("""
         (function(){
-            var inputs = Array.from(document.querySelectorAll('input[type="file"]'));
-            var candidates = inputs.filter(function(el){
-                var accept = (el.getAttribute('accept') || '').toLowerCase();
-                return accept.indexOf('image') >= 0 || accept.indexOf('.png') >= 0;
-            });
-            var target = candidates.find(function(el){
-                return !!el.closest('.chat-input, .chat-editor, .chat-operate, .chat-conversation, .conversation');
-            }) || candidates[0];
-            if (!target) return {ok:false, count:inputs.length};
-            target.id = 'jsa-default-resume-image-input';
-            return {ok:true, accept:target.getAttribute('accept') || ''};
+            var host = document.querySelector('#job-search-assistant-image-test-host');
+            var root = host && host.shadowRoot;
+            var status = root && root.querySelector('.status');
+            var send = root && root.querySelector('button.send');
+            var text = status ? status.textContent.trim() : '';
+            return {ready:!!send && !send.disabled && text.indexOf('尚未发送') >= 0, text:text};
         })()
         """) or {}
-        if not prepared.get('ok'):
-            return False, f"聊天区未找到图片上传控件（文件控件 {prepared.get('count', 0)} 个）"
+        if state.get('ready'):
+            ready = True
+            break
+        load_error = str(state.get('text', ''))
+    if not ready:
+        return False, f'默认简历图片预览加载失败: {load_error or "等待超时"}'
 
-        result = api("upload", {
-            "selector": "#jsa-default-resume-image-input",
-            "files": [image_path],
-        })
-        if not result.get("success"):
-            return False, f"简历图片写入上传控件失败: {result}"
+    sent = evaluate("""
+    (function(){
+        var host = document.querySelector('#job-search-assistant-image-test-host');
+        var root = host && host.shadowRoot;
+        var send = root && root.querySelector('button.send');
+        if (!send || send.disabled) return false;
+        send.click();
+        return true;
+    })()
+    """)
+    if not sent:
+        return False, '插件确认发送按钮不可用'
 
-        time.sleep(1.5)
-        confirmation = evaluate("""
+    for _ in range(20):
+        time.sleep(0.5)
+        status_text = str(evaluate("""
         (function(){
-            var visible = function(el){
-                var r = el.getBoundingClientRect();
-                var s = window.getComputedStyle(el);
-                return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
-            };
-            var dialogs = Array.from(document.querySelectorAll(
-                '.dialog-wrap, .dialog-container, .modal, .ant-modal-wrap, .image-preview, .upload-preview'
-            )).filter(visible);
-            for (var i = 0; i < dialogs.length; i++) {
-                var button = Array.from(dialogs[i].querySelectorAll('button, a')).find(function(el){
-                    var text = (el.textContent || '').trim();
-                    return visible(el) && !el.disabled && (text === '发送' || text === '确定');
-                });
-                if (button) { button.click(); return 'clicked:' + (button.textContent || '').trim(); }
-            }
-            return 'auto';
+            var host = document.querySelector('#job-search-assistant-image-test-host');
+            var root = host && host.shadowRoot;
+            var status = root && root.querySelector('.status');
+            return status ? status.textContent.trim() : '';
         })()
-        """) or 'auto'
-        time.sleep(2)
-        return True, f"默认简历图片已提交（{confirmation}）"
-    finally:
-        try:
-            os.unlink(image_path)
-        except OSError:
-            pass
+        """) or '')
+        if '已将图片交给 BOSS 发送' in status_text:
+            return True, f"默认简历图片已通过插件发送（v{prepared.get('version', 'unknown')}）"
+        if '没有执行发送' in status_text:
+            return False, status_text
+    return False, '插件已点击发送，但未取得发送状态'
 
 
 # ═══════════════════════════════════════════════════════════
