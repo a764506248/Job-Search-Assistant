@@ -135,6 +135,15 @@ def click(selector, session=SESSION):
     return api("click", {"selector": selector}, session=session).get("data", {}).get("success", False)
 
 
+def fill(selector, value, session=SESSION):
+    """通过 WebBridge 填写输入框或 contenteditable，确保前端框架收到输入事件。"""
+    return api(
+        "fill",
+        {"selector": selector, "value": str(value)},
+        session=session,
+    ).get("data", {}).get("success", False)
+
+
 def scroll_page(session=SESSION):
     """滚动到页面底部，触发懒加载"""
     evaluate("(function(){window.scrollTo(0, document.body.scrollHeight);return document.body.scrollHeight;})()", session=session)
@@ -162,7 +171,7 @@ _EXTRACT_JOBS_JS = r"""
                 city: d.cityName || "",
                 company: d.brandName || "",
                 industry: d.brandIndustry || "",
-                scale: d.brandScaleName || "",
+                company_size: d.brandScaleName || "",
                 stage: d.brandStageName || "",
                 online: !!d.bossOnline,
                 welfare: (d.welfareList || []).join("|"),

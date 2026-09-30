@@ -1,15 +1,15 @@
 ---
 name: boss-zhipin-deliver
 description: |
-  BOSS直聘自动化投递技能 v5.9 — 本地 API 原子分析职位，Kimi WebBridge 只负责浏览器读取、点击和安全发送。
+  BOSS直聘自动化投递技能 v5.9.3 — 本地 API 原子分析职位，Kimi WebBridge 只负责浏览器读取、点击和安全发送。
   依赖 Kimi WebBridge（端口 10086）控制已登录 Chrome，从目标关键词搜索页采集岗位并投递。
   支持环境自检、投递断点续传、每日目标检测、HTML 汇报生成和本地数据库同步。
-  ★ v5.9: 个人档案、规则、RAG、职位快照、问候语和投递记录统一由 Job Search Assistant 本地服务管理。
+  ★ v5.9.3: 自动投递采集链路保留并补采公司规模，统一写入职位快照 companySize。
 metadata:
-  version: "5.9.0"
+  version: "5.9.3"
 ---
 
-# BOSS直聘自动化投递 Skill v5.9
+# BOSS直聘自动化投递 Skill v5.9.3
 
 > 本技能加载后，Agent 将按三层循环架构执行 BOSS直聘自动化投递。
 > 依赖 Kimi WebBridge（端口 10086）控制已登录 Chrome。
@@ -232,6 +232,9 @@ python_executor: 运行 <SKILL_DIR>/scripts/env_check.py
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v5.9.3 | 2026-09-30 | 保留岗位卡片 company_size，详情页补采公司规模，并兼容旧 scale 字段写入职位快照 |
+| v5.9.2 | 2026-09-30 | 改用 WebBridge fill 写入问候语；等待发送按钮移除 `.disabled`；发送后最长 10 秒轮询验证消息气泡与输入框清空 |
+| v5.9.1 | 2026-09-30 | 修复聊天输入框被计入消息列表导致空会话误报成功；发送成功必须同时满足目标消息气泡新增和输入框清空 |
 | v5.9 | 2026-09-30 | 本地 API 成为业务唯一事实源；新增原子分析计划，移除 decision.json 最终决策链路 |
 | v5.8 | 2026-09-30 | 接入简历库默认首页图片；默认关闭，明确启用后才随问候语发送 |
 | v5.7 | 2026-09-29 | 移除报告赞赏二维码；新增 `/v1/deliveries` 数据库同步与本地失败队列 |

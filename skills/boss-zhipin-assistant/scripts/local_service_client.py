@@ -65,7 +65,11 @@ def analyze_and_plan_job(current_jd):
                 "url": str(surface.get("url") or f"https://www.zhipin.com/job_detail/{job_id}.html"),
                 "title": title,
                 "companyName": company,
-                "companySize": jd.get("company_size") or surface.get("company_size"),
+                "companySize": (
+                    jd.get("company_size")
+                    or surface.get("company_size")
+                    or surface.get("scale")
+                ),
                 "location": jd.get("city") or surface.get("location"),
                 "workAddress": jd.get("work_address") or surface.get("work_address"),
                 "salaryText": jd.get("salary_decrypted") or jd.get("salary") or current_jd.get("salary"),

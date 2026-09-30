@@ -7,8 +7,8 @@
   保存至缓存文件。
 
 ★ v4.4 精简抓取:
-  只保留7个核心字段（page_order, jobId, title, salary, salary_max_k,
-  company, industry），去掉了 city(用户配置城市,通过推荐页已限定)、stage、online、
+  保留8个核心字段（page_order, jobId, title, salary, salary_max_k,
+  company, company_size, industry），去掉了 city(用户配置城市,通过推荐页已限定)、stage、online、
   welfare(单条最长80字)、degree、experience 等6个对AI初筛无价值的字段，
   数据量减少约40%。
 
@@ -37,15 +37,18 @@ from scripts.webbridge_client import (
     SESSION, evaluate, extract_jobs, decrypt_salary, parse_salary_max,
 )
 
-# ★ v4.4 精简字段白名单 — 只保留AI初筛需要的字段
-KEEP_FIELDS = ['page_order', 'jobId', 'title', 'salary', 'salary_max_k', 'company', 'industry']
+# 精简字段白名单。company_size 同时用于职位快照，不能在初筛缓存阶段丢弃。
+KEEP_FIELDS = [
+    'page_order', 'jobId', 'title', 'salary', 'salary_max_k',
+    'company', 'company_size', 'industry',
+]
 
 
 def extract_all_surface():
     """从当前推荐页提取所有岗位卡片的表面信息（精简版）
 
-    ★ v4.4 只保留7个核心字段:
-      page_order, jobId, title, salary, salary_max_k, company, industry
+    保留8个核心字段:
+      page_order, jobId, title, salary, salary_max_k, company, company_size, industry
 
     返回:
         list[dict]: 岗位列表

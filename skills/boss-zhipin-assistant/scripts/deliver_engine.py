@@ -41,7 +41,7 @@ from scripts.profile_loader import WORK_DIR, DAILY_TARGET, GREETING_TEXT, SEND_R
 from scripts.local_service_client import download_default_resume_image
 
 from scripts.webbridge_client import (
-    SESSION, api, evaluate, navigate, handle_popup,
+    SESSION, api, click as webbridge_click, fill as webbridge_fill, evaluate, navigate, handle_popup,
     ensure_active_tab, health_check,
     ProgressManager, register_signal_guard, SafeInterrupt,
 )
@@ -301,21 +301,56 @@ def _get_chat_button_text():
 
 
 def _visible_message_count(text):
-    """统计右侧当前会话中可见的完全相同消息，排除左侧联系人摘要。"""
+    """统计当前聊天记录中可见的完全相同消息。
+
+    输入框位于右侧区域，旧实现会把尚未真正发送的编辑器文本也计为消息，
+    从而把空会话误报为发送成功。这里只接受位于编辑器上方、且不属于
+    输入控件/按钮/常用语面板的叶子节点。
+    """
     encoded = json.dumps(text, ensure_ascii=False)
     return int(evaluate(f"""
     (function(){{
-        var expected = {encoded};
-        var nodes = Array.from(document.querySelectorAll('*'));
-        return nodes.filter(function(el){{
-            if (el.children.length !== 0 || (el.textContent || '').trim() !== expected) return false;
+        var normalize = function(value) {{
+            return (value || '').replace(/\\s+/g, ' ').trim();
+        }};
+        var expected = normalize({encoded});
+        var input = document.querySelector('#chat-input[contenteditable="true"]');
+        var inputRect = input ? input.getBoundingClientRect() : null;
+        var preferred = Array.from(document.querySelectorAll(
+            '.message-content, .message-text, .chat-message, .item-myself .text, ' +
+            '[class*="message"] [class*="text"], [class*="message"] [class*="content"]'
+        ));
+        var nodes = preferred.length ? preferred : Array.from(document.querySelectorAll('*'));
+        var matches = nodes.filter(function(el){{
+            if (normalize(el.innerText || el.textContent) !== expected) return false;
+            if (el === input || el.closest(
+                '#chat-input, [contenteditable="true"], textarea, input, button, ' +
+                '.sentence-panel, .chat-editor, .chat-input, .chat-operate'
+            )) return false;
             var r = el.getBoundingClientRect();
             var s = window.getComputedStyle(el);
             return r.width > 0 && r.height > 0 && r.left > window.innerWidth * 0.28 &&
+                   (!inputRect || r.bottom < inputRect.top - 4) &&
                    s.display !== 'none' && s.visibility !== 'hidden';
+        }});
+        // 同一气泡可能同时命中父子容器，只保留最内层节点。
+        return matches.filter(function(el){{
+            return !matches.some(function(other) {{
+                return other !== el && el.contains(other);
+            }});
         }}).length;
     }})()
     """) or 0)
+
+
+def _chat_input_text():
+    """读取聊天编辑器当前文本，用于确认发送后编辑器已清空。"""
+    return str(evaluate("""
+    (function(){
+        var input = document.querySelector('#chat-input[contenteditable="true"]');
+        return input ? (input.innerText || input.textContent || '').trim() : '';
+    })()
+    """) or '').strip()
 
 
 def _restore_source_page(source_url):
@@ -355,36 +390,24 @@ def _company_names_match(expected, candidate):
     )
 
 
-def _send_verified_greeting(job_info, greeting_text=None):
-    """仅在当前聊天明确对应目标岗位时，发送且只发送一次问候语。"""
-    job_info = job_info or {}
-    title = str(job_info.get('title') or '').strip()
-    company = str(job_info.get('company') or '').strip()
-    if not title or not company:
-        return False, '缺少岗位标题或公司，拒绝发送问候语'
-
+def _read_chat_identity(title, company):
+    """读取当前聊天会话身份，供填写前后重复校验。"""
     expected_title = json.dumps(title, ensure_ascii=False)
-    expected_company = json.dumps(company, ensure_ascii=False)
     identity = evaluate(f"""
     (function(){{
         var title = {expected_title};
-        var company = {expected_company};
-        var visibleLeaves = function() {{
-            return Array.from(document.querySelectorAll('*')).filter(function(el) {{
-                if (el.children.length !== 0) return false;
-                var r = el.getBoundingClientRect();
-                var s = window.getComputedStyle(el);
-                return r.width > 0 && r.height > 0 && r.left > window.innerWidth * 0.28 &&
-                       s.display !== 'none' && s.visibility !== 'hidden';
-            }});
-        }};
-        var leaves = visibleLeaves();
-        var visibleExact = function(text) {{
-            return leaves.some(function(el) {{ return (el.textContent || '').trim() === text; }});
-        }};
+        var leaves = Array.from(document.querySelectorAll('*')).filter(function(el) {{
+            if (el.children.length !== 0) return false;
+            var r = el.getBoundingClientRect();
+            var s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && r.left > window.innerWidth * 0.28 &&
+                   s.display !== 'none' && s.visibility !== 'hidden';
+        }});
         return {{
             url: location.href,
-            titleOk: visibleExact(title),
+            titleOk: leaves.some(function(el) {{
+                return (el.textContent || '').trim() === title;
+            }}),
             visibleTexts: leaves.map(function(el) {{ return (el.textContent || '').trim(); }})
         }};
     }})()
@@ -398,6 +421,11 @@ def _send_verified_greeting(job_info, greeting_text=None):
     )
     identity['companyOk'] = bool(company_match)
     identity['companyMatch'] = company_match
+    return identity
+
+
+def _validate_chat_identity(title, company):
+    identity = _read_chat_identity(title, company)
     if '/web/geek/chat' not in str(identity.get('url', '')):
         return False, '尚未进入聊天页，无法安全发送问候语'
     if not identity.get('titleOk') or not identity.get('companyOk'):
@@ -405,6 +433,75 @@ def _send_verified_greeting(job_info, greeting_text=None):
             f"目标会话校验失败: title={identity.get('titleOk')}, "
             f"company={identity.get('companyOk')}, matched={identity.get('companyMatch', '')}"
         )
+    return True, ''
+
+
+def _click_visible_send_button(max_wait=5.0):
+    """等待发送按钮解除业务禁用态，再交给 WebBridge click 执行。"""
+    selector = '[data-boss-automation-action="send-greeting"]'
+    attempts = max(1, int(max_wait / 0.25))
+    prepared = False
+    for _ in range(attempts):
+        state = evaluate("""
+        (function(){
+            var old = document.querySelector('[data-boss-automation-action="send-greeting"]');
+            if (old) old.removeAttribute('data-boss-automation-action');
+            var buttons = Array.from(document.querySelectorAll('button')).filter(function(el){
+                var r = el.getBoundingClientRect();
+                var s = window.getComputedStyle(el);
+                return (el.textContent || '').trim() === '发送' &&
+                       r.width > 0 && r.height > 0 &&
+                       s.display !== 'none' && s.visibility !== 'hidden';
+            });
+            if (buttons.length !== 1) return {ready:false, reason:'count', count:buttons.length};
+            var btn = buttons[0];
+            var disabled = btn.disabled || btn.classList.contains('disabled') ||
+                           btn.getAttribute('aria-disabled') === 'true' ||
+                           window.getComputedStyle(btn).pointerEvents === 'none';
+            if (disabled) return {ready:false, reason:'disabled', className:btn.className};
+            btn.setAttribute('data-boss-automation-action', 'send-greeting');
+            return {ready:true, className:btn.className};
+        })()
+        """) or {}
+        if isinstance(state, dict) and state.get('ready'):
+            prepared = True
+            break
+        time.sleep(0.25)
+    if not prepared:
+        return False
+    try:
+        return bool(webbridge_click(selector))
+    finally:
+        evaluate("""
+        (function(){
+            var el = document.querySelector('[data-boss-automation-action="send-greeting"]');
+            if (el) el.removeAttribute('data-boss-automation-action');
+            return true;
+        })()
+        """)
+
+
+def _wait_for_greeting_delivery(greeting, before, max_wait=20.0):
+    """等待目标消息气泡出现，并确认编辑器已清空。"""
+    attempts = max(1, int(max_wait / 0.5))
+    for _ in range(attempts):
+        if _visible_message_count(greeting) > before and not _chat_input_text():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _send_verified_greeting(job_info, greeting_text=None):
+    """仅在当前聊天明确对应目标岗位时，发送且只发送一次问候语。"""
+    job_info = job_info or {}
+    title = str(job_info.get('title') or '').strip()
+    company = str(job_info.get('company') or '').strip()
+    if not title or not company:
+        return False, '缺少岗位标题或公司，拒绝发送问候语'
+
+    identity_ok, identity_detail = _validate_chat_identity(title, company)
+    if not identity_ok:
+        return False, identity_detail
 
     greeting = str(greeting_text or GREETING_TEXT or '').strip()
     if not greeting:
@@ -427,36 +524,22 @@ def _send_verified_greeting(job_info, greeting_text=None):
     if before > 0:
         return True, '问候语已存在，跳过重复发送'
 
-    encoded_greeting = json.dumps(greeting, ensure_ascii=False)
-    filled = evaluate(f"""
-    (function(){{
-        var input = document.querySelector('#chat-input[contenteditable="true"]');
-        if (!input) return false;
-        input.focus();
-        input.textContent = {encoded_greeting};
-        input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:{encoded_greeting}}}));
-        return (input.innerText || input.textContent || '').trim() === {encoded_greeting};
-    }})()
-    """)
+    filled = webbridge_fill('#chat-input[contenteditable="true"]', greeting)
     if not filled:
         return False, '问候语写入输入框失败'
 
-    sent = evaluate("""
-    (function(){
-        var buttons = Array.from(document.querySelectorAll('button'));
-        var btn = buttons.find(function(el){ return (el.textContent || '').trim() === '发送'; });
-        if (!btn || btn.disabled) return false;
-        btn.click();
-        return true;
-    })()
-    """)
+    identity_ok, identity_detail = _validate_chat_identity(title, company)
+    if not identity_ok:
+        return False, f'填写后{identity_detail}'
+
+    sent = _click_visible_send_button()
     if not sent:
         return False, '发送按钮不可用'
 
-    time.sleep(1.5)
-    after = _visible_message_count(greeting)
-    if after <= before:
-        return False, '点击发送后未观察到问候语送达'
+    if not _wait_for_greeting_delivery(greeting, before):
+        remaining = _chat_input_text()
+        state = '输入框仍有内容' if remaining else '输入框已清空但未识别到消息气泡'
+        return False, f'点击发送后20秒内未观察到问候语送达（{state}）'
     return True, '问候语已发送并在目标会话中验证'
 
 
@@ -584,17 +667,12 @@ def deliver_inplace(job_id, job_info=None, greeting_text=None, send_resume_image
 
     time.sleep(0.5)
 
-    click_result = evaluate("""
-    (function(){
-        var btn = document.querySelector('.op-btn-chat');
-        if (!btn) btn = document.querySelector('.btn-startchat, .job-chat-btn');
-        if (!btn) return 'not_found';
-        btn.click();
-        return 'clicked';
-    })()
-    """)
+    clicked = any(
+        webbridge_click(selector)
+        for selector in ('.op-btn-chat', '.btn-startchat', '.job-chat-btn')
+    )
 
-    if click_result == 'not_found':
+    if not clicked:
         return 'fail', '点击时按钮消失'
 
     # 3. 等待弹窗 → 检测致命错误
@@ -650,20 +728,16 @@ def deliver_inplace(job_id, job_info=None, greeting_text=None, send_resume_image
 
     btn_text = _get_chat_button_text()
 
-    # 7. 综合判断
+    # 7. 综合判断。旧弹窗分支无法看到目标聊天中的消息气泡，因此不能把
+    # DOM click、按钮文案变化或「留在此页」单独视为 v5.9.1 的成功证据。
     if '继续沟通' in btn_text:
-        return 'success', '投递成功(按钮已变为继续沟通)'
+        return 'unknown', '已建立沟通，但旧弹窗分支无法验证目标问候语消息气泡'
 
-    if sent_greeting and stayed_on_page:
-        return 'success', '投递成功(发送招呼+留在此页)'
-
-    if sent_greeting:
-        return 'success', '投递成功(已发送招呼)'
-
-    # v5.1 修复: "留在此页"被点击本身就是投递成功的强证据
-    # "留在此页"按钮只在招呼语发送成功后的确认弹窗中出现
-    if stayed_on_page:
-        return 'success', '投递成功(留在此页已点击,招呼弹窗可能自动发送)'
+    if sent_greeting or stayed_on_page:
+        return 'unknown', (
+            f'已触发弹窗操作但未验证目标问候语消息气泡: '
+            f'popup={popup}, stay={stay_result}'
+        )
 
     return 'unknown', f'未确认成功: popup={popup}, stay={stay_result}, btn={btn_text[:20]}'
 

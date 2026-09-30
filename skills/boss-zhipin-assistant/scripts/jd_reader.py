@@ -34,7 +34,7 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SKILL_DIR)
 
 from scripts.webbridge_client import (
-    SESSION, evaluate,
+    SESSION, evaluate, scroll_page,
 )
 
 # 薪资字体解密
@@ -81,6 +81,49 @@ _FIND_CARD_JS = """
 """
 
 
+def _find_card(job_id):
+    """在当前已渲染的卡片中查找 jobId。"""
+    find_js = _FIND_CARD_JS.replace("__JID__", json.dumps(job_id))
+    find_raw = evaluate(find_js) or "{}"
+    try:
+        return json.loads(find_raw)
+    except (json.JSONDecodeError, TypeError):
+        return {"found": False, "detail": f"JS解析失败: {str(find_raw)[:100]}"}
+
+
+def _recover_card_by_lazy_loading(job_id, max_scrolls=12, render_wait=1.5):
+    """搜索页重新导航后，通过逐次滚动恢复缓存中较靠后的岗位卡片。
+
+    投递完成返回搜索 URL 时，BOSS 只渲染首屏卡片。surface_cache 中的
+    jobId 仍然有效，但在再次触发懒加载前不会出现在 DOM 中。
+    """
+    last_count = 0
+    stable_rounds = 0
+    for scroll_index in range(1, max_scrolls + 1):
+        scroll_page()
+        time.sleep(render_wait)
+        result = _find_card(job_id)
+        if result.get("found"):
+            result["recovered_scrolls"] = scroll_index
+            return result
+
+        count = int(evaluate(
+            "document.querySelectorAll('.job-card-box, .job-card-wrap').length"
+        ) or 0)
+        if count <= last_count:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+            last_count = count
+        if stable_rounds >= 3:
+            break
+
+    return {
+        "found": False,
+        "detail": f"no_link_match_after_lazy_load:{last_count}",
+    }
+
+
 def click_card_inplace(job_id, verify=True, max_wait=5):
     """在推荐页左侧列表中原地点击指定岗位卡片
 
@@ -97,13 +140,12 @@ def click_card_inplace(job_id, verify=True, max_wait=5):
         }
     """
     # 1. 定位卡片并滚动到可视区域
-    find_js = _FIND_CARD_JS.replace("__JID__", json.dumps(job_id))
-    find_raw = evaluate(find_js) or "{}"
+    find_result = _find_card(job_id)
 
-    try:
-        find_result = json.loads(find_raw)
-    except (json.JSONDecodeError, TypeError):
-        return {"ok": False, "detail": f"JS解析失败: {find_raw[:100]}", "title": ""}
+    # 从聊天页返回搜索 URL 后，页面只恢复首屏卡片。对缓存命中的岗位
+    # 自动补做懒加载，避免 page_order 较大时稳定出现 no_link_match。
+    if not find_result.get("found") and find_result.get("detail") == "no_link_match":
+        find_result = _recover_card_by_lazy_loading(job_id)
 
     if not find_result.get("found"):
         return {"ok": False, "detail": f"未找到 jobId={job_id} 的卡片: {find_result.get('detail', '?')}", "title": ""}
@@ -288,6 +330,23 @@ def read_jd_from_panel():
         // 公司名: 在左侧卡片列表中，不从右侧面板读取
         var company = '';
 
+        // 公司规模: 优先读取右侧公司信息区域，作为卡片 props 的补充来源。
+        var companySize = '';
+        var sizePattern = /(?:少于)?\\d+(?:-\\d+)?人|\\d+人以上/;
+        var sizeNodes = document.querySelectorAll(
+            '.job-detail-company .company-scale, .company-info .company-scale, ' +
+            '.company-info .company-tag-list li, .company-info .company-info-item, ' +
+            '.job-detail-box .company-tag-list li'
+        );
+        for (var s = 0; s < sizeNodes.length; s++) {
+            var sizeText = (sizeNodes[s].textContent || '').trim();
+            var sizeMatch = sizeText.match(sizePattern);
+            if (sizeMatch) {
+                companySize = sizeMatch[0];
+                break;
+            }
+        }
+
         // 招聘者信息: .job-boss-info
         var bossInfo = document.querySelector('.job-detail-body .job-boss-info');
         var bossName = '';
@@ -308,6 +367,7 @@ def read_jd_from_panel():
             jd_text: jdText,
             job_title: jobTitle,
             company: company,
+            company_size: companySize,
             salary: salary,
             city: city,
             experience: experience,
@@ -329,6 +389,7 @@ def read_jd_from_panel():
             "jd_text": "",
             "job_title": "",
             "company": "",
+            "company_size": "",
             "salary": "",
             "salary_decrypted": "",
             "city": "",

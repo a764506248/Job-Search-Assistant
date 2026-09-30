@@ -150,7 +150,7 @@ def step_init(city_code=_PROFILE_CITY):
     3. 使用 user_profile.json 的第一个 search_keywords 导航到搜索页
     4. 提示下一步: --step next-batch
     """
-    print("[初始化] ═══ v5.0 三层循环投递系统启动 ═══")
+    print("[初始化] ═══ v5.9.3 三层循环投递系统启动 ═══")
 
     # 1. 环境检查
     if not health_check():
@@ -771,7 +771,7 @@ def step_status():
     delivered = [r for r in approved if r.get('deliver_status') == 'success']
 
     print(f"{'='*60}")
-    print(f"v5.0 三层循环进度")
+    print(f"v5.9.3 三层循环进度")
     print(f"{'='*60}")
 
     # 外层: 页面级
@@ -879,7 +879,7 @@ def _ensure_finish_on_exit():
 def main():
     atexit.register(_ensure_finish_on_exit)
     parser = argparse.ArgumentParser(
-        description="★v5.0 三层嵌套循环主控制器",
+        description="★v5.9.3 三层嵌套循环主控制器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 三层循环命令体系:
