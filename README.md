@@ -25,6 +25,12 @@
 - [系统架构与流程](docs/ARCHITECTURE.md)
 - [数据模型与接口约定](docs/DATA_MODEL.md)
 
+## 整体流程
+
+![Job Search Assistant 整体工作流](docs/assets/system-workflow.svg)
+
+系统以本地 API 和 SQLite 为业务事实源：Skill 负责三层循环编排，Kimi WebBridge 只执行浏览器读取与点击，项目 Chrome 扩展只在用户开启开关后处理默认简历图片的预览与确认发送。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
+
 ## 自动投递 Skill
 
 项目内已经包含与当前本地 API 架构配套的
@@ -55,7 +61,7 @@
 
 ## Chrome 扩展：简历图片测试版
 
-每次代码推送到 GitHub 后，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
+当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
 
 先构建并在 Chrome 中加载产物：
 
@@ -100,7 +106,17 @@ docker compose up -d --build
 
 ### 直接使用已发布镜像
 
-仓库通过 GitHub Actions 将 Web、本地 API 和 Embedding 服务分别发布到 GHCR。无需在本机编译源码：
+仓库通过 GitHub Actions 将 Web、本地 API 和 Embedding 服务分别发布到 GHCR。三个镜像不是让用户分别手动启动的；推荐使用仓库提供的 `docker-compose.release.yml` 一次性拉取、编排和启动：
+
+| Compose 服务 | GHCR 镜像 | 作用 | 对外端口 |
+|---|---|---|---|
+| `web` | `job-search-assistant-web` | Vue 管理后台，并将同源 `/v1` 请求反向代理到本地 API | `127.0.0.1:8765` |
+| `local-service` | `job-search-assistant-local-service` | FastAPI、SQLite、简历处理、规则与投递记录 | 仅 Compose 内部访问 |
+| `embedding` | `job-search-assistant-embedding` | 本地向量模型和语义检索 | `127.0.0.1:8766` |
+
+![Docker Compose 三容器部署架构](docs/assets/docker-deployment.svg)
+
+无需克隆源码或在本机编译：
 
 ```bash
 curl -O https://raw.githubusercontent.com/a764506248/Job-Search-Assistant/main/docker-compose.release.yml
@@ -108,13 +124,38 @@ docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 ```
 
-管理后台仍访问 <http://127.0.0.1:8765>。运行数据保存在 Compose 文件同级的 `data/`，Embedding 模型保存在 Docker Volume 中；升级镜像不会删除这些数据。可以通过 `JSA_IMAGE_TAG` 固定版本标签：
+启动后检查三个容器是否健康：
 
 ```bash
+docker compose -f docker-compose.release.yml ps
+docker compose -f docker-compose.release.yml logs -f
+```
+
+管理后台访问 <http://127.0.0.1:8765>。首次启动时 `embedding` 会下载模型，因此健康检查可能需要一段时间；后续启动会复用 Docker Volume 中的模型。
+
+运行数据保存在 Compose 文件同级的 `data/`，Embedding 模型保存在名为 `embedding-models` 的 Docker Volume 中。更新或重建容器不会删除这些数据。更新镜像并重启：
+
+```bash
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+停止服务但保留数据：
+
+```bash
+docker compose -f docker-compose.release.yml down
+```
+
+可以通过 `JSA_IMAGE_TAG` 固定三个镜像使用同一个版本标签，避免长期跟随 `latest`：
+
+```bash
+JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml pull
 JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml up -d
 ```
 
-GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Docker 只包含管理后台、本地 API 和 Embedding 服务；Chrome 扩展、BOSS Skill 及 Kimi WebBridge 仍需安装在用户浏览器和本机环境中。
+除非你正在调试某个服务，否则不建议分别执行三个 `docker run`：容器间 DNS、依赖顺序、健康检查、SQLite 目录和模型 Volume 都已经由 Compose 配置好。
+
+GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Docker 只包含管理后台、本地 API 和 Embedding 服务；Chrome 扩展、BOSS Skill 及 Kimi WebBridge 仍需安装在用户浏览器和本机环境中，它们不会被打包进这三个服务镜像。
 
 当前可以管理个人档案、项目、简历资料、匹配规则、模型配置和职位快照；所有修改都会持久化到本地 SQLite。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将识别结果分别写入个人档案、项目库和简历库，随后自动重建向量索引。“简历模板”提供投递版式选择、网页预览和 PDF 示例，“向量知识库”可使用 768 维的 `jinaai/jina-embeddings-v2-base-zh` 重建本地索引并测试语义检索。
 

@@ -2,6 +2,8 @@ name: Build Chrome Extension
 
 on:
   push:
+    paths:
+      - 'apps/extension/**'
   workflow_dispatch:
 
 permissions:
