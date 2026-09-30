@@ -1,10 +1,11 @@
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import (
@@ -18,7 +19,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__
@@ -34,6 +35,7 @@ from .domain import (
 from .domain.models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
+    AutomationConfigResponse,
     CapturedJob,
     ClientLogInput,
     ClientLogListResponse,
@@ -46,12 +48,15 @@ from .domain.models import (
     JobCaptureResponse,
     JobEvaluationRequest,
     JobEvaluationResponse,
+    JobAnalysisPlanRequest,
+    JobAnalysisPlanResponse,
     JobListResponse,
     JobTrackingUpdate,
     LibraryListResponse,
     LibraryRecord,
     LibraryRecordInput,
     ManualJobInput,
+    MaterialStrategy,
     MaterialPreviewRequest,
     MaterialPreviewResponse,
     ProfilePayload,
@@ -62,6 +67,7 @@ from .domain.models import (
     RagStatus,
     ResumeImportResponse,
     RiskRuleInput,
+    RuleAction,
     StoredJob,
 )
 from .project_extraction import (
@@ -79,6 +85,7 @@ from .repositories import (
 )
 from .repositories.library import ALLOWED_KINDS, LibraryKind
 from .resume_html import build_resume_html
+from .resume_images import render_pdf_first_page
 from .resume_import import MAX_RESUME_BYTES, extract_projects_from_text, parse_resume
 from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
@@ -96,10 +103,68 @@ def create_router(
     model_tester: ModelConnectionTester,
     material_preview_generator: MaterialPreviewGenerator,
     greeting_generator: GreetingGenerator,
+    resume_image_dir: Path,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
     greeting_generation_ids: set[int] = set()
     greeting_generation_lock = Lock()
+
+    def string_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if not value:
+            return []
+        return [item.strip() for item in re.split(r"[,，|\n;/；]+", str(value)) if item.strip()]
+
+    def matching_rules() -> list[RiskRuleInput]:
+        rules: list[RiskRuleInput] = []
+        for record in library_repository.list("rules"):
+            data = record["data"]
+            patterns = string_list(data.get("patterns") or data.get("pattern"))
+            if not patterns:
+                continue
+            try:
+                action = RuleAction(str(data.get("action", RuleAction.NOTIFY)))
+            except ValueError:
+                action = RuleAction.NOTIFY
+            rules.append(
+                RiskRuleInput(
+                    id=f"library:{record['id']}",
+                    name=str(record["name"]),
+                    patterns=patterns,
+                    action=action,
+                    score_penalty=int(data.get("scorePenalty", 0) or 0),
+                    enabled=bool(data.get("enabled", True)),
+                )
+            )
+        return rules
+
+    def automation_config() -> AutomationConfigResponse:
+        profile = library_repository.get_profile()
+        target_roles = string_list(profile.get("targetRoles"))
+        keywords = string_list(profile.get("searchKeywords")) or target_roles
+        try:
+            library_repository.get_default_resume_image()
+            image_available = True
+        except KeyError:
+            image_available = False
+        return AutomationConfigResponse(
+            target_roles=target_roles,
+            target_cities=string_list(profile.get("cities")),
+            search_keywords=keywords,
+            minimum_salary_k=int(profile.get("minimumSalaryK", 20) or 20),
+            daily_target=int(profile.get("dailyTarget", 20) or 20),
+            minimum_suitability_score=int(
+                profile.get("minimumSuitabilityScore", 60) or 60
+            ),
+            minimum_customization_confidence=int(
+                profile.get("minimumCustomizationConfidence", 80) or 80
+            ),
+            send_resume_image=bool(profile.get("sendResumeImage", False)),
+            default_greeting=str(profile.get("defaultGreeting", "")).strip(),
+            default_resume_image_available=image_available,
+            matching_rules=matching_rules(),
+        )
 
     def validate_model_data(data: dict[str, object]) -> None:
         missing = [field for field in ("modelId", "apiKey", "baseUrl") if not data.get(field)]
@@ -126,11 +191,22 @@ def create_router(
 
     def build_job_material_context(
         job: StoredJob,
+        *,
+        minimum_suitability_score: int = 75,
+        minimum_customization_confidence: int = 80,
+        rules: list[RiskRuleInput] | None = None,
+        duplicate: bool = False,
+        company_blocked: bool = False,
     ) -> tuple[dict[str, object], str, AutomaticJobMatchResponse]:
         match_request = AutomaticJobMatchRequest(
             title=job.title,
             job_text=job.description,
             skills=job.skills,
+            minimum_suitability_score=minimum_suitability_score,
+            minimum_customization_confidence=minimum_customization_confidence,
+            rules=rules or [],
+            duplicate=duplicate,
+            company_blocked=company_blocked,
         )
         query = "\n".join(
             part for part in [job.title, " ".join(job.skills), job.description] if part
@@ -217,6 +293,10 @@ def create_router(
     def health() -> HealthResponse:
         return HealthResponse(version=__version__)
 
+    @router.get("/automation/config", response_model=AutomationConfigResponse)
+    def get_automation_config() -> AutomationConfigResponse:
+        return automation_config()
+
     @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
     def create_client_log(request: ClientLogInput) -> ClientLogRecord:
         record = ClientLogRecord.model_validate(
@@ -268,10 +348,28 @@ def create_router(
         return JobCaptureResponse(accepted=len(job_ids), job_ids=job_ids)
 
     @router.get("/jobs", response_model=JobListResponse)
-    def list_jobs(limit: int = Query(default=100, ge=1, le=500)) -> JobListResponse:
+    def list_jobs(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
+        query: str | None = Query(default=None, max_length=300),
+        communication_result: Literal[
+            "not_communicated", "communicated", "interviewed"
+        ] | None = Query(default=None, alias="communicationResult"),
+    ) -> JobListResponse:
+        total = job_repository.count(query, communication_result)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        current_page = min(page, total_pages)
         return JobListResponse(
-            total=job_repository.count(),
-            items=job_repository.list_recent(limit),
+            total=total,
+            page=current_page,
+            page_size=page_size,
+            total_pages=total_pages,
+            items=job_repository.list_recent(
+                page_size,
+                offset=(current_page - 1) * page_size,
+                query=query,
+                communication_result=communication_result,
+            ),
         )
 
     @router.post("/jobs", response_model=StoredJob, status_code=201)
@@ -370,6 +468,80 @@ def create_router(
             raise HTTPException(status_code=503, detail=str(error)) from error
         return build_automatic_match(request, evidence)
 
+    @router.post("/jobs/analyze-and-plan", response_model=JobAnalysisPlanResponse)
+    def analyze_and_plan_job(request: JobAnalysisPlanRequest) -> JobAnalysisPlanResponse:
+        job_repository.save_many([request.job])
+        job = job_repository.get_by_platform_job_id(
+            request.job.platform, request.job.platform_job_id
+        )
+        config = automation_config()
+        suitability_threshold = (
+            request.minimum_suitability_score
+            if request.minimum_suitability_score is not None
+            else config.minimum_suitability_score
+        )
+        confidence_threshold = (
+            request.minimum_customization_confidence
+            if request.minimum_customization_confidence is not None
+            else config.minimum_customization_confidence
+        )
+        context, default_greeting, match = build_job_material_context(
+            job,
+            minimum_suitability_score=suitability_threshold,
+            minimum_customization_confidence=confidence_threshold,
+            rules=config.matching_rules,
+            duplicate=job.has_communicated,
+            company_blocked=request.company_blocked,
+        )
+
+        # 适合度是是否投递的硬门槛；定制可信度不足时才回退默认材料。
+        if match.suitability_score < suitability_threshold:
+            match = match.model_copy(
+                update={
+                    "decision": match.decision.model_copy(
+                        update={
+                            "material_strategy": MaterialStrategy.BLOCKED,
+                            "should_deliver": False,
+                            "reasons": [
+                                f"岗位适合度 {match.suitability_score} 低于投递阈值 {suitability_threshold}"
+                            ],
+                        }
+                    )
+                }
+            )
+
+        greeting: str | None = job.generated_greeting
+        if match.decision.should_deliver and not greeting:
+            if match.decision.material_strategy == "custom":
+                try:
+                    generated = greeting_generator.generate(
+                        {
+                            key: context[key]
+                            for key in (
+                                "job",
+                                "profile",
+                                "vectorEvidence",
+                                "defaultGreeting",
+                                "match",
+                            )
+                        }
+                    )
+                    greeting = str(generated["greeting"]).strip()
+                except (RuntimeError, KeyError, TypeError) as error:
+                    logger.warning("planned greeting fell back for job=%s: %s", job.id, error)
+            greeting = greeting or default_greeting or (
+                f"您好，我对贵司的{job.title}岗位很感兴趣，希望有机会进一步沟通，谢谢。"
+            )
+            job = job_repository.update_generated_greeting(job.id, greeting)
+
+        return JobAnalysisPlanResponse(
+            snapshot=job,
+            match=match,
+            generated_greeting=greeting,
+            default_resume_image_available=config.default_resume_image_available,
+            duplicate=job.has_communicated,
+        )
+
     @router.post(
         "/jobs/{snapshot_id}/material-preview",
         response_model=MaterialPreviewResponse,
@@ -417,7 +589,18 @@ def create_router(
     ) -> ResumeImportResponse:
         filename = Path((file.filename or "resume").replace("\\", "/")).name
         try:
-            parsed = parse_resume(filename, await file.read(MAX_RESUME_BYTES + 1))
+            file_content = await file.read(MAX_RESUME_BYTES + 1)
+            parsed = parse_resume(filename, file_content)
+            if Path(filename).suffix.lower() == ".pdf":
+                preview_path = await run_in_threadpool(
+                    render_pdf_first_page, file_content, resume_image_dir
+                )
+                has_default_image = any(
+                    item["data"].get("isDefaultImage")
+                    for item in library_repository.list("resumes")
+                )
+                parsed.resume["previewImageFile"] = preview_path.name
+                parsed.resume["isDefaultImage"] = not has_default_image
             ai_extraction_used = False
             ai_extraction_error = None
             ai_attempt_errors: list[str] = []
@@ -514,6 +697,42 @@ def create_router(
             ai_attempt_errors=ai_attempt_errors,
             ai_profile_extracted=ai_profile_extracted,
         )
+
+    def resume_image_response(record: dict[str, object]) -> FileResponse:
+        data = dict(record["data"])
+        image_name = Path(str(data.get("previewImageFile", ""))).name
+        image_path = resume_image_dir / image_name
+        if not image_name or not image_path.is_file():
+            raise HTTPException(status_code=404, detail="resume image not found")
+        return FileResponse(
+            image_path,
+            media_type="image/png",
+            filename=f"resume-{record['id']}-page-1.png",
+        )
+
+    @router.get("/resumes/default-image")
+    def get_default_resume_image() -> FileResponse:
+        try:
+            return resume_image_response(library_repository.get_default_resume_image())
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="default resume image not found") from error
+
+    @router.get("/resumes/{resume_id}/preview-image")
+    def get_resume_preview_image(resume_id: int) -> FileResponse:
+        try:
+            record = library_repository.get("resumes", resume_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="resume not found") from error
+        return resume_image_response(record)
+
+    @router.put("/resumes/{resume_id}/default-image", response_model=LibraryRecord)
+    def set_default_resume_image(resume_id: int) -> LibraryRecord:
+        try:
+            return LibraryRecord(**library_repository.set_default_resume_image(resume_id))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="resume not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @router.post("/resumes/{resume_id}/extract-projects")
     async def extract_existing_resume_projects(

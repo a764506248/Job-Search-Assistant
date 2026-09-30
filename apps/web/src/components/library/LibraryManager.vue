@@ -33,9 +33,11 @@
       <div v-else-if="!records.length" class="library-empty">还没有数据，请使用左侧表单添加第一条记录。</div>
       <div v-else class="record-grid">
         <article v-for="record in records" :key="record.id" class="record-card">
+          <div v-if="kind === 'resumes' && record.data.previewImageFile" class="resume-image-preview"><img :src="`/v1/resumes/${record.id}/preview-image`" :alt="`${record.name} 第一页预览`" /></div>
           <div class="record-card-head">
             <div><h3>{{ record.name }}</h3><p>{{ display(record) }}</p></div>
             <div class="record-actions">
+              <a-button v-if="kind === 'resumes' && record.data.previewImageFile" size="small" :type="record.data.isDefaultImage ? 'primary' : 'default'" :disabled="Boolean(record.data.isDefaultImage)" @click="setDefaultImage(record)">{{ record.data.isDefaultImage ? '默认投递图片' : '设为默认图片' }}</a-button>
               <a-button v-if="kind === 'models'" size="small" :loading="testingId === record.id" @click="testModel(record)">验证连接</a-button>
               <a-button size="small" @click="edit(record)">编辑</a-button>
               <a-button size="small" danger @click="confirmDelete(record)">删除</a-button>
@@ -154,6 +156,14 @@ async function testModel(record: LibraryRecord) {
     modelStatuses[record.id] = { ok: false, text: `✗ ${(error as Error).message}` }
     message.error('模型连接验证失败')
   } finally { testingId.value = null }
+}
+
+async function setDefaultImage(record: LibraryRecord) {
+  try {
+    await api.setDefaultResumeImage(record.id)
+    await reload()
+    message.success('默认投递简历图片已更新')
+  } catch (error) { message.error((error as Error).message) }
 }
 
 resetForm()

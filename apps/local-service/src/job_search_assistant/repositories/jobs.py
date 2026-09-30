@@ -171,10 +171,15 @@ class JobRepository:
             raise KeyError(platform_job_id)
         return self._from_row(row)
 
-    def count(self) -> int:
+    def count(
+        self, query: str | None = None, communication_result: str | None = None
+    ) -> int:
         self.initialize()
+        where_sql, parameters = self._filters(query, communication_result)
         with self._connect() as connection:
-            row = connection.execute("SELECT COUNT(*) FROM job_postings").fetchone()
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM job_postings {where_sql}", parameters
+            ).fetchone()
         return int(row[0]) if row else 0
 
     def get(self, snapshot_id: int) -> StoredJob:
@@ -265,19 +270,59 @@ class JobRepository:
             raise KeyError(snapshot_id)
         return self.get(snapshot_id)
 
-    def list_recent(self, limit: int = 100) -> list[StoredJob]:
+    def list_recent(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        query: str | None = None,
+        communication_result: str | None = None,
+    ) -> list[StoredJob]:
         self.initialize()
+        where_sql, parameters = self._filters(query, communication_result)
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                """
-                SELECT * FROM job_postings
+                f"""
+                SELECT * FROM job_postings {where_sql}
                 ORDER BY captured_at DESC, id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (*parameters, limit, offset),
             ).fetchall()
         return [self._from_row(row) for row in rows]
+
+    @staticmethod
+    def _filters(
+        query: str | None, communication_result: str | None
+    ) -> tuple[str, tuple[object, ...]]:
+        conditions: list[str] = []
+        parameters: list[object] = []
+        normalized = (query or "").strip().lower()
+        if normalized:
+            pattern = f"%{normalized}%"
+            fields = (
+                "title", "company_name", "company_size", "location", "work_address",
+                "salary_text", "experience", "education", "description", "skills_json",
+                "recruiter_name", "recruiter_title", "generated_greeting",
+            )
+            conditions.append(
+                "(" + " OR ".join(
+                    f"LOWER(COALESCE({field}, '')) LIKE ?" for field in fields
+                ) + ")"
+            )
+            parameters.extend(pattern for _ in fields)
+
+        result_filters = {
+            "not_communicated": "has_communicated = 0",
+            "communicated": "has_communicated = 1",
+            "interviewed": "has_interview = 1",
+        }
+        if communication_result in result_filters:
+            conditions.append(result_filters[communication_result])
+
+        if not conditions:
+            return "", ()
+        return "WHERE " + " AND ".join(conditions), tuple(parameters)
 
     def delete(self, snapshot_id: int) -> bool:
         self.initialize()

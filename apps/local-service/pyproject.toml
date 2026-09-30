@@ -3,10 +3,12 @@ name = "job-search-assistant-local"
 version = "0.1.0"
 description = "Local-first knowledge and decision service for Job Search Assistant"
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<1",
   "pydantic-settings>=2.10,<3",
+  "pymupdf>=1.26,<2",
   "pypdf>=6,<7",
   "python-docx>=1.2,<2",
   "python-multipart>=0.0.20,<1",

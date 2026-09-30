@@ -37,7 +37,15 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   health: () => request<HealthResponse>('/v1/health'),
-  jobs: () => request<{ total: number; items: StoredJob[] }>('/v1/jobs?limit=500'),
+  jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
+    const params = new URLSearchParams({
+      page: String(options.page || 1),
+      pageSize: String(options.pageSize || 20),
+    })
+    if (options.query?.trim()) params.set('query', options.query.trim())
+    if (options.communicationResult) params.set('communicationResult', options.communicationResult)
+    return request<{ total: number; page: number; pageSize: number; totalPages: number; items: StoredJob[] }>(`/v1/jobs?${params}`)
+  },
   createJob: (job: ManualJobInput) => request<StoredJob>('/v1/jobs', json('POST', job)),
   updateJobTracking: (id: number, data: JobTrackingUpdate) => request<StoredJob>(`/v1/jobs/${id}/tracking`, json('PUT', data)),
   deleteJob: (id: number) => request<void>(`/v1/jobs/${id}`, { method: 'DELETE' }),
@@ -60,6 +68,7 @@ export const api = {
     if (modelRecordId !== undefined) body.append('modelRecordId', String(modelRecordId))
     return request<ResumeImportResult>('/v1/resumes/import', { method: 'POST', body })
   },
+  setDefaultResumeImage: (id: number) => request<LibraryRecord>(`/v1/resumes/${id}/default-image`, { method: 'PUT' }),
   ragStatus: () => request<RagStatus>('/v1/rag/status'),
   ragChunks: () => request<{ total: number; items: RagChunk[] }>('/v1/rag/chunks'),
   deleteRagChunk: (id: number) => request<void>(`/v1/rag/chunks/${id}`, { method: 'DELETE' }),

@@ -12,6 +12,8 @@
 - `src/utils/`：无状态格式化工具；
 - `src/styles/`：全局视觉样式及 Ant Design Vue 适配；
 - `src/main.ts`：Vite 应用入口；
+
+开发约束：本项目当前在 `src/main.ts` 中按需全局注册 Ant Design Vue 组件。模板新增 `a-*` 标签时，必须同步导入并 `.use(...)` 注册对应组件；生产构建通过并不能证明未注册组件已经正常渲染。完整检查规则见项目根目录 `AGENTS.md`。
 - `nginx.conf`：SPA 路由回退，并将 `/v1`、`/docs`、`/openapi.json` 转发到 FastAPI；
 - `Dockerfile`：构建只包含静态资源的 Web 镜像。
 

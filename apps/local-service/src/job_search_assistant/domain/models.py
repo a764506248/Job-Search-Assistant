@@ -168,6 +168,9 @@ class StoredJob(CapturedJob):
 
 class JobListResponse(ApiModel):
     total: int
+    page: int
+    page_size: int
+    total_pages: int
     items: list[StoredJob]
 
 
@@ -355,6 +358,35 @@ class AutomaticJobMatchResponse(ApiModel):
     decision: DecisionResponse
     evidence: list[RagSearchResult]
     scoring_version: str = "local-hybrid-v1"
+
+
+class AutomationConfigResponse(ApiModel):
+    target_roles: list[str] = Field(default_factory=list)
+    target_cities: list[str] = Field(default_factory=list)
+    search_keywords: list[str] = Field(default_factory=list)
+    minimum_salary_k: int = Field(default=20, ge=0)
+    daily_target: int = Field(default=20, ge=1, le=500)
+    minimum_suitability_score: int = Field(default=60, ge=0, le=100)
+    minimum_customization_confidence: int = Field(default=80, ge=0, le=100)
+    send_resume_image: bool = False
+    default_greeting: str = ""
+    default_resume_image_available: bool = False
+    matching_rules: list[RiskRuleInput] = Field(default_factory=list)
+
+
+class JobAnalysisPlanRequest(ApiModel):
+    job: CapturedJob
+    minimum_suitability_score: int | None = Field(default=None, ge=0, le=100)
+    minimum_customization_confidence: int | None = Field(default=None, ge=0, le=100)
+    company_blocked: bool = False
+
+
+class JobAnalysisPlanResponse(ApiModel):
+    snapshot: StoredJob
+    match: AutomaticJobMatchResponse
+    generated_greeting: str | None = None
+    default_resume_image_available: bool = False
+    duplicate: bool = False
 
 
 class MaterialPreviewRequest(ApiModel):

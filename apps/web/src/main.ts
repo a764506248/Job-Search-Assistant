@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { Button, ConfigProvider, Layout, Modal } from 'ant-design-vue'
+import { Button, ConfigProvider, Layout, Modal, Pagination } from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
 import './styles/main.css'
 import App from './app/App.vue'
@@ -11,4 +11,5 @@ createApp(App)
   .use(ConfigProvider)
   .use(Layout)
   .use(Modal)
+  .use(Pagination)
   .mount('#app')

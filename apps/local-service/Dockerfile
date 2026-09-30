@@ -9,6 +9,7 @@ COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir \
     "fastapi>=0.116,<1" \
     "pydantic-settings>=2.10,<3" \
+    "pymupdf>=1.26,<2" \
     "pypdf>=6,<7" \
     "python-docx>=1.2,<2" \
     "python-multipart>=0.0.20,<1" \

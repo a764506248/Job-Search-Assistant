@@ -477,3 +477,93 @@ POST /v1/delivery-plans/{id}/pause-risk
 - 删除原始文件后，不得保留可还原敏感内容的缓存。
 - 审计日志只保留脱敏摘要。
 - 提供“删除全部本地数据”功能。
+
+## 19. 投递反馈闭环
+
+`has_communicated` 和 `has_interview` 只能用于快速展示，不能作为分析的唯一事实来源。正式统计需要保存阶段事件和实际使用的材料版本。
+
+### 19.1 求职申请
+
+```json
+{
+  "id": "application_001",
+  "job_posting_id": 83,
+  "delivery_record_id": 25,
+  "status": "interviewing",
+  "applied_at": "2026-09-30T09:30:00Z",
+  "resume_id": 12,
+  "resume_version": 3,
+  "greeting_text": "您好，我有 RAG 与 Agent 项目经验……",
+  "analysis_id": "analysis_083_v1",
+  "suitability_score": 76,
+  "customization_confidence": 84,
+  "matched_entity_ids": ["project:6", "strength:1", "tech:3"]
+}
+```
+
+同一职位只保留一个活动申请，但材料、评分和证据必须保留投递当时的快照，不能随个人档案后续修改而改变。
+
+### 19.2 阶段事件
+
+```json
+{
+  "id": "event_101",
+  "application_id": "application_001",
+  "stage": "interview_round_completed",
+  "result": "passed",
+  "round": 1,
+  "occurred_at": "2026-10-03T06:00:00Z",
+  "source": "manual",
+  "notes": "技术一面通过"
+}
+```
+
+阶段枚举：
+
+- `delivered`：已投递或已发送问候语；
+- `recruiter_replied`：招聘方有效回复；
+- `interview_invited`：收到面试邀请；
+- `interview_round_completed`：完成一轮面试，结果为 `passed`、`failed` 或 `pending`；
+- `offer_received`：收到 Offer；
+- `rejected`：流程被拒；
+- `withdrawn`：用户主动终止；
+- `expired`：岗位关闭或长期无反馈。
+
+浏览器可自动确认的事件标记为 `source=browser`；面试结果和 Offer 默认由用户手动确认，禁止模型自行推断。
+
+## 20. 统计口径
+
+所有比率必须同时返回分子、分母、时间范围和筛选条件，样本过小时展示“样本不足”，不得只展示百分比。
+
+| 指标 | 统一口径 |
+| --- | --- |
+| 有效回复率 | `recruiter_replied / delivered` |
+| 面试邀请率 | `interview_invited / delivered` |
+| 面试轮次通过率 | 结果为 `passed` 的已完成轮次 / 有明确结果的已完成轮次 |
+| 面试公司通过率 | 至少通过一轮的公司数 / 至少完成一轮面试的公司数 |
+| Offer 转化率 | `offer_received / interview_invited` |
+
+统计维度至少支持：
+
+- 时间范围；
+- 职位名称和标准化岗位族；
+- 公司及公司规模；
+- 城市、区域和详细工作地址；
+- 薪资区间；
+- JD 技能、职责和风险标签；
+- 使用的简历 ID、版本和模板；
+- 使用的项目、个人优势与向量证据实体 ID；
+- 默认/定制问候语和材料策略。
+
+## 21. 反馈分析接口规划
+
+```text
+POST /v1/applications/{id}/events
+GET  /v1/applications/{id}/timeline
+GET  /v1/analytics/funnel
+GET  /v1/analytics/interviews
+GET  /v1/analytics/job-patterns
+POST /v1/analytics/resume-recommendations
+```
+
+`resume-recommendations` 只能基于已保存的投递材料快照和结果事件提出建议，输出受影响的简历字段、项目实体 ID、支持样本和反例；不得自动覆盖个人档案、项目库或默认简历。

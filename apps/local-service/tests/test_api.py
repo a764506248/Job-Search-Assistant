@@ -196,6 +196,69 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
     assert client.get("/v1/jobs").json()["total"] == 0
 
 
+def test_job_snapshots_support_server_side_pagination_and_search(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    for index in range(1, 6):
+        response = client.post(
+            "/v1/jobs",
+            json={
+                "title": f"AI Agent 工程师 {index}",
+                "companyName": "分页测试公司" if index <= 3 else "其他公司",
+                "description": f"负责第 {index} 个 RAG 项目",
+            },
+        )
+        assert response.status_code == 201
+
+    first_page = client.get("/v1/jobs?page=1&pageSize=2").json()
+    assert first_page["total"] == 5
+    assert first_page["page"] == 1
+    assert first_page["pageSize"] == 2
+    assert first_page["totalPages"] == 3
+    assert [item["title"] for item in first_page["items"]] == [
+        "AI Agent 工程师 5",
+        "AI Agent 工程师 4",
+    ]
+
+    last_page = client.get("/v1/jobs?page=3&pageSize=2").json()
+    assert last_page["page"] == 3
+    assert [item["title"] for item in last_page["items"]] == ["AI Agent 工程师 1"]
+
+    searched = client.get(
+        "/v1/jobs",
+        params={"page": 1, "pageSize": 2, "query": "分页测试公司"},
+    ).json()
+    assert searched["total"] == 3
+    assert searched["totalPages"] == 2
+    assert len(searched["items"]) == 2
+
+    first_id = first_page["items"][0]["id"]
+    tracked = client.put(
+        f"/v1/jobs/{first_id}/tracking",
+        json={
+            "hasCommunicated": True,
+            "hasInterview": True,
+            "resumeVariant": "default",
+        },
+    )
+    assert tracked.status_code == 200
+
+    communicated = client.get(
+        "/v1/jobs", params={"communicationResult": "communicated"}
+    ).json()
+    assert communicated["total"] == 1
+    assert communicated["items"][0]["id"] == first_id
+
+    not_communicated = client.get(
+        "/v1/jobs", params={"communicationResult": "not_communicated"}
+    ).json()
+    assert not_communicated["total"] == 4
+
+    interviewed = client.get(
+        "/v1/jobs", params={"communicationResult": "interviewed"}
+    ).json()
+    assert interviewed["total"] == 1
+
+
 def test_create_manual_job_snapshot(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     response = client.post(
@@ -401,6 +464,120 @@ def test_delivery_api_upserts_by_platform_job_id(tmp_path) -> None:
     assert listing.status_code == 200
     assert listing.json()["total"] == 1
     assert listing.json()["items"][0]["platformJobId"] == "boss-job-1"
+
+
+def test_automation_config_uses_profile_and_library_rules(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+    client.put(
+        "/v1/profile",
+        json={
+            "data": {
+                "targetRoles": ["AI Agent 工程师"],
+                "cities": ["北京"],
+                "defaultGreeting": "您好，想和您沟通这个岗位。",
+                "minimumSuitabilityScore": 60,
+                "minimumCustomizationConfidence": 80,
+            }
+        },
+    )
+    client.post(
+        "/v1/library/rules",
+        json={
+            "name": "屏蔽外包",
+            "data": {"pattern": "外包, 驻场", "action": "block_delivery"},
+        },
+    )
+
+    response = client.get("/v1/automation/config")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["searchKeywords"] == ["AI Agent 工程师"]
+    assert result["targetCities"] == ["北京"]
+    assert result["minimumSuitabilityScore"] == 60
+    assert result["matchingRules"][0]["patterns"] == ["外包", "驻场"]
+
+
+def test_analyze_and_plan_atomically_saves_matches_and_generates_greeting(tmp_path) -> None:
+    greeting_generator = FakeGreetingGenerator()
+    client = TestClient(
+        create_app(
+            tmp_path / "jobs.sqlite3",
+            embedder=MaterialPreviewEmbedder(),
+            greeting_generator=greeting_generator,
+        )
+    )
+    client.put(
+        "/v1/profile",
+        json={
+            "data": {
+                "summary": "熟悉 RAG 与 Agent 开发",
+                "defaultGreeting": "您好，我对贵司岗位很感兴趣。",
+                "minimumSuitabilityScore": 60,
+                "minimumCustomizationConfidence": 1,
+            }
+        },
+    )
+    request = {
+        "job": {
+            "platform": "boss",
+            "platformJobId": "atomic-plan-1",
+            "url": "https://www.zhipin.com/job_detail/atomic-plan-1.html",
+            "title": "AI Agent 工程师",
+            "companyName": "示例科技",
+            "location": "北京",
+            "salaryText": "25-40K",
+            "description": "负责 RAG 与 Agent 应用开发",
+            "skills": ["Python", "RAG"],
+            "capturedAt": "2026-09-30T08:00:00Z",
+            "source": "dom",
+        }
+    }
+
+    response = client.post("/v1/jobs/analyze-and-plan", json=request)
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["snapshot"]["platformJobId"] == "atomic-plan-1"
+    assert result["match"]["suitabilityScore"] >= 60
+    assert result["match"]["decision"]["shouldDeliver"] is True
+    assert result["generatedGreeting"].startswith("您好")
+    assert client.get("/v1/jobs").json()["total"] == 1
+
+
+def test_analyze_and_plan_blocks_jobs_below_profile_threshold(tmp_path) -> None:
+    class ZeroEmbedder(MaterialPreviewEmbedder):
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.0, 0.0, 0.0] for _text in texts]
+
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3", embedder=ZeroEmbedder()))
+    client.put(
+        "/v1/profile",
+        json={"data": {"minimumSuitabilityScore": 60, "summary": "平面设计"}},
+    )
+    response = client.post(
+        "/v1/jobs/analyze-and-plan",
+        json={
+            "job": {
+                "platform": "boss",
+                "platformJobId": "atomic-plan-low",
+                "url": "https://www.zhipin.com/job_detail/atomic-plan-low.html",
+                "title": "销售经理",
+                "companyName": "示例销售公司",
+                "description": "负责销售团队管理和业绩目标",
+                "capturedAt": "2026-09-30T08:00:00Z",
+                "source": "dom",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["match"]["decision"]["shouldDeliver"] is False
+    assert result["match"]["decision"]["materialStrategy"] == "blocked"
+    assert result["generatedGreeting"] is None
 
 
 def test_jd_analysis_returns_evidence_and_default_strategy(tmp_path) -> None:

@@ -2,6 +2,7 @@
   "name": "@job-search-assistant/contracts",
   "private": true,
   "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

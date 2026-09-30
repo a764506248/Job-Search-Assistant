@@ -2,7 +2,8 @@
   <div class="view active-view">
     <div class="toolbar panel">
       <label class="search-field"><span aria-hidden="true">⌕</span><input v-model="filter" type="search" placeholder="搜索职位、公司、技能或 JD 内容" /></label>
-      <span class="result-count">显示 {{ filteredJobs.length }} / {{ jobs.length }} 条</span>
+      <label class="snapshot-result-filter"><span>沟通结果</span><select v-model="communicationResult"><option value="">全部</option><option value="not_communicated">未沟通</option><option value="communicated">已沟通</option><option value="interviewed">已获得面试</option></select></label>
+      <span class="result-count">显示 {{ jobs.length }} / {{ total }} 条</span>
       <a-button type="primary" @click="showCreate = !showCreate">{{ showCreate ? '收起表单' : '手动添加职位' }}</a-button>
     </div>
 
@@ -62,9 +63,9 @@
 
     <section class="panel table-panel">
       <div v-if="loading" class="library-empty">正在读取职位数据…</div>
-      <div v-else-if="!filteredJobs.length" class="empty-state"><span class="empty-icon">▤</span><h3>还没有职位数据</h3><p>打开 Boss 职位详情页后，扩展会自动将 JD 保存到这里。</p></div>
+      <div v-else-if="!jobs.length" class="empty-state"><span class="empty-icon">▤</span><h3>{{ filter ? '没有匹配的职位' : '还没有职位数据' }}</h3><p>{{ filter ? '请调整搜索关键词后重试。' : '打开 Boss 职位详情页后，扩展会自动将 JD 保存到这里。' }}</p></div>
       <div v-else class="table-wrap"><table><thead><tr><th>职位与公司</th><th>薪资 / 地点</th><th>要求</th><th><span class="field-heading">生成问候语<small>generatedGreeting</small></span></th><th>沟通结果</th><th>采集时间</th><th>操作</th></tr></thead>
-        <tbody><tr v-for="job in filteredJobs" :key="job.id">
+        <tbody><tr v-for="job in jobs" :key="job.id">
           <td><strong>{{ job.title }}</strong><small>{{ job.companyName }}</small><small>{{ job.companySize || '规模未识别' }}</small></td>
           <td><strong>{{ job.salaryText || '—' }}</strong><small>{{ job.location || '地点未识别' }}</small><small v-if="job.workAddress" class="job-address-preview">{{ job.workAddress }}</small></td>
           <td><div class="tags"><span v-for="tag in jobTags(job)" :key="tag" class="tag">{{ tag }}</span></div></td>
@@ -74,12 +75,13 @@
           <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
         </tr></tbody>
       </table></div>
+      <div v-if="total" class="snapshot-pagination"><a-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-size-changer="true" :page-size-options="['10', '20', '50', '100']" show-quick-jumper :show-total="(value: number) => `共 ${value} 条职位快照`" @change="changePage" @show-size-change="changePageSize" /></div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
@@ -88,6 +90,10 @@ import type { JobMatch, JobTrackingUpdate, MaterialPreview, StoredJob } from '..
 
 const jobs = ref<StoredJob[]>([])
 const filter = ref('')
+const communicationResult = ref('')
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
 const loading = ref(false)
 const matchingId = ref<number | null>(null)
 const match = ref<{ job: StoredJob; result: JobMatch } | null>(null)
@@ -102,11 +108,6 @@ const materialPreview = ref<MaterialPreview | null>(null)
 const trackingForm = reactive<JobTrackingUpdate>({ hasCommunicated: false, hasInterview: false, generatedGreeting: '', resumeVariant: 'default', generatedResumeId: undefined, resumeOptimization: '' })
 const emptyForm = () => ({ title: '', companyName: '', companySize: '', url: '', location: '', workAddress: '', salaryText: '', experience: '', education: '', description: '', skillsText: '', recruiterName: '', recruiterTitle: '' })
 const form = reactive(emptyForm())
-const filteredJobs = computed(() => {
-  const query = filter.value.trim().toLowerCase()
-  if (!query) return jobs.value
-  return jobs.value.filter((job) => [job.title, job.companyName, job.description, job.location, job.workAddress, job.generatedGreeting, ...(job.skills || [])].filter(Boolean).join(' ').toLowerCase().includes(query))
-})
 const resumePreviewSections = computed(() => materialPreview.value ? [
   { title: '个人优势', items: materialPreview.value.resume.summary },
   { title: '技术栈', items: materialPreview.value.resume.skills },
@@ -165,10 +166,26 @@ async function generateMaterialPreview() {
 
 async function load() {
   loading.value = true
-  try { jobs.value = (await api.jobs()).items }
+  try {
+    const result = await api.jobs({ page: page.value, pageSize: pageSize.value, query: filter.value, communicationResult: communicationResult.value })
+    jobs.value = result.items
+    total.value = result.total
+    page.value = result.page
+  }
   catch (error) { message.error((error as Error).message) }
   finally { loading.value = false }
 }
+
+function changePage(nextPage: number) { page.value = nextPage; void load() }
+function changePageSize(_current: number, nextSize: number) { page.value = 1; pageSize.value = nextSize; void load() }
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(filter, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { page.value = 1; void load() }, 300)
+})
+watch(communicationResult, () => { page.value = 1; void load() })
+onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
 
 async function runMatch(job: StoredJob) {
   matchingId.value = job.id

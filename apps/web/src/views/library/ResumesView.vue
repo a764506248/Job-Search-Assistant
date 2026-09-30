@@ -10,7 +10,7 @@
             <option v-if="!models.length" value="">未配置模型，将使用本地解析</option>
             <option v-for="model in models" :key="model.id" :value="String(model.id)">{{ model.name }} · {{ roleName(model) }} · {{ model.data.modelId }}</option>
           </select>
-          <small v-if="models.length">AI 会一次提取完整档案、优势、技术栈、工作/教育经历和多个独立项目；主模型失败时自动调用兜底模型。</small>
+          <small v-if="models.length">AI 会一次提取完整档案、优势、技术栈、工作/教育经历和多个独立项目；项目库采用累加写入，不会清空已有项目，同名项目会更新避免重复；主模型失败时自动调用兜底模型。</small>
           <small v-else>请先到“模型配置”添加并验证模型；本次仍可使用本地规则导入。</small>
         </label>
         <a-button type="primary" html-type="submit" :loading="importing">{{ importing ? '正在识别并入库…' : models.length ? 'AI 识别并直接入库' : '本地解析并直接入库' }}</a-button>

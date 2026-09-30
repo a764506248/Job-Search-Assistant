@@ -185,24 +185,78 @@ class LibraryRepository:
         with self._connect() as connection:
             return self._upsert_projects(connection, projects, now)
 
+    def set_default_resume_image(self, resume_id: int) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, name, data_json FROM library_records WHERE kind = 'resumes'"
+            ).fetchall()
+            selected: tuple[int, str, dict[str, Any]] | None = None
+            for record_id, name, data_json in rows:
+                data = json.loads(data_json)
+                if record_id == resume_id:
+                    if not data.get("previewImageFile"):
+                        raise ValueError("这份简历没有可用的首页图片")
+                    selected = (record_id, name, data)
+                if data.get("isDefaultImage"):
+                    data["isDefaultImage"] = False
+                    connection.execute(
+                        "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(data, ensure_ascii=False), now, record_id),
+                    )
+            if selected is None:
+                raise KeyError(resume_id)
+            record_id, name, data = selected
+            data["isDefaultImage"] = True
+            connection.execute(
+                "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(data, ensure_ascii=False), now, record_id),
+            )
+        return self.get("resumes", record_id)
+
+    def get_default_resume_image(self) -> dict[str, Any]:
+        self.initialize()
+        records = self.list("resumes")
+        selected = next(
+            (item for item in records if item["data"].get("isDefaultImage")), None
+        )
+        if selected is None:
+            selected = next(
+                (item for item in records if item["data"].get("previewImageFile")), None
+            )
+        if selected is None:
+            raise KeyError("default-resume-image")
+        return selected
+
     @staticmethod
     def _upsert_projects(
         connection: sqlite3.Connection,
         projects: list[dict[str, Any]],
         now: str,
     ) -> list[int]:
+        """Accumulate imported projects while updating the same logical project."""
         project_ids: list[int] = []
         existing_projects = connection.execute(
-            "SELECT id, data_json FROM library_records WHERE kind = 'projects'"
+            "SELECT id, name, data_json FROM library_records WHERE kind = 'projects'"
         ).fetchall()
         projects_by_source_key = {
             data.get("sourceKey"): record_id
-            for record_id, data_json in existing_projects
+            for record_id, _name, data_json in existing_projects
             if (data := json.loads(data_json)).get("sourceKey")
+        }
+        imported_projects_by_name = {
+            LibraryRepository._normalized_project_name(name): record_id
+            for record_id, name, data_json in existing_projects
+            if json.loads(data_json).get("source") == "resume-import"
         }
         for project in projects:
             source_key = project["data"].get("sourceKey")
             existing_id = projects_by_source_key.get(source_key)
+            if existing_id is None and project["data"].get("source") == "resume-import":
+                existing_id = imported_projects_by_name.get(
+                    LibraryRepository._normalized_project_name(project["name"])
+                )
             if existing_id:
                 connection.execute(
                     """UPDATE library_records SET name = ?, data_json = ?, updated_at = ?
@@ -230,7 +284,15 @@ class LibraryRepository:
                 project_ids.append(project_id)
                 if source_key:
                     projects_by_source_key[source_key] = project_id
+                if project["data"].get("source") == "resume-import":
+                    imported_projects_by_name[
+                        LibraryRepository._normalized_project_name(project["name"])
+                    ] = project_id
         return project_ids
+
+    @staticmethod
+    def _normalized_project_name(name: str) -> str:
+        return re.sub(r"[\s·•_\-—–]+", "", name).casefold()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)

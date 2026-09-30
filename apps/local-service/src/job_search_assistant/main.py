@@ -81,6 +81,7 @@ def create_app(
             resolved_model_tester,
             resolved_material_generator,
             resolved_greeting_generator,
+            resolved_database_path.parent / "resume-images",
         )
     )
     return application

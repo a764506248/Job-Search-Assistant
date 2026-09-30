@@ -1,4 +1,7 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
+from reportlab.pdfgen import canvas
 
 from job_search_assistant.main import create_app
 
@@ -11,6 +14,15 @@ class FakeEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [[float(len(text)), 1.0, 0.5] for text in texts]
+
+
+def make_pdf(text: str) -> bytes:
+    stream = BytesIO()
+    document = canvas.Canvas(stream)
+    document.drawString(72, 760, text)
+    document.showPage()
+    document.save()
+    return stream.getvalue()
 
 
 class FakeProjectExtractor:
@@ -58,6 +70,97 @@ class StructuredResumeExtractor:
             "modelId": "fallback-model",
             "attemptErrors": ["主模型：timed out"],
         }
+
+
+class MutableStructuredResumeExtractor:
+    def __init__(self) -> None:
+        self.projects = [
+            {"name": "已有项目", "data": {"summary": "第一版", "extractionMethod": "ai"}},
+        ]
+
+    def extract_resume(
+        self, resume_text: str, model_record_id: int | None = None
+    ) -> dict[str, object]:
+        return {
+            "profile": {},
+            "projects": self.projects,
+            "modelRecordId": 1,
+            "modelName": "测试模型",
+            "modelId": "test-model",
+            "attemptErrors": [],
+        }
+
+
+def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
+    tmp_path,
+) -> None:
+    extractor = MutableStructuredResumeExtractor()
+    client = TestClient(create_app(
+        tmp_path / "jobs.sqlite3",
+        embedder=FakeEmbedder(),
+        project_extractor=extractor,
+    ))
+
+    first = client.post(
+        "/v1/resumes/import",
+        files={"file": ("resume-v1.txt", "第一版简历".encode(), "text/plain")},
+    ).json()
+    first_project_id = first["projectIds"][0]
+
+    extractor.projects = [
+        {"name": "已有 项目", "data": {"summary": "第二版", "extractionMethod": "ai"}},
+        {"name": "新增项目", "data": {"summary": "新增内容", "extractionMethod": "ai"}},
+    ]
+    second = client.post(
+        "/v1/resumes/import",
+        files={"file": ("resume-v2.txt", "第二版简历".encode(), "text/plain")},
+    ).json()
+
+    projects = client.get("/v1/library/projects").json()["items"]
+    assert len(projects) == 2
+    assert second["projectIds"][0] == first_project_id
+    assert {item["name"] for item in projects} == {"已有 项目", "新增项目"}
+    updated = next(item for item in projects if item["id"] == first_project_id)
+    assert updated["data"]["summary"] == "第二版"
+
+
+def test_pdf_import_generates_first_page_image_and_supports_default_selection(
+    tmp_path,
+) -> None:
+    client = TestClient(create_app(
+        tmp_path / "jobs.sqlite3",
+        embedder=FakeEmbedder(),
+        project_extractor=StructuredResumeExtractor(),
+    ))
+    first = client.post(
+        "/v1/resumes/import",
+        files={"file": ("resume-one.pdf", make_pdf("First resume page"), "application/pdf")},
+    ).json()
+    second = client.post(
+        "/v1/resumes/import",
+        files={"file": ("resume-two.pdf", make_pdf("Second resume page"), "application/pdf")},
+    ).json()
+
+    records = client.get("/v1/library/resumes").json()["items"]
+    first_record = next(item for item in records if item["id"] == first["resumeId"])
+    second_record = next(item for item in records if item["id"] == second["resumeId"])
+    assert first_record["data"]["isDefaultImage"] is True
+    assert second_record["data"]["isDefaultImage"] is False
+    assert first_record["data"]["previewImageFile"].endswith("-page-1.png")
+
+    preview = client.get(f"/v1/resumes/{first['resumeId']}/preview-image")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+    assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+    selected = client.put(f"/v1/resumes/{second['resumeId']}/default-image")
+    assert selected.status_code == 200
+    assert selected.json()["data"]["isDefaultImage"] is True
+    default_image = client.get("/v1/resumes/default-image")
+    assert default_image.status_code == 200
+    assert default_image.content == client.get(
+        f"/v1/resumes/{second['resumeId']}/preview-image"
+    ).content
 
 
 def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path) -> None:
