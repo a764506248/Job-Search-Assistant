@@ -80,7 +80,20 @@ def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path
     profile = client.get("/v1/profile").json()["data"]
     assert profile["displayName"] == "AI 提取姓名"
     assert profile["strengths"] == [{"id": "strength-1", "content": "完整的个人优势"}]
-    assert len(client.get("/v1/library/projects").json()["items"]) == 2
+    projects = client.get("/v1/library/projects").json()["items"]
+    assert len(projects) == 2
+    assert {item["name"] for item in projects} == {"项目一", "项目二"}
+    assert all(item["data"]["source"] == "resume-import" for item in projects)
+
+    chunks = client.get("/v1/rag/chunks").json()["items"]
+    strength_chunks = [item for item in chunks if item["knowledgeType"] == "strengths"]
+    assert len(strength_chunks) == 1
+    assert strength_chunks[0]["entityId"] == "strengths"
+    assert strength_chunks[0]["content"] == "完整的个人优势"
+    project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
+    assert {item["entityId"] for item in project_chunks} == {
+        str(item["id"]) for item in projects
+    }
 
 
 def test_import_resume_writes_profile_projects_resume_and_vectors(tmp_path) -> None:

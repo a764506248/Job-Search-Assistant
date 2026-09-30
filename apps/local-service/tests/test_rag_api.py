@@ -41,6 +41,16 @@ def test_rebuild_and_search_local_knowledge(tmp_path) -> None:
         "/v1/library/resumes",
         json={"name": "原始简历", "data": {"rawText": "这段原始简历不能被机械切片"}},
     )
+    client.post(
+        "/v1/library/projects",
+        json={
+            "name": "旧简历 · 项目经历",
+            "data": {
+                "summary": "整段项目经历占位文本",
+                "source": "resume-import",
+            },
+        },
+    )
 
     rebuilt = client.post("/v1/rag/rebuild")
     assert rebuilt.status_code == 200
@@ -73,6 +83,7 @@ def test_rebuild_and_search_local_knowledge(tmp_path) -> None:
     assert project_item["sourceId"] == str(project_response.json()["id"])
     assert project_item["tags"] == ["Python", "RAG"]
     assert all("机械切片" not in item["content"] for item in chunk_data["items"])
+    assert all(item["sourceName"] != "旧简历 · 项目经历" for item in chunk_data["items"])
 
     search = client.post("/v1/rag/search", json={"query": "Python 后端", "limit": 2})
     assert search.status_code == 200
@@ -165,11 +176,21 @@ def test_rag_uses_materialized_profile_entities_instead_of_raw_sections(tmp_path
     assert profile["techStackGroups"][0]["items"] == ["LangGraph", "LangChain", "MCP"]
 
     chunks = client.get("/v1/rag/chunks").json()["items"]
-    assert len([item for item in chunks if item["knowledgeType"] == "strengths"]) == 2
-    assert len([item for item in chunks if item["knowledgeType"] == "tech-stack"]) == 2
-    assert all(item["content"] != profile["summary"] for item in chunks)
-    tech_chunk = next(item for item in chunks if item["sourceName"] == "Agent 与编排")
-    assert tech_chunk["tags"] == ["LangGraph", "LangChain", "MCP"]
+    strength_chunks = [item for item in chunks if item["knowledgeType"] == "strengths"]
+    tech_chunks = [item for item in chunks if item["knowledgeType"] == "tech-stack"]
+    assert len(strength_chunks) == 1
+    assert strength_chunks[0]["sourceName"] == "个人优势"
+    assert strength_chunks[0]["content"] == "熟悉 Python 后端开发\n具备 RAG 检索优化经验"
+    assert len(tech_chunks) == 1
+    assert tech_chunks[0]["sourceName"] == "技术栈"
+    assert tech_chunks[0]["content"] == (
+        "Agent 与编排：LangGraph、LangChain、MCP\nRAG 与推理：Embedding、Rerank"
+    )
+    assert tech_chunks[0]["tags"] == [
+        "LangGraph", "LangChain", "MCP", "Embedding", "Rerank",
+    ]
+    assert len([item for item in chunks if item["sourceName"] == "工作经历"]) == 1
+    assert len([item for item in chunks if item["sourceName"] == "教育经历"]) == 1
 
 
 def test_structured_profile_stops_at_following_resume_headings(tmp_path) -> None:

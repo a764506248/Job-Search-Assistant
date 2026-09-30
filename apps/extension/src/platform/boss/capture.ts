@@ -29,6 +29,11 @@ const ACTIVE_CARD_SELECTOR = [
   '.job-card-wrapper.active', '.job-card-wrapper.selected',
   '.job-card-wrap.active', '.job-card-wrap.selected',
   '.job-list-item.active', '.job-list-item.selected',
+  '.job-card-wrapper[aria-selected="true"]', '.job-card-wrap[aria-selected="true"]',
+].join(',')
+
+const CARD_SELECTOR = [
+  '.job-card-wrapper', '.job-card-wrap', '.job-list-item', '.job-card-box',
 ].join(',')
 
 const SALARY_PATTERN = /(?:\d{1,3}(?:\.\d+)?\s*[-–—~]\s*\d{1,3}(?:\.\d+)?K|\d{1,3}K以上)(?:[·・]\d{1,2}薪)?/i
@@ -55,11 +60,16 @@ function texts(document: Document, selectors: readonly string[]): string[] {
   return []
 }
 
-function platformJobId(document: Document, pathname: string, title?: string): string | undefined {
+function platformJobId(
+  document: Document,
+  pathname: string,
+  title?: string,
+  resolvedCard?: HTMLElement | null,
+): string | undefined {
   const match = pathname.match(/\/job_detail\/([^/.]+)(?:\.html)?/)
   if (match?.[1]) return match[1]
 
-  const selected = document.querySelector<HTMLElement>(
+  const selected = resolvedCard ?? document.querySelector<HTMLElement>(
     '[data-jobid].selected,[data-job-id].selected,.job-card-wrapper.active,.job-card-wrap.active',
   )
   const selectedId = selected?.dataset.jobid ?? selected?.dataset.jobId
@@ -97,8 +107,23 @@ function cleanCompanyName(value: string | undefined): string | undefined {
   return value?.replace(/^公司名称[：:]?\s*/, '').trim() || undefined
 }
 
-function activeCard(document: Document): HTMLElement | null {
-  return document.querySelector<HTMLElement>(ACTIVE_CARD_SELECTOR)
+function normalized(value: string | null | undefined): string {
+  return value?.replace(/\s+/g, '').toLowerCase() ?? ''
+}
+
+function activeCard(document: Document, title?: string): HTMLElement | null {
+  const explicitlySelected = document.querySelector<HTMLElement>(ACTIVE_CARD_SELECTOR)
+  if (explicitlySelected && (!title || normalized(cardText(explicitlySelected, [
+    '.job-name', '.job-title', '.job-info .name', 'a[href*="/job_detail/"]',
+  ])) === normalized(title))) return explicitlySelected
+  if (!title) return null
+  const expected = normalized(title)
+  return Array.from(document.querySelectorAll<HTMLElement>(CARD_SELECTOR)).find((card) => {
+    const cardTitle = cardText(card, [
+      '.job-name', '.job-title', '.job-info .name', 'a[href*="/job_detail/"]',
+    ])
+    return normalized(cardTitle) === expected
+  }) ?? null
 }
 
 function cardText(card: HTMLElement | null, selectors: readonly string[]): string | undefined {
@@ -108,6 +133,28 @@ function cardText(card: HTMLElement | null, selectors: readonly string[]): strin
     if (value) return value
   }
   return undefined
+}
+
+function cardCompanyName(card: HTMLElement | null): string | undefined {
+  return cleanCompanyName(cardText(card, [
+    '.job-card-footer .company-name',
+    '.job-card-footer [class*="company-name"]',
+    '.job-card-footer .company-info a',
+    '.job-card-footer .company-info',
+    '.job-card-footer .name',
+    '[class*="company-name"]',
+    '.company-info .name',
+    '.company-info a',
+    '.company-text',
+  ]))
+}
+
+function cardLabels(card: HTMLElement | null): string[] {
+  if (!card) return []
+  return Array.from(card.querySelectorAll<HTMLElement>('span,li,p,a,div'))
+    .filter((node) => node.children.length === 0)
+    .map((node) => node.textContent?.trim() ?? '')
+    .filter(Boolean)
 }
 
 function semanticDescription(document: Document): string | undefined {
@@ -132,16 +179,16 @@ function stablePartialId(page: Pick<Location, 'pathname'>, values: string[]): st
 }
 
 function collectCoreFields(document: Document, page: Pick<Location, 'pathname'>) {
-  const card = activeCard(document)
   const directTitle = text(document, SELECTORS.title)
+  const card = activeCard(document, directTitle)
   const directCompany = cleanCompanyName(text(document, SELECTORS.company))
   const directDescription = text(document, SELECTORS.description)
   const title = directTitle ?? cardText(card, ['.job-name', '.job-title', 'a[href*="/job_detail/"]'])
-  const companyName = directCompany ?? cleanCompanyName(
-    cardText(card, ['.company-name', '.company-text', '.company-info']),
-  )
+  const companyName = page.pathname.startsWith('/web/geek/jobs')
+    ? cardCompanyName(card) ?? directCompany
+    : directCompany ?? cardCompanyName(card)
   const description = directDescription ?? semanticDescription(document)
-  const directId = platformJobId(document, page.pathname, title)
+  const directId = platformJobId(document, page.pathname, title, card)
   const hasJobSignal = Boolean(directId || title || companyName || description)
   return {
     direct: {
@@ -159,7 +206,9 @@ function collectCoreFields(document: Document, page: Pick<Location, 'pathname'>)
   }
 }
 
-function companySize(document: Document): string | undefined {
+function companySize(document: Document, card?: HTMLElement | null): string | undefined {
+  const cardSize = firstMatch(cardLabels(card ?? null), COMPANY_SIZE_PATTERN)
+  if (cardSize) return cardSize
   const direct = texts(document, SELECTORS.companySize)
   const company = document.querySelector('.job-detail-company,.company-info,.company-card')
   const fallback = company
@@ -177,7 +226,9 @@ export function captureBossJob(
   const { platformJobId: id, title, companyName, description } = fields.resolved
   if (!id || !title || !companyName || !description) return null
 
-  const labels = [...texts(document, SELECTORS.tags), ...headerLabels(document, title)]
+  const card = activeCard(document, title)
+  const cardValues = cardLabels(card)
+  const labels = [...texts(document, SELECTORS.tags), ...headerLabels(document, title), ...cardValues]
   const uniqueLabels = [...new Set(labels)]
   return {
     platform: 'boss',
@@ -185,10 +236,14 @@ export function captureBossJob(
     url: page.href,
     title,
     companyName,
-    companySize: companySize(document),
-    location: text(document, SELECTORS.location) ?? uniqueLabels.find((label) => LOCATION_PATTERN.test(label)),
+    companySize: companySize(document, card),
+    location: text(document, SELECTORS.location)
+      ?? cardText(card, ['.job-area', '.job-location', '.job-address', '.company-location'])
+      ?? uniqueLabels.find((label) => LOCATION_PATTERN.test(label)),
     workAddress: text(document, SELECTORS.workAddress),
-    salaryText: text(document, SELECTORS.salary) ?? firstMatch(uniqueLabels, SALARY_PATTERN),
+    salaryText: text(document, SELECTORS.salary)
+      ?? cardText(card, ['.salary', '.job-salary'])
+      ?? firstMatch(uniqueLabels, SALARY_PATTERN),
     experience: uniqueLabels.find((label) => EXPERIENCE_PATTERN.test(label))?.match(EXPERIENCE_PATTERN)?.[0],
     education: uniqueLabels.find((label) => EDUCATION_PATTERN.test(label))?.match(EDUCATION_PATTERN)?.[0],
     description,

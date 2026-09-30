@@ -49,49 +49,59 @@ class RagService:
         return self.vectors.delete(chunk_id)
 
     def _collect_knowledge_units(self) -> list[dict[str, Any]]:
-        """Build one vector per resume entity; never split raw resume text by length."""
+        """Build vectors by resume section; projects remain independently addressable."""
         units: list[dict[str, Any]] = []
         profile = self.library.get_profile()
-        for index, strength in enumerate(profile.get("strengths", []), 1):
-            entity_id = str(strength.get("id") or f"strength-{index}")
-            content = str(strength.get("content", "")).strip()
-            if content:
-                units.append(
-                    self._unit(
-                        "profile", entity_id, f"个人优势 #{index}",
-                        "strengths", entity_id, content, [],
-                    )
+        strengths = [
+            str(item.get("content", "")).strip()
+            for item in profile.get("strengths", [])
+            if str(item.get("content", "")).strip()
+        ]
+        if strengths:
+            units.append(
+                self._unit(
+                    "profile", "strengths", "个人优势", "strengths", "strengths",
+                    "\n".join(strengths), [],
                 )
+            )
 
-        for index, group in enumerate(profile.get("techStackGroups", []), 1):
-            entity_id = str(group.get("id") or f"tech-{index}")
-            name = str(group.get("name") or f"技术栈 #{index}")
+        tech_lines: list[str] = []
+        tech_tags: list[str] = []
+        for group in profile.get("techStackGroups", []):
+            name = str(group.get("name") or "技术栈").strip()
             items = [str(item).strip() for item in group.get("items", []) if str(item).strip()]
             if items:
-                units.append(
-                    self._unit(
-                        "profile", entity_id, name, "tech-stack", entity_id,
-                        f"{name}：{'、'.join(items)}", items,
-                    )
+                tech_lines.append(f"{name}：{'、'.join(items)}")
+                tech_tags.extend(items)
+        if tech_lines:
+            units.append(
+                self._unit(
+                    "profile", "tech-stack", "技术栈", "tech-stack", "tech-stack",
+                    "\n".join(tech_lines), tech_tags,
                 )
+            )
 
         for field, knowledge_type, label in (
             ("workExperiences", "work-experience", "工作经历"),
             ("educations", "education", "教育经历"),
         ):
-            for index, entity in enumerate(profile.get(field, []), 1):
-                entity_id = str(entity.get("id") or f"{knowledge_type}-{index}")
-                content = self._to_text(entity.get("content") or entity)
+            contents: list[str] = []
+            for entity in profile.get(field, []):
+                content = self._to_text(entity.get("content") or entity).strip()
                 if content:
-                    units.append(
-                        self._unit(
-                            "profile", entity_id, f"{label} #{index}", knowledge_type,
-                            entity_id, content, [],
-                        )
+                    contents.append(content)
+            if contents:
+                units.append(
+                    self._unit(
+                        "profile", knowledge_type, label, knowledge_type,
+                        knowledge_type, "\n\n".join(contents), [],
                     )
+                )
 
         for record in self.library.list("projects"):
             data = record["data"]
+            if self._is_legacy_aggregate_project(record["name"], data):
+                continue
             content = f"项目名称：{record['name']}\n{self._project_text(data)}"
             tags = self._tags(data, content)
             units.append(
@@ -106,6 +116,15 @@ class RagService:
                 )
             )
         return units
+
+    @staticmethod
+    def _is_legacy_aggregate_project(name: str, data: dict[str, Any]) -> bool:
+        """Exclude old fallback records that contain an entire resume project section."""
+        return (
+            data.get("source") == "resume-import"
+            and data.get("extractionMethod") != "ai"
+            and name.strip().endswith("· 项目经历")
+        )
 
     @staticmethod
     def _unit(

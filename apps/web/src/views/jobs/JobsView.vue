@@ -63,12 +63,12 @@
     <section class="panel table-panel">
       <div v-if="loading" class="library-empty">正在读取职位数据…</div>
       <div v-else-if="!filteredJobs.length" class="empty-state"><span class="empty-icon">▤</span><h3>还没有职位数据</h3><p>打开 Boss 职位详情页后，扩展会自动将 JD 保存到这里。</p></div>
-      <div v-else class="table-wrap"><table><thead><tr><th>职位与公司</th><th>薪资 / 地点</th><th>要求</th><th>自动问候语</th><th>沟通结果</th><th>采集时间</th><th>操作</th></tr></thead>
+      <div v-else class="table-wrap"><table><thead><tr><th>职位与公司</th><th>薪资 / 地点</th><th>要求</th><th><span class="field-heading">生成问候语<small>generatedGreeting</small></span></th><th>沟通结果</th><th>采集时间</th><th>操作</th></tr></thead>
         <tbody><tr v-for="job in filteredJobs" :key="job.id">
           <td><strong>{{ job.title }}</strong><small>{{ job.companyName }}</small><small>{{ job.companySize || '规模未识别' }}</small></td>
           <td><strong>{{ job.salaryText || '—' }}</strong><small>{{ job.location || '地点未识别' }}</small><small v-if="job.workAddress" class="job-address-preview">{{ job.workAddress }}</small></td>
           <td><div class="tags"><span v-for="tag in jobTags(job)" :key="tag" class="tag">{{ tag }}</span></div></td>
-          <td><p class="job-greeting-preview" :title="job.generatedGreeting || '后台生成中'">{{ job.generatedGreeting || '后台生成中，请稍后刷新' }}</p></td>
+          <td><div class="job-greeting-cell"><span :class="['greeting-status', { ready: Boolean(job.generatedGreeting) }]">{{ job.generatedGreeting ? '已生成' : '未生成' }}</span><p class="job-greeting-preview" :title="job.generatedGreeting || '当前快照尚未生成问候语'">{{ job.generatedGreeting || '当前快照尚未生成问候语' }}</p></div></td>
           <td><div class="snapshot-outcomes"><span :class="job.hasCommunicated ? 'outcome-positive' : ''">{{ job.hasCommunicated ? '已沟通' : '未沟通' }}</span><span :class="job.hasInterview ? 'outcome-positive' : ''">{{ job.hasInterview ? '有面试' : '无面试' }}</span><small>{{ job.resumeVariant === 'optimized' ? '优化简历' : '默认简历' }}</small></div></td>
           <td><time>{{ formatTime(job.capturedAt) }}</time><br><small>{{ sourceLabel(job.source) }}</small></td>
           <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
@@ -105,7 +105,7 @@ const form = reactive(emptyForm())
 const filteredJobs = computed(() => {
   const query = filter.value.trim().toLowerCase()
   if (!query) return jobs.value
-  return jobs.value.filter((job) => [job.title, job.companyName, job.description, job.location, job.workAddress, ...(job.skills || [])].filter(Boolean).join(' ').toLowerCase().includes(query))
+  return jobs.value.filter((job) => [job.title, job.companyName, job.description, job.location, job.workAddress, job.generatedGreeting, ...(job.skills || [])].filter(Boolean).join(' ').toLowerCase().includes(query))
 })
 const resumePreviewSections = computed(() => materialPreview.value ? [
   { title: '个人优势', items: materialPreview.value.resume.summary },

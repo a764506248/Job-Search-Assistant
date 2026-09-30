@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 from typing import Annotated
 from uuid import uuid4
 
@@ -97,6 +98,8 @@ def create_router(
     greeting_generator: GreetingGenerator,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
+    greeting_generation_ids: set[int] = set()
+    greeting_generation_lock = Lock()
 
     def validate_model_data(data: dict[str, object]) -> None:
         missing = [field for field in ("modelId", "apiKey", "baseUrl") if not data.get(field)]
@@ -194,6 +197,22 @@ def create_router(
         except Exception:
             logger.exception("automatic greeting failed unexpectedly for job=%s", snapshot_id)
 
+    def run_greeting_task(snapshot_id: int) -> None:
+        try:
+            generate_and_store_greeting(snapshot_id)
+        finally:
+            with greeting_generation_lock:
+                greeting_generation_ids.discard(snapshot_id)
+
+    def queue_greeting_generation(
+        snapshot_id: int, background_tasks: BackgroundTasks
+    ) -> None:
+        with greeting_generation_lock:
+            if snapshot_id in greeting_generation_ids:
+                return
+            greeting_generation_ids.add(snapshot_id)
+        background_tasks.add_task(run_greeting_task, snapshot_id)
+
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse(version=__version__)
@@ -245,7 +264,7 @@ def create_router(
             except KeyError:
                 continue
             if not stored.generated_greeting:
-                background_tasks.add_task(generate_and_store_greeting, stored.id)
+                queue_greeting_generation(stored.id, background_tasks)
         return JobCaptureResponse(accepted=len(job_ids), job_ids=job_ids)
 
     @router.get("/jobs", response_model=JobListResponse)
@@ -284,7 +303,7 @@ def create_router(
         )
         stored = job_repository.create(job)
         if not stored.generated_greeting:
-            background_tasks.add_task(generate_and_store_greeting, stored.id)
+            queue_greeting_generation(stored.id, background_tasks)
         return stored
 
     @router.put("/jobs/{snapshot_id}/tracking", response_model=StoredJob)

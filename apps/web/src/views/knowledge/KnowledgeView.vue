@@ -17,16 +17,18 @@
       <div class="panel-heading"><div><p class="eyebrow">INDEXED DATA</p><h2>已索引的知识实体</h2></div><div class="panel-heading-actions"><span>{{ filteredChunks.length }} / {{ chunks.length }} 个实体</span><a-button @click="load">刷新数据</a-button></div></div>
       <p class="panel-description">每条向量对应一个结构化实体，并通过实体 ID 关联个人档案或项目库，不再按字符长度切分整份简历。</p>
       <div class="knowledge-filter"><label><span>标签检索</span><input v-model.trim="tagQuery" type="search" placeholder="输入 Python、RAG、Agent 等标签" /></label><div><button v-for="tag in availableTags" :key="tag" type="button" :class="['tag', { active: tagQuery === tag }]" @click="tagQuery = tagQuery === tag ? '' : tag">{{ tag }}</button><button v-if="tagQuery" type="button" class="clear-filter" @click="tagQuery = ''">清除筛选</button></div></div>
-      <section v-if="selectedChunk" class="knowledge-detail">
-        <header><div><span class="tag">{{ knowledgeTypeLabel(selectedChunk.knowledgeType) }}</span><h3>{{ selectedChunk.sourceName }}</h3></div><a-button size="small" @click="selectedChunk = null">关闭详情</a-button></header>
-        <div v-if="visibleTags(selectedChunk).length" class="knowledge-detail-tags"><span v-for="tag in visibleTags(selectedChunk)" :key="tag" class="tag">{{ tag }}</span></div>
-        <pre>{{ selectedChunk.content }}</pre>
-        <dl><div><dt>实体 ID</dt><dd>{{ selectedChunk.entityId }}</dd></div><div><dt>模型</dt><dd>{{ selectedChunk.model }}</dd></div><div><dt>维度</dt><dd>{{ selectedChunk.dimensions }}</dd></div><div><dt>向量预览</dt><dd>[{{ vectorPreview(selectedChunk) }}]</dd></div><div><dt>内容哈希</dt><dd>{{ selectedChunk.contentHash }}</dd></div><div><dt>索引时间</dt><dd>{{ formatTime(selectedChunk.indexedAt) }}</dd></div></dl>
-      </section>
+      <a-modal v-model:open="detailOpen" width="900px" wrap-class-name="knowledge-detail-modal" :footer="null" centered destroy-on-close @after-close="closeDetail">
+        <template #title><div v-if="selectedChunk" class="knowledge-modal-title"><span class="tag">{{ knowledgeTypeLabel(selectedChunk.knowledgeType) }}</span><div><strong>{{ selectedChunk.sourceName }}</strong><small>实体 ID {{ selectedChunk.entityId }} · {{ selectedChunk.dimensions }} 维</small></div></div></template>
+        <div v-if="selectedChunk" class="knowledge-detail-modal-body">
+          <div v-if="visibleTags(selectedChunk).length" class="knowledge-detail-tags"><span v-for="tag in visibleTags(selectedChunk)" :key="tag" class="tag">{{ tag }}</span></div>
+          <section><h3>结构化内容</h3><pre>{{ selectedChunk.content }}</pre></section>
+          <section><h3>向量信息</h3><dl><div><dt>实体 ID</dt><dd>{{ selectedChunk.entityId }}</dd></div><div><dt>模型</dt><dd>{{ selectedChunk.model }}</dd></div><div><dt>维度</dt><dd>{{ selectedChunk.dimensions }}</dd></div><div><dt>向量预览</dt><dd>[{{ vectorPreview(selectedChunk) }}]</dd></div><div><dt>内容哈希</dt><dd>{{ selectedChunk.contentHash }}</dd></div><div><dt>索引时间</dt><dd>{{ formatTime(selectedChunk.indexedAt) }}</dd></div></dl></section>
+        </div>
+      </a-modal>
       <div v-if="chunksLoading" class="library-empty">正在读取本地向量数据…</div>
       <div v-else-if="!filteredChunks.length" class="library-empty">{{ chunks.length ? '没有匹配该标签的知识实体。' : '还没有结构化知识，请先完善个人档案或项目库。' }}</div>
       <div v-else class="vector-record-list">
-        <article v-for="item in filteredChunks" :key="item.id" class="vector-record" tabindex="0" @click="selectedChunk = item" @keydown.enter="selectedChunk = item">
+        <article v-for="item in filteredChunks" :key="item.id" class="vector-record" tabindex="0" @click="openDetail(item)" @keydown.enter="openDetail(item)">
           <header class="vector-record-head">
             <div class="vector-record-title"><span class="tag">{{ knowledgeTypeLabel(item.knowledgeType) }}</span><strong :title="item.sourceName">{{ item.sourceName }}</strong></div>
             <div class="vector-record-meta"><span class="vector-chip">ID {{ item.entityId }}</span><span class="vector-chip">{{ item.dimensions }} 维</span></div>
@@ -65,6 +67,7 @@ const searching = ref(false)
 const chunksLoading = ref(false)
 const tagQuery = ref('')
 const selectedChunk = ref<RagChunk | null>(null)
+const detailOpen = ref(false)
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`
 const vectorPreview = (item: RagChunk) => `${item.embedding.slice(0, 8).map((value) => value.toFixed(4)).join(', ')}${item.dimensions > 8 ? ', …' : ''}`
 const knowledgeTypeLabel = (value: string) => ({ strengths: '个人优势', 'tech-stack': '技术栈', project: '项目经历', 'work-experience': '工作经历', education: '教育经历' } as Record<string, string>)[value] || sourceTypeLabel(value)
@@ -80,8 +83,10 @@ async function loadStatus() { status.value = await api.ragStatus() }
 async function loadChunks() { chunksLoading.value = true; try { chunks.value = (await api.ragChunks()).items } catch (error) { message.error((error as Error).message) } finally { chunksLoading.value = false } }
 async function load() { try { await Promise.all([loadStatus(), loadChunks()]) } catch (error) { message.error((error as Error).message) } }
 async function search() { if (!query.value) return; searching.value = true; try { results.value = (await api.searchRag(query.value)).items } catch (error) { message.error((error as Error).message) } finally { searching.value = false } }
+function openDetail(item: RagChunk) { selectedChunk.value = item; detailOpen.value = true }
+function closeDetail() { selectedChunk.value = null }
 function confirmDelete(item: RagChunk) {
-  Modal.confirm({ title: `删除知识实体“${item.sourceName}”？`, content: '只删除当前向量记录，不删除项目库或个人档案源数据。以后重建索引时可能重新生成。', okType: 'danger', async onOk() { await api.deleteRagChunk(item.id); if (selectedChunk.value?.id === item.id) selectedChunk.value = null; await load(); message.success('知识实体已从当前索引删除') } })
+  Modal.confirm({ title: `删除知识实体“${item.sourceName}”？`, content: '只删除当前向量记录，不删除项目库或个人档案源数据。以后重建索引时可能重新生成。', okType: 'danger', async onOk() { await api.deleteRagChunk(item.id); if (selectedChunk.value?.id === item.id) { detailOpen.value = false; selectedChunk.value = null } await load(); message.success('知识实体已从当前索引删除') } })
 }
 useRefresh(load)
 </script>

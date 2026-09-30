@@ -74,6 +74,39 @@ describe('captureBossJob', () => {
       .toMatchObject({ platformJobId: 'list-current', title: 'AI Agent 工程师', location: '北京', experience: '3-5年', education: '本科' })
   })
 
+  it('matches the visible list card by title when Boss does not mark it active', () => {
+    document.body.innerHTML = `
+      <div class="job-card-wrapper">
+        <a class="job-name" href="/job_detail/other-job.html">高级全栈工程师</a>
+        <span class="salary">28-40K·15薪</span>
+        <div class="job-card-footer"><span class="company-name">Willand未岚大陆</span><span class="job-area">北京·海淀区</span></div>
+      </div>
+      <div class="job-card-wrapper">
+        <a class="job-name" href="/job_detail/ad-algorithm.html">广告算法专家</a>
+        <span class="salary">45-75K·15薪</span>
+        <ul><li>5-10年</li><li>本科</li><li>Python</li></ul>
+        <div class="job-card-footer"><span class="company-name">HUNGRY STUDIO</span><span class="job-area">北京·朝阳区·亚运村</span></div>
+      </div>
+      <section class="job-detail-info"><h1 class="job-name">广告算法专家</h1></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责广告推荐算法、深度学习和大数据平台研发。</div></section>
+    `
+
+    const result = captureBossJob(
+      document,
+      { href: 'https://www.zhipin.com/web/geek/jobs?ka=header-jobs', pathname: '/web/geek/jobs' },
+    )
+
+    expect(result).toMatchObject({
+      platformJobId: 'ad-algorithm',
+      title: '广告算法专家',
+      companyName: 'HUNGRY STUDIO',
+      salaryText: '45-75K·15薪',
+      location: '北京·朝阳区·亚运村',
+      experience: '5-10年',
+      education: '本科',
+    })
+  })
+
   it('extracts salary, city, experience and education from the current job banner', () => {
     document.body.innerHTML = `
       <section class="job-banner">
