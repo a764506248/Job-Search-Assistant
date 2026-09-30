@@ -60,6 +60,18 @@ uv sync --dev
 uv run pytest -q
 ```
 
+### 2.3 直接拉取 GHCR 镜像
+
+不修改源码时可以只下载 Release Compose，无需 Node.js、Python 或本地构建：
+
+```bash
+curl -O https://raw.githubusercontent.com/a764506248/Job-Search-Assistant/main/docker-compose.release.yml
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+该配置拉取 `ghcr.io/a764506248/job-search-assistant-{web,local-service,embedding}:latest`，同时只将 8765/8766 绑定到本机回环地址。业务数据写入 Compose 文件同级的 `data/`，模型写入命名 Volume。生产或可重复部署建议设置 `JSA_IMAGE_TAG` 使用明确版本标签，而不是长期跟随 `latest`。
+
 ## 3. 大模型配置
 
 Embedding 服务只负责向量化，不负责 AI 简历解析、项目拆分或文案生成。以下功能要求在“模型配置”页面至少保存一个验证成功的模型：

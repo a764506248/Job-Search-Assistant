@@ -98,6 +98,24 @@ docker compose up -d --build
 
 启动后打开 <http://127.0.0.1:8765>。Compose 会同时启动基于 Vue 3 + Ant Design Vue 的独立 Web 前端、FastAPI 本地服务与 Embedding 服务。Web 容器通过同源 `/v1` 反向代理访问 FastAPI，因此扩展、Skill 和已有接口地址仍保持 `http://127.0.0.1:8765` 不变。SQLite 文件继续通过 `apps/local-service/data:/data` 挂载到服务容器，现有数据无需迁移。
 
+### 直接使用已发布镜像
+
+仓库通过 GitHub Actions 将 Web、本地 API 和 Embedding 服务分别发布到 GHCR。无需在本机编译源码：
+
+```bash
+curl -O https://raw.githubusercontent.com/a764506248/Job-Search-Assistant/main/docker-compose.release.yml
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+管理后台仍访问 <http://127.0.0.1:8765>。运行数据保存在 Compose 文件同级的 `data/`，Embedding 模型保存在 Docker Volume 中；升级镜像不会删除这些数据。可以通过 `JSA_IMAGE_TAG` 固定版本标签：
+
+```bash
+JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml up -d
+```
+
+GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Docker 只包含管理后台、本地 API 和 Embedding 服务；Chrome 扩展、BOSS Skill 及 Kimi WebBridge 仍需安装在用户浏览器和本机环境中。
+
 当前可以管理个人档案、项目、简历资料、匹配规则、模型配置和职位快照；所有修改都会持久化到本地 SQLite。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将识别结果分别写入个人档案、项目库和简历库，随后自动重建向量索引。“简历模板”提供投递版式选择、网页预览和 PDF 示例，“向量知识库”可使用 768 维的 `jinaai/jina-embeddings-v2-base-zh` 重建本地索引并测试语义检索。
 
 职位快照的“跟进”入口已经改为弹窗。当前弹窗仍通过旧版 `has_communicated`、`has_interview` 等字段保存快速摘要；PRD 目标是迁移到“求职申请 + 追加阶段事件 + 时间线”，相关数据库表和 API 尚未完成，详见 [数据模型与接口约定](docs/DATA_MODEL.md#19-投递反馈闭环)。

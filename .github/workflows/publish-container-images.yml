@@ -1,0 +1,88 @@
+name: Publish Container Images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - '.github/workflows/publish-container-images.yml'
+      - 'apps/web/**'
+      - 'apps/local-service/**'
+      - 'services/embedding/**'
+      - 'packages/contracts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'docker-compose.release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-containers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            image: ghcr.io/a764506248/job-search-assistant-web
+            context: .
+            dockerfile: apps/web/Dockerfile
+          - name: local-service
+            image: ghcr.io/a764506248/job-search-assistant-local-service
+            context: apps/local-service
+            dockerfile: apps/local-service/Dockerfile
+          - name: embedding
+            image: ghcr.io/a764506248/job-search-assistant-embedding
+            context: services/embedding
+            dockerfile: services/embedding/Dockerfile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=Job Search Assistant ${{ matrix.name }}
+            org.opencontainers.image.description=Local-first BOSS job search assistant component
+            org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
