@@ -60,7 +60,19 @@ uv sync --dev
 uv run pytest -q
 ```
 
-### 2.3 直接拉取 GHCR 镜像
+### 2.3 从 Docker Hub 搜索并安装
+
+三个公开镜像位于 Docker Hub 的 `jinxinss` 命名空间，可通过 `docker search jinxinss/job-search-assistant` 搜索。推荐下载专用 Compose 文件一次性启动全部服务：
+
+```bash
+curl -O https://raw.githubusercontent.com/a764506248/Job-Search-Assistant/main/docker-compose.dockerhub.yml
+docker compose -f docker-compose.dockerhub.yml pull
+docker compose -f docker-compose.dockerhub.yml up -d
+```
+
+该配置会拉取 `jinxinss/job-search-assistant-{web,local-service,embedding}:latest`。也可以在各镜像的 Docker Hub 页面查看标签和拉取命令。
+
+### 2.4 直接拉取 GHCR 镜像
 
 不修改源码时可以只下载 Release Compose，无需 Node.js、Python 或本地构建：
 
