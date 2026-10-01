@@ -70,7 +70,7 @@ docker compose -f docker-compose.dockerhub.yml pull
 docker compose -f docker-compose.dockerhub.yml up -d
 ```
 
-该配置会拉取 `jinxinss/job-search-assistant-{web,local-service,embedding}:latest`。也可以在各镜像的 Docker Hub 页面查看标签和拉取命令。
+该配置会拉取 `jinxinss/job-search-assistant-{web,local-service,embedding}:latest`。也可以在各镜像的 Docker Hub 页面查看标签和拉取命令。当前 Docker Hub 的 Web 与 Local Service 镜像支持 `linux/amd64` 和 `linux/arm64`，Embedding 镜像暂时仅支持 `linux/arm64`；Intel/AMD 机器请使用下一节的 GHCR Compose，三个 GHCR 镜像均为双架构。
 
 ### 2.4 直接拉取 GHCR 镜像
 
