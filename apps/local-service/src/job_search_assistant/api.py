@@ -1,6 +1,8 @@
 import hashlib
+import json
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -36,6 +38,10 @@ from .domain.models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
     AutomationConfigResponse,
+    AutomationEventListResponse,
+    AutomationRun,
+    AutomationRunCreateRequest,
+    AutomationRunListResponse,
     BrowserProbeRequest,
     BrowserProbeResponse,
     CapturedJob,
@@ -84,6 +90,7 @@ from .project_extraction import (
 )
 from .rag import RagService
 from .repositories import (
+    AutomationRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -111,6 +118,7 @@ def create_router(
     material_preview_generator: MaterialPreviewGenerator,
     greeting_generator: GreetingGenerator,
     resume_image_dir: Path,
+    automation_repository: AutomationRepository,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
     greeting_generation_ids: set[int] = set()
@@ -628,6 +636,128 @@ def create_router(
                 else f"安全测试未通过，请先处理：{'、'.join(blocking_checks)}"
             ),
         )
+
+    def automation_run(run_id: int) -> AutomationRun:
+        try:
+            return AutomationRun.model_validate(automation_repository.get_run(run_id))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+
+    @router.post("/automation/runs", response_model=AutomationRun, status_code=201)
+    def create_automation_run(request: AutomationRunCreateRequest) -> AutomationRun:
+        config = automation_config().model_dump(mode="json", by_alias=True)
+        config.update(request.config)
+        return AutomationRun.model_validate(
+            automation_repository.create_run(config, request.target_count)
+        )
+
+    @router.get("/automation/runs", response_model=AutomationRunListResponse)
+    def list_automation_runs() -> AutomationRunListResponse:
+        return AutomationRunListResponse(
+            items=[AutomationRun.model_validate(run) for run in automation_repository.list_runs()]
+        )
+
+    @router.get("/automation/runs/{run_id}", response_model=AutomationRun)
+    def get_automation_run(run_id: int) -> AutomationRun:
+        return automation_run(run_id)
+
+    @router.post("/automation/runs/{run_id}/start", response_model=AutomationRun)
+    def start_automation_run(run_id: int) -> AutomationRun:
+        run = automation_run(run_id)
+        if run.status == "interrupted":
+            return AutomationRun.model_validate(automation_repository.transition(run_id, "running"))
+        if run.status != "draft":
+            raise HTTPException(status_code=409, detail=f"run cannot start from {run.status}")
+        active = [
+            item
+            for item in automation_repository.list_runs()
+            if item["id"] != run_id and item["status"] in {"running", "paused", "stopping"}
+        ]
+        if active:
+            raise HTTPException(status_code=409, detail="another automation run is active")
+        automation_repository.transition(run_id, "validating")
+        status_result = setup_status()
+        blockers = [
+            check.label
+            for check in status_result.checks
+            if check.blocking and check.status != "ready"
+        ]
+        if blockers:
+            return AutomationRun.model_validate(
+                automation_repository.transition(run_id, "blocked", "、".join(blockers))
+            )
+        automation_repository.transition(run_id, "ready")
+        running = automation_repository.transition(run_id, "running")
+        automation_repository.append_event(
+            run_id,
+            "runner-awaiting-host",
+            "info",
+            {"message": "任务已创建，等待宿主机执行器认领"},
+        )
+        return AutomationRun.model_validate(running)
+
+    @router.post("/automation/runs/{run_id}/pause", response_model=AutomationRun)
+    def pause_automation_run(run_id: int) -> AutomationRun:
+        try:
+            return AutomationRun.model_validate(automation_repository.transition(run_id, "paused"))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/automation/runs/{run_id}/resume", response_model=AutomationRun)
+    def resume_automation_run(run_id: int) -> AutomationRun:
+        try:
+            return AutomationRun.model_validate(automation_repository.transition(run_id, "running"))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/automation/runs/{run_id}/stop", response_model=AutomationRun)
+    def stop_automation_run(run_id: int) -> AutomationRun:
+        try:
+            automation_repository.transition(run_id, "stopping", "user-requested")
+            return AutomationRun.model_validate(
+                automation_repository.transition(run_id, "cancelled", "user-requested")
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.get(
+        "/automation/runs/{run_id}/events", response_model=AutomationEventListResponse
+    )
+    def list_automation_events(run_id: int) -> AutomationEventListResponse:
+        try:
+            events = automation_repository.list_events(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        return AutomationEventListResponse(items=events)
+
+    @router.get("/automation/runs/{run_id}/events/stream")
+    def stream_automation_events(run_id: int, after: int = 0) -> StreamingResponse:
+        automation_run(run_id)
+
+        def events():
+            cursor = after
+            idle = 0
+            while idle < 30:
+                current = automation_repository.list_events(run_id)
+                unseen = [event for event in current if event["sequence"] > cursor]
+                if unseen:
+                    idle = 0
+                    for event in unseen:
+                        cursor = event["sequence"]
+                        payload = json.dumps(event, ensure_ascii=False, default=str)
+                        yield f"id: {cursor}\ndata: {payload}\n\n"
+                else:
+                    idle += 1
+                    yield ": heartbeat\n\n"
+                time.sleep(1)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
     def create_client_log(request: ClientLogInput) -> ClientLogRecord:

@@ -93,6 +93,29 @@ class AutomationRepository:
         result["config_snapshot"] = json.loads(result.pop("config_snapshot_json"))
         return result
 
+    def list_runs(self) -> list[dict[str, Any]]:
+        self.initialize()
+        with sqlite3.connect(self.database_path) as connection:
+            run_ids = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT id FROM automation_runs ORDER BY id DESC"
+                ).fetchall()
+            ]
+        return [self.get_run(run_id) for run_id in run_ids]
+
+    def append_event(
+        self,
+        run_id: int,
+        event_type: str,
+        level: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.get_run(run_id)
+        with sqlite3.connect(self.database_path) as connection:
+            self._append_event(connection, run_id, event_type, level, payload)
+        return self.list_events(run_id)[-1]
+
     def transition(
         self, run_id: int, target: AutomationRunStatus | str, reason: str | None = None
     ) -> dict[str, Any]:

@@ -1,5 +1,7 @@
 import type {
   BrowserProbe,
+  AutomationEvent,
+  AutomationRun,
   HealthResponse,
   JobMatch,
   MaterialPreview,
@@ -44,6 +46,10 @@ export const api = {
   setupStatus: () => request<SetupStatus>('/v1/setup/status'),
   saveBrowserProbe: (probe: BrowserProbe) => request<BrowserProbe>('/v1/setup/browser/probe', json('POST', probe)),
   runSetupTest: () => request<SetupTestRunResult>('/v1/setup/test-run', { method: 'POST' }),
+  automationRuns: () => request<{ items: AutomationRun[] }>('/v1/automation/runs'),
+  createAutomationRun: (targetCount: number) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config: {} })),
+  automationEvents: (id: number) => request<{ items: AutomationEvent[] }>(`/v1/automation/runs/${id}/events`),
+  controlAutomationRun: (id: number, action: 'start' | 'pause' | 'resume' | 'stop') => request<AutomationRun>(`/v1/automation/runs/${id}/${action}`, { method: 'POST' }),
   jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
     const params = new URLSearchParams({
       page: String(options.page || 1),

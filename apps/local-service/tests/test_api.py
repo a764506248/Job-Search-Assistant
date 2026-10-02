@@ -131,6 +131,32 @@ def test_setup_test_run_never_executes_browser_actions(tmp_path) -> None:
     assert "未通过" in payload["message"]
 
 
+def test_automation_run_api_blocks_start_when_setup_is_incomplete(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+    created = client.post(
+        "/v1/automation/runs",
+        json={"targetCount": 12, "config": {"searchKeywords": ["AI Agent"]}},
+    )
+
+    assert created.status_code == 201
+    run_id = created.json()["id"]
+    assert created.json()["status"] == "draft"
+    started = client.post(f"/v1/automation/runs/{run_id}/start")
+    assert started.status_code == 200
+    assert started.json()["status"] == "blocked"
+    assert "大模型连接" in started.json()["stopReason"]
+    listing = client.get("/v1/automation/runs").json()["items"]
+    assert listing[0]["id"] == run_id
+    events = client.get(f"/v1/automation/runs/{run_id}/events").json()["items"]
+    assert [event["eventType"] for event in events] == [
+        "run-created",
+        "status-changed",
+        "status-changed",
+    ]
+
+
 def test_extension_error_log_is_stored_locally(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     payload = {

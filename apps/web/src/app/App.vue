@@ -49,6 +49,7 @@ provide('refreshVersion', refreshVersion)
 const navigation = [
   { name: 'overview', path: '/', label: '工作台', icon: '⌂' },
   { name: 'setup', path: '/setup', label: '安装向导', icon: '✓' },
+  { name: 'automation', path: '/automation', label: '自动投递', icon: '▶' },
   { name: 'jobs', path: '/jobs', label: '职位快照', icon: '▤' },
   { name: 'profile', path: '/profile', label: '个人档案', icon: '◎' },
   { name: 'projects', path: '/projects', label: '项目库', icon: '◇' },

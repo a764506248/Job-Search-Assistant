@@ -21,6 +21,7 @@ from .project_extraction import (
 )
 from .rag import RagService
 from .repositories import (
+    AutomationRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -60,6 +61,7 @@ def create_app(
     vector_repository = VectorRepository(resolved_database_path)
     client_log_repository = ClientLogRepository(resolved_database_path)
     delivery_repository = DeliveryRepository(resolved_database_path)
+    automation_repository = AutomationRepository(resolved_database_path)
     resolved_embedder = embedder or HttpEmbeddingClient(
         settings.embedding_url, settings.embedding_model
     )
@@ -82,6 +84,7 @@ def create_app(
             resolved_material_generator,
             resolved_greeting_generator,
             resolved_database_path.parent / "resume-images",
+            automation_repository,
         )
     )
     return application

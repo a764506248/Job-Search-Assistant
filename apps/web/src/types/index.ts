@@ -46,6 +46,32 @@ export interface SetupTestRunResult {
   message: string
 }
 
+export interface AutomationRun {
+  id: number
+  status: string
+  configSnapshot: JsonData
+  targetCount: number
+  successCount: number
+  failureCount: number
+  currentKeyword?: string
+  currentJobId?: string
+  stopReason?: string
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+  updatedAt: string
+}
+
+export interface AutomationEvent {
+  id: number
+  runId: number
+  sequence: number
+  eventType: string
+  level: string
+  payload: JsonData
+  createdAt: string
+}
+
 export interface StoredJob {
   id: number
   platformJobId: string

@@ -119,6 +119,45 @@ class SetupTestRunResponse(ApiModel):
     message: str
 
 
+class AutomationRunCreateRequest(ApiModel):
+    target_count: int = Field(default=20, ge=1, le=500)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutomationRun(ApiModel):
+    id: int
+    status: str
+    config_snapshot: dict[str, Any]
+    target_count: int
+    success_count: int
+    failure_count: int
+    current_keyword: str | None = None
+    current_job_id: str | None = None
+    stop_reason: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+
+
+class AutomationRunListResponse(ApiModel):
+    items: list[AutomationRun]
+
+
+class AutomationEvent(ApiModel):
+    id: int
+    run_id: int
+    sequence: int
+    event_type: str
+    level: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class AutomationEventListResponse(ApiModel):
+    items: list[AutomationEvent]
+
+
 class ClientLogInput(ApiModel):
     source: Literal["extension-content", "extension-background", "extension-page"]
     level: Literal["warning", "error"] = "error"
