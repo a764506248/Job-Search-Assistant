@@ -45,6 +45,15 @@ class LibraryRepository:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS setup_state (
+                    key TEXT PRIMARY KEY,
+                    data_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             connection.execute("PRAGMA optimize")
 
     def list(self, kind: LibraryKind) -> list[dict[str, Any]]:
@@ -144,6 +153,29 @@ class LibraryRepository:
             )
         return data
 
+    def get_setup_state(self, key: str) -> dict[str, Any] | None:
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT data_json, updated_at FROM setup_state WHERE key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {**json.loads(row[0]), "checkedAt": row[1]}
+
+    def save_setup_state(self, key: str, data: dict[str, Any]) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO setup_state(key, data_json, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    data_json = excluded.data_json,
+                    updated_at = excluded.updated_at""",
+                (key, json.dumps(data, ensure_ascii=False), now),
+            )
+        return {**data, "checkedAt": now}
+
     def import_resume(
         self,
         filename: str,
@@ -151,14 +183,54 @@ class LibraryRepository:
         resume: dict[str, Any],
         projects: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """Stage parsed resume data until the user explicitly confirms it."""
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        staged_resume = {
+            **resume,
+            "confirmationStatus": "pending",
+            "confirmedAt": None,
+            "isDefaultImage": False,
+            "stagedProfile": profile,
+            "stagedProjects": projects,
+        }
+        with self._connect() as connection:
+            resume_cursor = connection.execute(
+                """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
+                VALUES ('resumes', ?, ?, ?, ?)""",
+                (filename, json.dumps(staged_resume, ensure_ascii=False), now, now),
+            )
+        return {
+            "profile": profile,
+            "resumeId": resume_cursor.lastrowid,
+            "projectIds": [],
+        }
+
+    def confirm_resume(self, resume_id: int) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             row = connection.execute(
+                "SELECT name, data_json FROM library_records WHERE kind = 'resumes' AND id = ?",
+                (resume_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(resume_id)
+            name, raw_data = row
+            resume = json.loads(raw_data)
+            if resume.get("confirmationStatus") == "confirmed":
+                return {
+                    "profile": self.get_profile(),
+                    "projectIds": [],
+                    "resume": self.get("resumes", resume_id),
+                }
+            staged_profile = dict(resume.pop("stagedProfile", {}))
+            staged_projects = list(resume.pop("stagedProjects", []))
+            profile_row = connection.execute(
                 "SELECT data_json FROM profile WHERE singleton = 1"
             ).fetchone()
-            current_profile = json.loads(row[0]) if row else {}
-            merged_profile = self._structure_profile({**current_profile, **profile})
+            current_profile = json.loads(profile_row[0]) if profile_row else {}
+            merged_profile = self._structure_profile({**current_profile, **staged_profile})
             connection.execute(
                 """INSERT INTO profile(singleton, data_json, updated_at) VALUES (1, ?, ?)
                 ON CONFLICT(singleton) DO UPDATE SET
@@ -166,16 +238,29 @@ class LibraryRepository:
                     updated_at = excluded.updated_at""",
                 (json.dumps(merged_profile, ensure_ascii=False), now),
             )
-            resume_cursor = connection.execute(
-                """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                VALUES ('resumes', ?, ?, ?, ?)""",
-                (filename, json.dumps(resume, ensure_ascii=False), now, now),
+            project_ids = self._upsert_projects(connection, staged_projects, now)
+            existing_default = connection.execute(
+                "SELECT data_json FROM library_records WHERE kind = 'resumes' AND id != ?",
+                (resume_id,),
+            ).fetchall()
+            has_default_image = any(
+                data.get("confirmationStatus", "confirmed") == "confirmed"
+                and data.get("isDefaultImage")
+                for (value,) in existing_default
+                if (data := json.loads(value))
             )
-            project_ids = self._upsert_projects(connection, projects, now)
+            resume["confirmationStatus"] = "confirmed"
+            resume["confirmedAt"] = now
+            if resume.get("previewImageFile") and not has_default_image:
+                resume["isDefaultImage"] = True
+            connection.execute(
+                "UPDATE library_records SET name = ?, data_json = ?, updated_at = ? WHERE id = ?",
+                (name, json.dumps(resume, ensure_ascii=False), now, resume_id),
+            )
         return {
             "profile": merged_profile,
-            "resumeId": resume_cursor.lastrowid,
             "projectIds": project_ids,
+            "resume": self.get("resumes", resume_id),
         }
 
     def upsert_projects(self, projects: list[dict[str, Any]]) -> list[int]:
@@ -196,6 +281,8 @@ class LibraryRepository:
             for record_id, name, data_json in rows:
                 data = json.loads(data_json)
                 if record_id == resume_id:
+                    if data.get("confirmationStatus") == "pending":
+                        raise ValueError("请先确认这份简历的识别结果")
                     if not data.get("previewImageFile"):
                         raise ValueError("这份简历没有可用的首页图片")
                     selected = (record_id, name, data)
@@ -219,11 +306,23 @@ class LibraryRepository:
         self.initialize()
         records = self.list("resumes")
         selected = next(
-            (item for item in records if item["data"].get("isDefaultImage")), None
+            (
+                item
+                for item in records
+                if item["data"].get("confirmationStatus", "confirmed") == "confirmed"
+                and item["data"].get("isDefaultImage")
+            ),
+            None,
         )
         if selected is None:
             selected = next(
-                (item for item in records if item["data"].get("previewImageFile")), None
+                (
+                    item
+                    for item in records
+                    if item["data"].get("confirmationStatus", "confirmed") == "confirmed"
+                    and item["data"].get("previewImageFile")
+                ),
+                None,
             )
         if selected is None:
             raise KeyError("default-resume-image")

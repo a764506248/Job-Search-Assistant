@@ -1,4 +1,5 @@
 import type {
+  BrowserProbe,
   HealthResponse,
   JobMatch,
   MaterialPreview,
@@ -8,9 +9,11 @@ import type {
   RagChunk,
   RagSearchResult,
   RagStatus,
+  ResumeConfirmationResult,
   ResumeImportResult,
   ResumeTemplate,
   SetupStatus,
+  SetupTestRunResult,
   StoredJob,
 } from '../types'
 
@@ -39,6 +42,8 @@ const json = (method: string, body: unknown): RequestInit => ({
 export const api = {
   health: () => request<HealthResponse>('/v1/health'),
   setupStatus: () => request<SetupStatus>('/v1/setup/status'),
+  saveBrowserProbe: (probe: BrowserProbe) => request<BrowserProbe>('/v1/setup/browser/probe', json('POST', probe)),
+  runSetupTest: () => request<SetupTestRunResult>('/v1/setup/test-run', { method: 'POST' }),
   jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
     const params = new URLSearchParams({
       page: String(options.page || 1),
@@ -70,6 +75,7 @@ export const api = {
     if (modelRecordId !== undefined) body.append('modelRecordId', String(modelRecordId))
     return request<ResumeImportResult>('/v1/resumes/import', { method: 'POST', body })
   },
+  confirmResume: (id: number) => request<ResumeConfirmationResult>(`/v1/resumes/${id}/confirm`, { method: 'POST' }),
   setDefaultResumeImage: (id: number) => request<LibraryRecord>(`/v1/resumes/${id}/default-image`, { method: 'PUT' }),
   ragStatus: () => request<RagStatus>('/v1/rag/status'),
   ragChunks: () => request<{ total: number; items: RagChunk[] }>('/v1/rag/chunks'),

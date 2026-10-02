@@ -105,7 +105,9 @@ def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
         "/v1/resumes/import",
         files={"file": ("resume-v1.txt", "第一版简历".encode(), "text/plain")},
     ).json()
-    first_project_id = first["projectIds"][0]
+    assert first["confirmationStatus"] == "pending"
+    first_confirmed = client.post(f"/v1/resumes/{first['resumeId']}/confirm").json()
+    first_project_id = first_confirmed["projectIds"][0]
 
     extractor.projects = [
         {"name": "已有 项目", "data": {"summary": "第二版", "extractionMethod": "ai"}},
@@ -115,10 +117,11 @@ def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
         "/v1/resumes/import",
         files={"file": ("resume-v2.txt", "第二版简历".encode(), "text/plain")},
     ).json()
+    second_confirmed = client.post(f"/v1/resumes/{second['resumeId']}/confirm").json()
 
     projects = client.get("/v1/library/projects").json()["items"]
     assert len(projects) == 2
-    assert second["projectIds"][0] == first_project_id
+    assert second_confirmed["projectIds"][0] == first_project_id
     assert {item["name"] for item in projects} == {"已有 项目", "新增项目"}
     updated = next(item for item in projects if item["id"] == first_project_id)
     assert updated["data"]["summary"] == "第二版"
@@ -140,6 +143,9 @@ def test_pdf_import_generates_first_page_image_and_supports_default_selection(
         "/v1/resumes/import",
         files={"file": ("resume-two.pdf", make_pdf("Second resume page"), "application/pdf")},
     ).json()
+    assert client.get("/v1/resumes/default-image").status_code == 404
+    client.post(f"/v1/resumes/{first['resumeId']}/confirm")
+    client.post(f"/v1/resumes/{second['resumeId']}/confirm")
 
     records = client.get("/v1/library/resumes").json()["items"]
     first_record = next(item for item in records if item["id"] == first["resumeId"])
@@ -180,6 +186,10 @@ def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path
     assert result["aiProjectCount"] == 2
     assert result["aiModelName"] == "兜底模型"
     assert result["aiAttemptErrors"] == ["主模型：timed out"]
+    assert result["confirmationRequired"] is True
+    assert client.get("/v1/profile").json()["data"] == {}
+    confirmation = client.post(f"/v1/resumes/{result['resumeId']}/confirm")
+    assert confirmation.status_code == 200
     profile = client.get("/v1/profile").json()["data"]
     assert profile["displayName"] == "AI 提取姓名"
     assert profile["strengths"] == [{"id": "strength-1", "content": "完整的个人优势"}]
@@ -231,9 +241,24 @@ xiaolin@example.com
 
     assert response.status_code == 201
     result = response.json()
-    assert result["indexRebuilt"] is True
-    assert result["indexedChunks"] >= 3
-    assert len(result["projectIds"]) == 1
+    assert result["indexRebuilt"] is False
+    assert result["indexedChunks"] is None
+    assert result["projectIds"] == []
+    assert client.get("/v1/profile").json()["data"] == {}
+    assert client.get("/v1/rag/chunks").json()["total"] == 0
+    pending_setup = client.get("/v1/setup/status").json()
+    pending_resume = next(
+        item for item in pending_setup["checks"] if item["key"] == "resume"
+    )
+    assert pending_resume["status"] == "blocked"
+    assert "等待确认" in pending_resume["message"]
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert confirmed["indexRebuilt"] is True
+    assert confirmed["indexedChunks"] >= 3
+    assert len(confirmed["projectIds"]) == 1
+    ready_setup = client.get("/v1/setup/status").json()
+    ready_resume = next(item for item in ready_setup["checks"] if item["key"] == "resume")
+    assert ready_resume["status"] == "ready"
     assert result["aiExtractionUsed"] is True
     assert result["aiProjectCount"] == 1
     assert result["aiExtractionError"] is None
@@ -264,9 +289,11 @@ xiaolin@example.com
     repeated = client.post(
         "/v1/resumes/import",
         files={"file": ("张小林简历.txt", content.encode(), "text/plain")},
-    )
-    assert repeated.status_code == 201
-    assert repeated.json()["projectIds"] == result["projectIds"]
+    ).json()
+    repeated_confirmed = client.post(
+        f"/v1/resumes/{repeated['resumeId']}/confirm"
+    ).json()
+    assert repeated_confirmed["projectIds"] == confirmed["projectIds"]
     assert len(client.get("/v1/library/projects").json()["items"]) == 1
 
 
@@ -361,7 +388,8 @@ def test_import_resume_keeps_data_when_ai_extraction_fails(tmp_path) -> None:
     result = response.json()
     assert result["aiExtractionUsed"] is False
     assert result["aiExtractionError"] == "模型接口暂时不可用"
-    assert len(result["projectIds"]) == 1
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert len(confirmed["projectIds"]) == 1
 
 
 class EmptyProjectExtractor:
@@ -402,7 +430,8 @@ def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_e
     result = response.json()
     assert result["aiExtractionUsed"] is False
     assert "本地项目标题规则" in result["aiExtractionError"]
-    assert len(result["projectIds"]) == 2
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert len(confirmed["projectIds"]) == 2
 
     projects = client.get("/v1/library/projects").json()["items"]
     assert {item["name"] for item in projects} == {
@@ -412,10 +441,10 @@ def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_e
     chunks = client.get("/v1/rag/chunks").json()["items"]
     project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
     assert {item["entityId"] for item in project_chunks} == {
-        str(project_id) for project_id in result["projectIds"]
+        str(project_id) for project_id in confirmed["projectIds"]
     }
 
     reprocess = client.post(f"/v1/resumes/{result['resumeId']}/extract-projects")
     assert reprocess.status_code == 200
-    assert reprocess.json()["projectIds"] == result["projectIds"]
+    assert reprocess.json()["projectIds"] == confirmed["projectIds"]
     assert reprocess.json()["extractionMethod"] == "local-heading-fallback"

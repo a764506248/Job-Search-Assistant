@@ -36,6 +36,8 @@ from .domain.models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
     AutomationConfigResponse,
+    BrowserProbeRequest,
+    BrowserProbeResponse,
     CapturedJob,
     ClientLogInput,
     ClientLogListResponse,
@@ -65,11 +67,13 @@ from .domain.models import (
     RagSearchRequest,
     RagSearchResponse,
     RagStatus,
+    ResumeConfirmationResponse,
     ResumeImportResponse,
     RiskRuleInput,
     RuleAction,
     SetupCheck,
     SetupStatusResponse,
+    SetupTestRunResponse,
     StoredJob,
 )
 from .project_extraction import (
@@ -93,6 +97,7 @@ from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
 logger = logging.getLogger("job_search_assistant.client")
+EXPECTED_SKILL_VERSION = "5.10.0"
 
 
 def create_router(
@@ -184,7 +189,13 @@ def create_router(
     def setup_status() -> SetupStatusResponse:
         config = automation_config()
         models = library_repository.list("models")
-        resumes = library_repository.list("resumes")
+        all_resumes = library_repository.list("resumes")
+        resumes = [
+            record
+            for record in all_resumes
+            if record["data"].get("confirmationStatus", "confirmed") == "confirmed"
+        ]
+        pending_resumes = len(all_resumes) - len(resumes)
         rag = rag_service.status()
         checks = [
             SetupCheck(
@@ -266,7 +277,11 @@ def create_router(
                 message=(
                     f"已导入 {len(resumes)} 份简历"
                     if resumes
-                    else "尚未导入简历"
+                    else (
+                        f"有 {pending_resumes} 份简历等待确认"
+                        if pending_resumes
+                        else "尚未导入简历"
+                    )
                 ),
                 blocking=not resumes,
                 action_label="管理简历" if resumes else "导入简历",
@@ -337,14 +352,102 @@ def create_router(
             )
         )
 
+        browser_probe = library_repository.get_setup_state("browser-probe")
+        probe_fresh = False
+        if browser_probe and browser_probe.get("checkedAt"):
+            checked_at = datetime.fromisoformat(str(browser_probe["checkedAt"]))
+            probe_fresh = (datetime.now(UTC) - checked_at).total_seconds() <= 12 * 60 * 60
+        if not probe_fresh:
+            browser_probe = None
+
+        webbridge_ready = bool(
+            browser_probe
+            and browser_probe.get("webbridgeRunning")
+            and browser_probe.get("kimiExtensionConnected")
+        )
         checks.append(
             SetupCheck(
-                key="browser",
-                label="浏览器环境",
-                status="pending",
-                message="等待桌面安装器确认 Kimi、扩展与 BOSS 登录状态",
-                blocking=True,
-                action_label="查看安装步骤",
+                key="kimi-webbridge",
+                label="Kimi WebBridge",
+                status="ready" if webbridge_ready else ("blocked" if browser_probe else "pending"),
+                message=(
+                    "WebBridge 正在运行，Kimi 浏览器扩展已连接"
+                    if webbridge_ready
+                    else (
+                        "WebBridge 或 Kimi 浏览器扩展未连接"
+                        if browser_probe
+                        else "尚未检查 Kimi WebBridge"
+                    )
+                ),
+                blocking=not webbridge_ready,
+                action_label="检查浏览器环境",
+                action_path="/setup#browser",
+            )
+        )
+
+        project_extension_ready = bool(
+            browser_probe and browser_probe.get("projectExtensionReady")
+        )
+        extension_required = config.send_resume_image
+        checks.append(
+            SetupCheck(
+                key="project-extension",
+                label="简历图片扩展",
+                status=(
+                    "ready"
+                    if project_extension_ready
+                    else ("blocked" if extension_required and browser_probe else "warning")
+                ),
+                message=(
+                    "项目扩展已在 BOSS 页面显示操作面板"
+                    if project_extension_ready
+                    else (
+                        "已开启简历图片发送，必须确认项目扩展可用"
+                        if extension_required
+                        else "未启用图片发送，可稍后确认项目扩展"
+                    )
+                ),
+                blocking=extension_required and not project_extension_ready,
+                action_label="检查浏览器环境",
+                action_path="/setup#browser",
+            )
+        )
+
+        boss_logged_in = bool(browser_probe and browser_probe.get("bossLoggedIn"))
+        checks.append(
+            SetupCheck(
+                key="boss-login",
+                label="BOSS 登录",
+                status="ready" if boss_logged_in else ("blocked" if browser_probe else "pending"),
+                message=(
+                    "已确认 BOSS 账号处于登录状态"
+                    if boss_logged_in
+                    else ("BOSS 登录状态未通过确认" if browser_probe else "尚未确认 BOSS 登录状态")
+                ),
+                blocking=not boss_logged_in,
+                action_label="检查浏览器环境",
+                action_path="/setup#browser",
+            )
+        )
+
+        skill_version = str(browser_probe.get("skillVersion", "")) if browser_probe else ""
+        skill_ready = skill_version == EXPECTED_SKILL_VERSION
+        checks.append(
+            SetupCheck(
+                key="skill-version",
+                label="BOSS Skill",
+                status="ready" if skill_ready else ("blocked" if skill_version else "pending"),
+                message=(
+                    f"BOSS Skill v{EXPECTED_SKILL_VERSION} 已安装"
+                    if skill_ready
+                    else (
+                        f"需要 v{EXPECTED_SKILL_VERSION}，当前为 v{skill_version}"
+                        if skill_version
+                        else "尚未确认 BOSS Skill 版本"
+                    )
+                ),
+                blocking=not skill_ready,
+                action_label="检查浏览器环境",
                 action_path="/setup#browser",
             )
         )
@@ -412,7 +515,11 @@ def create_router(
             evidence = []
         match = build_automatic_match(match_request, evidence)
         profile = library_repository.get_profile()
-        resumes = library_repository.list("resumes")
+        resumes = [
+            record
+            for record in library_repository.list("resumes")
+            if record["data"].get("confirmationStatus", "confirmed") == "confirmed"
+        ]
         default_greeting = str(profile.get("defaultGreeting", "")).strip()
         context = {
             "job": job.model_dump(mode="json", by_alias=True),
@@ -492,6 +599,35 @@ def create_router(
     @router.get("/setup/status", response_model=SetupStatusResponse)
     def get_setup_status() -> SetupStatusResponse:
         return setup_status()
+
+    @router.post("/setup/browser/probe", response_model=BrowserProbeResponse)
+    def save_browser_probe(request: BrowserProbeRequest) -> BrowserProbeResponse:
+        state = library_repository.save_setup_state(
+            "browser-probe", request.model_dump(mode="json", by_alias=True)
+        )
+        return BrowserProbeResponse.model_validate(state)
+
+    @router.post("/setup/test-run", response_model=SetupTestRunResponse)
+    def run_setup_test() -> SetupTestRunResponse:
+        status_result = setup_status()
+        blocking_checks = [
+            check.label
+            for check in status_result.checks
+            if check.blocking and check.status != "ready"
+        ]
+        config = automation_config()
+        ok = not blocking_checks
+        return SetupTestRunResponse(
+            ok=ok,
+            planned_keywords=config.search_keywords,
+            daily_target=config.daily_target,
+            blocking_checks=blocking_checks,
+            message=(
+                "安全测试通过；未打开 BOSS 页面，也未执行点击、发送或投递"
+                if ok
+                else f"安全测试未通过，请先处理：{'、'.join(blocking_checks)}"
+            ),
+        )
 
     @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
     def create_client_log(request: ClientLogInput) -> ClientLogRecord:
@@ -793,12 +929,7 @@ def create_router(
                 preview_path = await run_in_threadpool(
                     render_pdf_first_page, file_content, resume_image_dir
                 )
-                has_default_image = any(
-                    item["data"].get("isDefaultImage")
-                    for item in library_repository.list("resumes")
-                )
                 parsed.resume["previewImageFile"] = preview_path.name
-                parsed.resume["isDefaultImage"] = not has_default_image
             ai_extraction_used = False
             ai_extraction_error = None
             ai_attempt_errors: list[str] = []
@@ -866,24 +997,15 @@ def create_router(
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-        rebuilt = False
-        indexed_chunks = None
-        index_error = None
-        try:
-            index_result = rag_service.rebuild()
-            rebuilt = True
-            indexed_chunks = index_result["rebuilt"]
-        except RuntimeError as error:
-            index_error = str(error)
         return ResumeImportResponse(
             filename=filename,
             profile_fields=sorted(imported["profile"]),
             resume_id=imported["resumeId"],
             project_ids=imported["projectIds"],
             extracted_characters=len(parsed.resume["rawText"]),
-            index_rebuilt=rebuilt,
-            indexed_chunks=indexed_chunks,
-            index_error=index_error,
+            index_rebuilt=False,
+            indexed_chunks=None,
+            index_error=None,
             ai_extraction_used=ai_extraction_used,
             ai_project_count=len(projects) if ai_extraction_used else 0,
             ai_extraction_error=ai_extraction_error,
@@ -894,6 +1016,33 @@ def create_router(
             ),
             ai_attempt_errors=ai_attempt_errors,
             ai_profile_extracted=ai_profile_extracted,
+        )
+
+    @router.post(
+        "/resumes/{resume_id}/confirm",
+        response_model=ResumeConfirmationResponse,
+    )
+    def confirm_resume(resume_id: int) -> ResumeConfirmationResponse:
+        try:
+            confirmed = library_repository.confirm_resume(resume_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="resume not found") from error
+        rebuilt = False
+        indexed_chunks = None
+        index_error = None
+        try:
+            index_result = rag_service.rebuild()
+            rebuilt = True
+            indexed_chunks = index_result["rebuilt"]
+        except RuntimeError as error:
+            index_error = str(error)
+        return ResumeConfirmationResponse(
+            resume=LibraryRecord.model_validate(confirmed["resume"]),
+            profile_fields=sorted(confirmed["profile"]),
+            project_ids=confirmed["projectIds"],
+            index_rebuilt=rebuilt,
+            indexed_chunks=indexed_chunks,
+            index_error=index_error,
         )
 
     def resume_image_response(record: dict[str, object]) -> FileResponse:

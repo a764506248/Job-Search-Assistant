@@ -96,6 +96,29 @@ class SetupStatusResponse(ApiModel):
     checked_at: datetime
 
 
+class BrowserProbeRequest(ApiModel):
+    webbridge_running: bool = False
+    kimi_extension_connected: bool = False
+    project_extension_ready: bool = False
+    boss_logged_in: bool = False
+    skill_version: str = ""
+    source: Literal["installer", "manual", "extension"] = "manual"
+
+
+class BrowserProbeResponse(BrowserProbeRequest):
+    checked_at: datetime
+
+
+class SetupTestRunResponse(ApiModel):
+    ok: bool
+    mode: Literal["dry-run"] = "dry-run"
+    browser_actions_executed: bool = False
+    planned_keywords: list[str] = Field(default_factory=list)
+    daily_target: int
+    blocking_checks: list[str] = Field(default_factory=list)
+    message: str
+
+
 class ClientLogInput(ApiModel):
     source: Literal["extension-content", "extension-background", "extension-page"]
     level: Literal["warning", "error"] = "error"
@@ -334,6 +357,17 @@ class ResumeImportResponse(ApiModel):
     ai_model_id: str | None = None
     ai_attempt_errors: list[str] = Field(default_factory=list)
     ai_profile_extracted: bool = False
+    confirmation_required: bool = True
+    confirmation_status: Literal["pending", "confirmed"] = "pending"
+
+
+class ResumeConfirmationResponse(ApiModel):
+    resume: LibraryRecord
+    profile_fields: list[str]
+    project_ids: list[int]
+    index_rebuilt: bool
+    indexed_chunks: int | None = None
+    index_error: str | None = None
 
 
 class RagStatus(ApiModel):

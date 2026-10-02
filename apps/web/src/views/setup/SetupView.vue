@@ -45,16 +45,22 @@
           <div><p class="eyebrow">BROWSER CHECK</p><h2>浏览器投递环境</h2></div>
           <span class="setup-phase">阶段 1</span>
         </div>
-        <div v-if="browserCheck" class="setup-browser-content">
-          <div class="setup-browser-state" :class="`is-${browserCheck.status}`">
-            <span class="setup-check-icon">{{ statusIcon(browserCheck.status) }}</span>
-            <div><strong>{{ browserCheck.label }}</strong><p>{{ browserCheck.message }}</p></div>
+        <div class="setup-browser-content">
+          <div class="setup-browser-states">
+            <div v-for="check in browserChecks" :key="check.key" class="setup-browser-state" :class="`is-${check.status}`">
+              <span class="setup-check-icon">{{ statusIcon(check.status) }}</span>
+              <div><strong>{{ check.label }}</strong><p>{{ check.message }}</p></div>
+            </div>
           </div>
-          <ol>
-            <li><strong>启动 Docker 服务</strong><span>本地 API、数据库与向量模型保持运行。</span></li>
-            <li><strong>启动 Kimi 并安装项目扩展</strong><span>当前阶段由 Kimi WebBridge 控制已登录的浏览器。</span></li>
-            <li><strong>登录 BOSS 直聘</strong><span>账号会话只留在你的浏览器中。</span></li>
-          </ol>
+          <form class="browser-probe-form" @submit.prevent="saveBrowserProbe">
+            <p>请在本机和 BOSS 页面核对后确认。状态保存 12 小时，过期后需要重新检查。</p>
+            <label><input v-model="probe.webbridgeRunning" type="checkbox" /> WebBridge 正在运行</label>
+            <label><input v-model="probe.kimiExtensionConnected" type="checkbox" /> Kimi 浏览器扩展已连接</label>
+            <label><input v-model="probe.projectExtensionReady" type="checkbox" /> BOSS 页面已显示简历图片面板</label>
+            <label><input v-model="probe.bossLoggedIn" type="checkbox" /> 已登录 BOSS 直聘</label>
+            <label class="browser-probe-version">Skill 版本<input v-model.trim="probe.skillVersion" placeholder="例如 5.10.0" /></label>
+            <a-button type="primary" html-type="submit" :loading="savingProbe">保存检查结果</a-button>
+          </form>
         </div>
       </section>
 
@@ -62,10 +68,15 @@
         <div>
           <p class="eyebrow">READY TO RUN</p>
           <h2>{{ canContinue ? '本地准备已完成' : '完成阻塞项后即可开始投递' }}</h2>
-          <p>{{ canContinue ? '浏览器环境确认完成后，可以进入自动投递流程。' : '优先处理标记为“需处理”的项目；可选项不会阻止继续配置。' }}</p>
+          <p>{{ canContinue ? '可以先运行无副作用测试；当前版本仍通过 Skill 启动真实投递。' : '优先处理标记为“需处理”的项目；安全测试不会打开 BOSS 页面或执行点击。' }}</p>
         </div>
-        <a-button type="primary" :disabled="!canContinue">开始投递</a-button>
+        <a-button type="primary" :loading="testingSetup" @click="runSafeTest">运行安全测试</a-button>
       </section>
+      <div v-if="testResult" class="setup-test-result" :class="testResult.ok ? 'is-ready' : 'is-blocked'">
+        <strong>{{ testResult.ok ? '安全测试通过' : '安全测试未通过' }}</strong>
+        <p>{{ testResult.message }}</p>
+        <span>浏览器动作：{{ testResult.browserActionsExecuted ? '已执行' : '未执行' }} · 每日目标：{{ testResult.dailyTarget }} · 关键词：{{ testResult.plannedKeywords.join('、') || '未配置' }}</span>
+      </div>
     </template>
   </div>
 </template>
@@ -75,15 +86,27 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
-import type { SetupCheckStatus, SetupStatus } from '../../types'
+import type { BrowserProbe, SetupCheckStatus, SetupStatus, SetupTestRunResult } from '../../types'
 
 const router = useRouter()
 const status = ref<SetupStatus>()
 const loading = ref(false)
 const error = ref('')
+const savingProbe = ref(false)
+const testingSetup = ref(false)
+const testResult = ref<SetupTestRunResult>()
+const browserKeys = new Set(['kimi-webbridge', 'project-extension', 'boss-login', 'skill-version'])
+const probe = ref<BrowserProbe>({
+  webbridgeRunning: false,
+  kimiExtensionConnected: false,
+  projectExtensionReady: false,
+  bossLoggedIn: false,
+  skillVersion: '5.10.0',
+  source: 'manual',
+})
 
-const localChecks = computed(() => status.value?.checks.filter((check) => check.key !== 'browser') || [])
-const browserCheck = computed(() => status.value?.checks.find((check) => check.key === 'browser'))
+const localChecks = computed(() => status.value?.checks.filter((check) => !browserKeys.has(check.key)) || [])
+const browserChecks = computed(() => status.value?.checks.filter((check) => browserKeys.has(check.key)) || [])
 const canContinue = computed(() => Boolean(status.value) && !status.value!.checks.some((check) => check.blocking && check.status !== 'ready'))
 
 const labels: Record<SetupCheckStatus, string> = {
@@ -114,6 +137,29 @@ async function load() {
     error.value = (reason as Error).message
   } finally {
     loading.value = false
+  }
+}
+
+async function saveBrowserProbe() {
+  savingProbe.value = true
+  try {
+    await api.saveBrowserProbe(probe.value)
+    await load()
+  } catch (reason) {
+    error.value = (reason as Error).message
+  } finally {
+    savingProbe.value = false
+  }
+}
+
+async function runSafeTest() {
+  testingSetup.value = true
+  try {
+    testResult.value = await api.runSetupTest()
+  } catch (reason) {
+    error.value = (reason as Error).message
+  } finally {
+    testingSetup.value = false
   }
 }
 

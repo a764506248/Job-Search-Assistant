@@ -97,6 +97,7 @@ check_environment() {
     say "✗ Docker Compose v2 不可用"
     failures=$((failures + 1))
   fi
+  if has_command curl; then say "✓ curl 可用"; else say "✗ 未安装 curl"; failures=$((failures + 1)); fi
   if find_chrome; then say "✓ Chrome/Chromium 已安装"; else say "! 未检测到 Chrome/Chromium"; fi
   if port_available 8765 || [ -f "$COMPOSE_FILE" ]; then say "✓ 管理后台端口可用或由现有安装管理"; else say "✗ 端口 8765 已被其他程序占用"; failures=$((failures + 1)); fi
   if port_available 8766 || [ -f "$COMPOSE_FILE" ]; then say "✓ 向量服务端口可用或由现有安装管理"; else say "✗ 端口 8766 已被其他程序占用"; failures=$((failures + 1)); fi
@@ -178,6 +179,30 @@ wait_for_service() {
   return 1
 }
 
+probe_browser_environment() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "[dry-run] 检查 Kimi WebBridge 并写入本地安装状态"
+    return
+  fi
+  webbridge_running=false
+  kimi_extension_connected=false
+  kimi_bridge="$HOME/.kimi-webbridge/bin/kimi-webbridge"
+  if [ -x "$kimi_bridge" ]; then
+    kimi_status=$("$kimi_bridge" status 2>/dev/null || true)
+    if printf '%s' "$kimi_status" | grep -Eiq 'running[^a-zA-Z]+true'; then
+      webbridge_running=true
+    fi
+    if printf '%s' "$kimi_status" | grep -Eiq 'extension_connected[^a-zA-Z]+true'; then
+      kimi_extension_connected=true
+    fi
+  fi
+  curl -fsS -X POST http://127.0.0.1:8765/v1/setup/browser/probe \
+    -H 'Content-Type: application/json' \
+    --data "{\"webbridgeRunning\":$webbridge_running,\"kimiExtensionConnected\":$kimi_extension_connected,\"projectExtensionReady\":false,\"bossLoggedIn\":false,\"skillVersion\":\"$JSA_SKILL_VERSION\",\"source\":\"installer\"}" \
+    >/dev/null
+  say "✓ 已写入安装器可检测的浏览器环境状态"
+}
+
 open_setup() {
   [ "$OPEN_SETUP" -eq 0 ] && return
   if [ "$DRY_RUN" -eq 1 ]; then say "[dry-run] 打开 $JSA_SETUP_URL"; return; fi
@@ -216,5 +241,6 @@ say "正在拉取三个服务镜像；首次安装会下载 Python/ONNX 依赖�
 run compose pull
 run compose up -d
 wait_for_service
+probe_browser_environment
 open_setup
 say "完成。首次使用向导：$JSA_SETUP_URL"

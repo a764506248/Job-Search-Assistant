@@ -75,14 +75,60 @@ def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["overall"] == "blocked"
-    assert payload["total"] == 8
+    assert payload["total"] == 11
     checks = {item["key"]: item for item in payload["checks"]}
     assert checks["local-service"]["status"] == "ready"
     assert checks["embedding"]["status"] == "ready"
     assert checks["model"]["status"] == "blocked"
     assert checks["resume"]["actionPath"] == "/resumes"
-    assert checks["browser"]["status"] == "pending"
+    assert checks["kimi-webbridge"]["status"] == "pending"
+    assert checks["boss-login"]["status"] == "pending"
+    assert checks["skill-version"]["status"] == "pending"
     assert payload["checkedAt"]
+
+
+def test_browser_probe_is_persisted_and_updates_setup_checks(tmp_path) -> None:
+    database_path = tmp_path / "jobs.sqlite3"
+    client = TestClient(create_app(database_path, embedder=MaterialPreviewEmbedder()))
+
+    saved = client.post(
+        "/v1/setup/browser/probe",
+        json={
+            "webbridgeRunning": True,
+            "kimiExtensionConnected": True,
+            "projectExtensionReady": True,
+            "bossLoggedIn": True,
+            "skillVersion": "5.10.0",
+            "source": "manual",
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["checkedAt"]
+    restarted = TestClient(create_app(database_path, embedder=MaterialPreviewEmbedder()))
+    checks = {
+        item["key"]: item for item in restarted.get("/v1/setup/status").json()["checks"]
+    }
+    assert checks["kimi-webbridge"]["status"] == "ready"
+    assert checks["project-extension"]["status"] == "ready"
+    assert checks["boss-login"]["status"] == "ready"
+    assert checks["skill-version"]["status"] == "ready"
+
+
+def test_setup_test_run_never_executes_browser_actions(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+
+    response = client.post("/v1/setup/test-run")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "dry-run"
+    assert payload["browserActionsExecuted"] is False
+    assert payload["ok"] is False
+    assert "大模型连接" in payload["blockingChecks"]
+    assert "未通过" in payload["message"]
 
 
 def test_extension_error_log_is_stored_locally(tmp_path) -> None:

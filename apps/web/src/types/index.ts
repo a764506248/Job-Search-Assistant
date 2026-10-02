@@ -26,6 +26,26 @@ export interface SetupStatus {
   checkedAt: string
 }
 
+export interface BrowserProbe {
+  webbridgeRunning: boolean
+  kimiExtensionConnected: boolean
+  projectExtensionReady: boolean
+  bossLoggedIn: boolean
+  skillVersion: string
+  source: 'installer' | 'manual' | 'extension'
+  checkedAt?: string
+}
+
+export interface SetupTestRunResult {
+  ok: boolean
+  mode: 'dry-run'
+  browserActionsExecuted: boolean
+  plannedKeywords: string[]
+  dailyTarget: number
+  blockingChecks: string[]
+  message: string
+}
+
 export interface StoredJob {
   id: number
   platformJobId: string
@@ -182,4 +202,15 @@ export interface ResumeImportResult {
   aiModelId?: string
   aiAttemptErrors: string[]
   aiProfileExtracted: boolean
+  confirmationRequired: boolean
+  confirmationStatus: 'pending' | 'confirmed'
+}
+
+export interface ResumeConfirmationResult {
+  resume: LibraryRecord
+  profileFields: string[]
+  projectIds: number[]
+  indexRebuilt: boolean
+  indexedChunks?: number
+  indexError?: string
 }
