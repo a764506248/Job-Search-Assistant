@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 job-search-assistant-local = "job_search_assistant.main:run"
+job-search-assistant-runner = "job_search_assistant.automation.runner:main"
 
 [build-system]
 requires = ["hatchling"]

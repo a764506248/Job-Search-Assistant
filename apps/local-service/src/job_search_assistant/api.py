@@ -60,6 +60,7 @@ from .domain.models import (
     AutomationRunListResponse,
     AutomationRunnerClaimResponse,
     AutomationRunnerFinishRequest,
+    AutomationRunnerStatus,
     BrowserActionResponse,
     BrowserPairingResponse,
     BrowserProbeRequest,
@@ -359,6 +360,23 @@ def create_router(
                 blocking=bool(missing_config),
                 action_label="完善个人资料",
                 action_path="/profile",
+            )
+        )
+
+        runner = automation_repository.runner_status()
+        checks.append(
+            SetupCheck(
+                key="automation-runner",
+                label="自动投递执行器",
+                status="ready" if runner["online"] else "blocked",
+                message=(
+                    f"执行器 {runner['runner_id']} 在线"
+                    if runner["online"]
+                    else "自动投递执行器未运行，请重新启动 Docker 服务"
+                ),
+                blocking=not runner["online"],
+                action_label="查看安装说明",
+                action_path="/setup#services",
             )
         )
 
@@ -694,6 +712,18 @@ def create_router(
     def get_automation_config() -> AutomationConfigResponse:
         return automation_config()
 
+    @router.get("/automation/runner/status", response_model=AutomationRunnerStatus)
+    def get_automation_runner_status() -> AutomationRunnerStatus:
+        return AutomationRunnerStatus.model_validate(automation_repository.runner_status())
+
+    @router.post("/automation/runner/heartbeat", response_model=AutomationRunnerStatus)
+    def automation_runner_heartbeat(
+        request: AutomationHeartbeatRequest,
+    ) -> AutomationRunnerStatus:
+        return AutomationRunnerStatus.model_validate(
+            automation_repository.runner_heartbeat(request.runner_id)
+        )
+
     @router.get("/setup/status", response_model=SetupStatusResponse)
     def get_setup_status() -> SetupStatusResponse:
         return setup_status()
@@ -949,6 +979,25 @@ def create_router(
     def start_automation_run(run_id: int) -> AutomationRun:
         run = automation_run(run_id)
         if run.status == "interrupted":
+            planned_jobs = run.config_snapshot.get("plannedJobs", [])
+            if not isinstance(planned_jobs, list) or not planned_jobs:
+                return AutomationRun.model_validate(
+                    automation_repository.transition(
+                        run_id,
+                        "blocked",
+                        "没有可执行的岗位计划；请先采集岗位，再新建任务",
+                    )
+                )
+            status_result = setup_status()
+            blockers = [
+                check.label
+                for check in status_result.checks
+                if check.blocking and check.status != "ready"
+            ]
+            if blockers:
+                return AutomationRun.model_validate(
+                    automation_repository.transition(run_id, "blocked", "、".join(blockers))
+                )
             return AutomationRun.model_validate(automation_repository.transition(run_id, "running"))
         if run.status != "draft":
             raise HTTPException(status_code=409, detail=f"run cannot start from {run.status}")
@@ -960,6 +1009,15 @@ def create_router(
         if active:
             raise HTTPException(status_code=409, detail="another automation run is active")
         automation_repository.transition(run_id, "validating")
+        planned_jobs = run.config_snapshot.get("plannedJobs", [])
+        if not isinstance(planned_jobs, list) or not planned_jobs:
+            return AutomationRun.model_validate(
+                automation_repository.transition(
+                    run_id,
+                    "blocked",
+                    "没有可执行的岗位计划；请先采集岗位，再新建任务",
+                )
+            )
         status_result = setup_status()
         blockers = [
             check.label

@@ -37,6 +37,17 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  automation-runner:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    command:
+      - job-search-assistant-runner
+      - --base-url
+      - http://local-service:8765
+    depends_on:
+      local-service:
+        condition: service_healthy
+    restart: unless-stopped
+
   embedding:
     image: ghcr.io/a764506248/job-search-assistant-embedding:${JSA_IMAGE_TAG:-latest}
     ports:

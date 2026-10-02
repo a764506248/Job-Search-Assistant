@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-"""Host companion for automation tasks.
-
-The runner never talks to the page directly. Every browser operation goes through
-the local service's allow-listed, idempotent browser-action endpoint.
-"""
+"""Automation worker packaged with the local-service Docker image."""
 
 import argparse
 import json
@@ -68,30 +63,35 @@ def record_progress(
     )
 
 
+def finish_run(
+    api: LocalApi,
+    run_id: int,
+    runner_id: str,
+    status: str,
+    reason: str,
+) -> None:
+    api.post(
+        f"/v1/automation/runs/{run_id}/runner-finish",
+        {"runnerId": runner_id, "status": status, "reason": reason},
+    )
+
+
 def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: bool) -> None:
     run_id = int(run["id"])
     config = run.get("configSnapshot", {})
     api.post(f"/v1/automation/runs/{run_id}/heartbeat", {"runnerId": runner_id})
     if dry_run:
-        api.post(
-            f"/v1/automation/runs/{run_id}/runner-finish",
-            {
-                "runnerId": runner_id,
-                "status": "completed",
-                "reason": "host-runner-dry-run",
-            },
-        )
+        finish_run(api, run_id, runner_id, "completed", "runner-dry-run")
         return
 
     planned_jobs = config.get("plannedJobs", [])
     if not isinstance(planned_jobs, list) or not planned_jobs:
-        api.post(
-            f"/v1/automation/runs/{run_id}/runner-finish",
-            {
-                "runnerId": runner_id,
-                "status": "blocked",
-                "reason": "没有服务端已审批的岗位计划；未执行浏览器副作用",
-            },
+        finish_run(
+            api,
+            run_id,
+            runner_id,
+            "blocked",
+            "没有可执行的岗位计划；未执行浏览器操作",
         )
         return
 
@@ -104,7 +104,16 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
         greeting = str(job.get("greeting", ""))
         job_url = str(job.get("url", ""))
         if not all((job_id, job_url, expected_title, expected_company, greeting)):
+            record_progress(
+                api,
+                run_id,
+                runner_id,
+                job_id or "unknown",
+                "failure",
+                "计划字段不完整",
+            )
             continue
+
         opened = browser_action(
             api,
             run_id,
@@ -117,6 +126,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
             record_progress(api, run_id, runner_id, job_id, "failure", "open-job-failed")
             continue
         time.sleep(2)
+
         chat = browser_action(
             api,
             run_id,
@@ -128,6 +138,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
         if chat.get("result", {}).get("status") != "success":
             record_progress(api, run_id, runner_id, job_id, "failure", "open-chat-failed")
             continue
+
         identity = browser_action(
             api,
             run_id,
@@ -139,6 +150,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
         if identity.get("result", {}).get("status") != "success":
             record_progress(api, run_id, runner_id, job_id, "failure", "identity-mismatch")
             continue
+
         sent = browser_action(
             api,
             run_id,
@@ -154,17 +166,22 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
         greeting_status = sent.get("result", {}).get("status")
         if greeting_status != "success":
             record_progress(
-                api, run_id, runner_id, job_id, "failure", f"greeting-{greeting_status}"
+                api,
+                run_id,
+                runner_id,
+                job_id,
+                "failure",
+                f"greeting-{greeting_status}",
             )
-            api.post(
-                f"/v1/automation/runs/{run_id}/runner-finish",
-                {
-                    "runnerId": runner_id,
-                    "status": "blocked",
-                    "reason": f"问候语发送未确认成功：{greeting_status or 'unknown'}",
-                },
+            finish_run(
+                api,
+                run_id,
+                runner_id,
+                "blocked",
+                f"问候语发送未确认成功：{greeting_status or 'unknown'}",
             )
             return
+
         if config.get("sendResumeImage"):
             resume = browser_action(
                 api,
@@ -180,50 +197,67 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
             resume_status = resume.get("result", {}).get("status")
             if resume_status != "success":
                 record_progress(
-                    api, run_id, runner_id, job_id, "failure", f"resume-{resume_status}"
+                    api,
+                    run_id,
+                    runner_id,
+                    job_id,
+                    "failure",
+                    f"resume-{resume_status}",
                 )
-                api.post(
-                    f"/v1/automation/runs/{run_id}/runner-finish",
-                    {
-                        "runnerId": runner_id,
-                        "status": "blocked",
-                        "reason": f"简历发送未确认成功：{resume_status or 'unknown'}",
-                    },
+                finish_run(
+                    api,
+                    run_id,
+                    runner_id,
+                    "blocked",
+                    f"简历发送未确认成功：{resume_status or 'unknown'}",
                 )
                 return
         record_progress(api, run_id, runner_id, job_id, "success", "delivery-confirmed")
 
-    api.post(
-        f"/v1/automation/runs/{run_id}/runner-finish",
-        {"runnerId": runner_id, "status": "completed", "reason": "plan-finished"},
-    )
+    finish_run(api, run_id, runner_id, "completed", "plan-finished")
+
+
+def run_loop(
+    api: LocalApi,
+    runner_id: str,
+    *,
+    dry_run: bool = False,
+    once: bool = False,
+    poll_seconds: float = 2.0,
+) -> None:
+    while True:
+        try:
+            api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
+            claimed = api.post("/v1/automation/runner/claim", {"runnerId": runner_id})
+            run = claimed.get("run")
+            if run:
+                execute_run(api, run, runner_id, dry_run)
+            elif once:
+                return
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            print(f"runner error: {error}", flush=True)
+            if once:
+                raise SystemExit(1) from error
+        if once:
+            return
+        time.sleep(max(poll_seconds, 0.5))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Job Search Assistant host runner")
+    parser = argparse.ArgumentParser(description="Job Search Assistant automation runner")
     parser.add_argument("--base-url", default="http://127.0.0.1:8765")
-    parser.add_argument("--runner-id", default=f"{platform.node()}-host-runner")
+    parser.add_argument("--runner-id", default=f"{platform.node()}-automation-runner")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     args = parser.parse_args()
-    api = LocalApi(args.base_url)
-    while True:
-        try:
-            api.post("/v1/automation/runner/heartbeat", {"runnerId": args.runner_id})
-            claimed = api.post("/v1/automation/runner/claim", {"runnerId": args.runner_id})
-            run = claimed.get("run")
-            if run:
-                execute_run(api, run, args.runner_id, args.dry_run)
-            elif args.once:
-                return
-        except (urllib.error.URLError, TimeoutError, ValueError) as error:
-            print(f"runner error: {error}", flush=True)
-            if args.once:
-                raise SystemExit(1) from error
-        if args.once:
-            return
-        time.sleep(max(args.poll_seconds, 0.5))
+    run_loop(
+        LocalApi(args.base_url),
+        args.runner_id,
+        dry_run=args.dry_run,
+        once=args.once,
+        poll_seconds=args.poll_seconds,
+    )
 
 
 if __name__ == "__main__":

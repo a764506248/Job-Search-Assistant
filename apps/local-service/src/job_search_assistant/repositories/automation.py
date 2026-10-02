@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,10 @@ class AutomationRepository:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(run_id) REFERENCES automation_runs(id)
                 );
+                CREATE TABLE IF NOT EXISTS automation_runners (
+                    runner_id TEXT PRIMARY KEY,
+                    heartbeat_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(connection, "automation_runs", "runner_id", "TEXT")
@@ -102,6 +106,7 @@ class AutomationRepository:
         with sqlite3.connect(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.row_factory = sqlite3.Row
+            self._upsert_runner(connection, runner_id, now)
             row = connection.execute(
                 """SELECT id FROM automation_runs
                 WHERE status = 'running' AND runner_id IS NULL
@@ -123,6 +128,31 @@ class AutomationRepository:
                 {"runnerId": runner_id},
             )
         return self.get_run(run_id)
+
+    def runner_heartbeat(self, runner_id: str) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            self._upsert_runner(connection, runner_id, now)
+        return {"runner_id": runner_id, "heartbeat_at": now, "online": True}
+
+    def runner_status(self, max_age_seconds: int = 10) -> dict[str, Any]:
+        self.initialize()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT runner_id, heartbeat_at FROM automation_runners "
+                "ORDER BY heartbeat_at DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return {"runner_id": None, "heartbeat_at": None, "online": False}
+        heartbeat_at = datetime.fromisoformat(str(row["heartbeat_at"]))
+        online = datetime.now(UTC) - heartbeat_at <= timedelta(seconds=max_age_seconds)
+        return {
+            "runner_id": str(row["runner_id"]),
+            "heartbeat_at": str(row["heartbeat_at"]),
+            "online": online,
+        }
 
     def heartbeat(self, run_id: int, runner_id: str) -> dict[str, Any]:
         self.initialize()
@@ -380,3 +410,15 @@ class AutomationRepository:
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _upsert_runner(
+        connection: sqlite3.Connection,
+        runner_id: str,
+        heartbeat_at: str,
+    ) -> None:
+        connection.execute(
+            """INSERT INTO automation_runners(runner_id, heartbeat_at) VALUES (?, ?)
+            ON CONFLICT(runner_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at""",
+            (runner_id, heartbeat_at),
+        )

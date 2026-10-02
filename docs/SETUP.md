@@ -20,7 +20,7 @@ Windows PowerShell：
 .\scripts\install.ps1 -Mode install
 ```
 
-安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，安装或升级 BOSS Skill（保留已有 `user_profile.json`），拉取三个容器镜像并打开 <http://127.0.0.1:8765/setup>。如果本地已有构建后的 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。首次完整拉取包含 Python/ONNX 运行依赖，启动后还可能下载向量模型，网络较慢时需要等待数分钟；安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
+安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，安装或升级 BOSS Skill（保留已有 `user_profile.json`），拉取三个容器镜像并打开 <http://127.0.0.1:8765/setup>。Compose 会从 Local Service 镜像自动启动独立 runner 容器，不需要主机安装 Python 或手工运行脚本。如果本地已有构建后的 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。首次完整拉取包含 Python/ONNX 运行依赖，启动后还可能下载向量模型，网络较慢时需要等待数分钟；安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
 
 升级、预演和卸载：
 

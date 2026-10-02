@@ -17,6 +17,7 @@ services:
     restart: unless-stopped
 
   local-service:
+    image: job-search-assistant-local-service
     build:
       context: ./apps/local-service
     expose:
@@ -38,6 +39,17 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+
+  automation-runner:
+    image: job-search-assistant-local-service
+    command:
+      - job-search-assistant-runner
+      - --base-url
+      - http://local-service:8765
+    depends_on:
+      local-service:
+        condition: service_healthy
     restart: unless-stopped
 
   embedding:

@@ -95,15 +95,12 @@ $extensionOutput = Join-Path $resolvedSource 'apps\extension\.output\chrome-mv3\
 if (Test-Path $extensionOutput) {
     Invoke-Step { Compress-Archive $extensionOutput $ExtensionZip -Force } '打包统一 Chrome 扩展'
 }
-Invoke-Step { Copy-Item (Join-Path $resolvedSource 'scripts\automation-runner.py') $RunnerScript -Force } '安装宿主 automation runner'
+if (Test-Path $RunnerPid) {
+    $processId = Get-Content $RunnerPid -ErrorAction SilentlyContinue
+    if ($processId -match '^\d+$' -and -not $DryRun) { Stop-Process -Id ([int]$processId) -ErrorAction SilentlyContinue }
+}
 Invoke-Step { Invoke-Compose @('pull') } '拉取三个服务镜像'
-Invoke-Step { Invoke-Compose @('up', '-d') } '启动三个服务'
+Invoke-Step { Invoke-Compose @('up', '-d') } '启动三个服务和内置执行器'
 Wait-Service
-if (Test-Command 'python') {
-    Invoke-Step {
-        $process = Start-Process python -ArgumentList @($RunnerScript) -RedirectStandardOutput $RunnerLog -RedirectStandardError $RunnerErrorLog -WindowStyle Hidden -PassThru
-        Set-Content $RunnerPid $process.Id -Encoding ASCII
-    } '启动宿主 automation runner'
-} else { Write-Step '! 未检测到 Python，任务 API 可用，但宿主 runner 未启动' }
 if (-not $NoOpen -and -not $DryRun) { Start-Process $SetupUrl }
 Write-Step "安装完成：$SetupUrl"

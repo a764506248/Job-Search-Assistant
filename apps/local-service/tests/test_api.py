@@ -75,7 +75,7 @@ def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["overall"] == "blocked"
-    assert payload["total"] == 11
+    assert payload["total"] == 12
     checks = {item["key"]: item for item in payload["checks"]}
     assert checks["local-service"]["status"] == "ready"
     assert checks["embedding"]["status"] == "ready"
@@ -84,6 +84,7 @@ def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:
     assert checks["kimi-webbridge"]["status"] == "pending"
     assert checks["boss-login"]["status"] == "pending"
     assert checks["skill-version"]["status"] == "pending"
+    assert checks["automation-runner"]["status"] == "blocked"
     assert payload["checkedAt"]
 
 
@@ -137,7 +138,21 @@ def test_automation_run_api_blocks_start_when_setup_is_incomplete(tmp_path) -> N
     )
     created = client.post(
         "/v1/automation/runs",
-        json={"targetCount": 12, "config": {"searchKeywords": ["AI Agent"]}},
+        json={
+            "targetCount": 12,
+            "config": {
+                "searchKeywords": ["AI Agent"],
+                "plannedJobs": [
+                    {
+                        "jobId": "job-1",
+                        "url": "https://www.zhipin.com/job_detail/job-1.html",
+                        "title": "AI Agent 工程师",
+                        "companyName": "示例公司",
+                        "greeting": "您好，希望进一步沟通。",
+                    }
+                ],
+            },
+        },
     )
 
     assert created.status_code == 201
@@ -155,6 +170,40 @@ def test_automation_run_api_blocks_start_when_setup_is_incomplete(tmp_path) -> N
         "status-changed",
         "status-changed",
     ]
+
+
+def test_automation_run_blocks_zero_job_plan_before_running(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+    created = client.post(
+        "/v1/automation/runs",
+        json={"targetCount": 5, "config": {"plannedJobs": []}},
+    )
+
+    started = client.post(f"/v1/automation/runs/{created.json()['id']}/start")
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "blocked"
+    assert "没有可执行的岗位计划" in started.json()["stopReason"]
+
+
+def test_runner_heartbeat_endpoint_updates_setup_check(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+
+    heartbeat = client.post(
+        "/v1/automation/runner/heartbeat",
+        json={"runnerId": "compose-runner"},
+    )
+    checks = {
+        item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
+    }
+
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["online"] is True
+    assert checks["automation-runner"]["status"] == "ready"
 
 
 def test_extension_error_log_is_stored_locally(tmp_path) -> None:

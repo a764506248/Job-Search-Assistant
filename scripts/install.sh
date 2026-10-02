@@ -269,12 +269,11 @@ prepare_source
 run cp "$SOURCE_DIR/docker-compose.release.yml" "$COMPOSE_FILE"
 install_skill
 package_extension
-install_runner
-say "正在拉取三个服务镜像；首次安装会下载 Python/ONNX 依赖和向量模型，耗时取决于网络。"
+stop_runner
+say "正在拉取三个镜像并启动内置执行器；首次安装会下载 Python/ONNX 依赖和向量模型，耗时取决于网络。"
 run compose pull
 run compose up -d
 wait_for_service
-start_runner
 probe_browser_environment
 open_setup
 say "完成。首次使用向导：$JSA_SETUP_URL"

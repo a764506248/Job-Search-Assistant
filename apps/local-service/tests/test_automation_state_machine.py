@@ -19,6 +19,7 @@ from job_search_assistant.automation import (
         ("stopping", "completed"),
         ("running", "interrupted"),
         ("interrupted", "running"),
+        ("interrupted", "blocked"),
     ],
 )
 def test_valid_automation_transitions(current: str, target: str) -> None:

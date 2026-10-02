@@ -31,14 +31,14 @@ flowchart LR
     API --> DB[(SQLite)]
     UI --> SSE[SSE 任务事件]
     SSE --> API
-    RUNNER[宿主 automation-runner] --> API
+    RUNNER[Docker automation-runner] --> API
     API --> WS[本机 WebSocket 动作协议]
     WS --> EXT[统一 Chrome 扩展]
     EXT --> BOSS[BOSS 页面]
 ```
 
 - Web、Local Service、Embedding 由一个 Compose 文件统一启动，但仍是三个职责独立的镜像。
-- 宿主 runner 不直接访问 DOM；它只能调用 Local Service 的动作接口。
+- runner 与 Local Service 使用同一镜像，由 Compose 自动启动；runner 不直接访问 DOM，只能调用 Local Service 的动作接口。
 - 扩展连接地址固定为 `ws://127.0.0.1:8765/v1/browser/ws`。
 - Nginx 只在本机端口转发 `/v1`，包括 WebSocket Upgrade。
 
@@ -93,18 +93,14 @@ draft → validating → ready → running ↔ paused
 
 发送动作还必须包含 `expectedTitle` 与 `expectedCompany`。问候语使用浏览器确认框，简历使用包含真实图片的扩展预览层；用户取消时返回 `confirmation_required`，不会静默点击发送。点击后只有同时观察到目标身份与送达证据才返回成功；证据不足返回 `uncertain`，幂等账本禁止自动重试。
 
-## 6. 宿主 runner
+## 6. Docker 内置 runner
 
-开发预览运行：
+正常安装无需手工启动 runner。`docker compose up -d` 会使用 Local Service 镜像同时启动 `automation-runner` 服务，并持续向 `/v1/automation/runner/heartbeat` 上报存活状态。后台在 runner 离线或岗位计划为空时会阻止任务进入运行态。
+
+仅在开发调试时可以手工运行：
 
 ```bash
 python3 scripts/automation-runner.py --once --dry-run
-```
-
-常驻运行：
-
-```bash
-python3 scripts/automation-runner.py
 ```
 
 runner 通过 `/v1/automation/runner/claim` 原子认领任务，并持续写入心跳。真实模式只处理服务端快照中已经审批的 `plannedJobs`；没有计划时会安全进入 `blocked`，不会自己猜测岗位或发送内容。

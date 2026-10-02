@@ -146,6 +146,12 @@ class AutomationRunListResponse(ApiModel):
     items: list[AutomationRun]
 
 
+class AutomationRunnerStatus(ApiModel):
+    runner_id: str | None = None
+    heartbeat_at: datetime | None = None
+    online: bool = False
+
+
 class AutomationEvent(ApiModel):
     id: int
     run_id: int

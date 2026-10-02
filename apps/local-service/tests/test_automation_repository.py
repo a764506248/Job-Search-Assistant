@@ -67,6 +67,16 @@ def test_runner_claim_is_atomic_and_action_is_idempotent(tmp_path) -> None:
     assert repository.report(run["id"])["actions"][0]["attempt_count"] == 1
 
 
+def test_runner_heartbeat_reports_worker_online(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+
+    assert repository.runner_status()["online"] is False
+    heartbeat = repository.runner_heartbeat("runner-a")
+
+    assert heartbeat["online"] is True
+    assert repository.runner_status()["runner_id"] == "runner-a"
+
+
 def test_failed_action_can_be_retried(tmp_path) -> None:
     repository = AutomationRepository(tmp_path / "jobs.sqlite3")
     run = repository.create_run({}, 1)

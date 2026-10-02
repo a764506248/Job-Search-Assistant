@@ -410,6 +410,11 @@ td small { color: var(--muted); }
 .automation-command p:last-child { margin: 0; color: var(--muted); font-size: 10px; }
 .automation-command label { display: grid; gap: 5px; color: var(--muted); font-size: 9px; }
 .automation-command input { width: 95px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.automation-readiness { margin-top: 12px; padding: 14px 18px; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.automation-readiness > div { padding: 11px 12px; border: 1px solid #f1c8c8; border-radius: 9px; background: #fff7f7; display: grid; gap: 4px; }
+.automation-readiness > div.ready { border-color: #b9ddcf; background: var(--brand-soft); }
+.automation-readiness strong { font-size: 10px; }
+.automation-readiness span { color: var(--muted); font-size: 9px; line-height: 1.5; }
 .automation-layout { margin-top: 18px; display: grid; grid-template-columns: minmax(320px,.85fr) minmax(0,1.15fr); gap: 18px; }
 .automation-runs, .automation-events { overflow: hidden; }
 .automation-runs article { padding: 15px 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; cursor: pointer; }

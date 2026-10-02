@@ -12,7 +12,7 @@
 
 由于包含非商业限制，本项目属于“源码可用（source-available）”，不属于 OSI 定义的开源软件。第三方依赖仍分别适用其自身许可证。
 
-当前阶段：产品化开发。Chrome 扩展已升级为 `v0.3.0-unified-protocol-preview`，具备本机配对、WebSocket 白名单动作、岗位读取、目标身份校验和页面内确认发送；任务 API、状态机、SSE、幂等动作账本与宿主 runner 已接通。完成受控真实账号回归前仍保留人工确认门禁，不会宣称无人值守投递可用。
+当前阶段：产品化开发。Chrome 扩展已升级为 `v0.3.0-unified-protocol-preview`，具备本机配对、WebSocket 白名单动作、岗位读取、目标身份校验和页面内确认发送；任务 API、状态机、SSE、幂等动作账本与 Docker 内置 runner 已接通。完成受控真实账号回归前仍保留人工确认门禁，不会宣称无人值守投递可用。
 
 ## 产品原则
 
@@ -38,7 +38,7 @@
 | 阶段 | 用户入口 | 主要变化 | 当前状态 |
 | --- | --- | --- | --- |
 | 一：一键安装现有架构 | 安装器 + 首次使用向导 | 自动启动服务、安装 Skill、统一环境检查和简历导入确认 | 首版完成：macOS/Linux 与 Windows 安装器、向导、简历确认、浏览器探针、安全测试 |
-| 二：后台成为唯一入口 | 管理后台“开始投递” | 本地任务状态机、实时进度、暂停/恢复/停止，不再要求手工调用 Skill | 首版完成：任务 API、SSE、控制台、宿主 runner、心跳、幂等动作与报告 |
+| 二：后台成为唯一入口 | 管理后台“开始投递” | 本地任务状态机、实时进度、暂停/恢复/停止，不再要求手工调用 Skill | 首版完成：任务 API、SSE、控制台、Docker 内置 runner、心跳、幂等动作与报告 |
 | 三：统一浏览器扩展 | 一个项目扩展 | 接管浏览器读取、点击、问候语和图片发送，移除 Kimi/Skill 必选依赖 | 协议预览：配对、读取、身份校验和页面内确认发送已完成；仍需真实环境验收 |
 
 目标体验：
@@ -57,7 +57,7 @@
 
 ![Job Search Assistant 整体工作流](docs/assets/system-workflow.svg)
 
-系统以本地 API 和 SQLite 为业务事实源：Skill 负责三层循环编排，Kimi WebBridge 只执行浏览器读取与点击，项目 Chrome 扩展只在用户开启开关后处理默认简历图片的预览与确认发送。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
+系统以本地 API 和 SQLite 为业务事实源。新链路由 Docker 内置 runner 认领已有岗位计划，再通过统一 Chrome 扩展执行白名单浏览器动作；旧版 Skill + Kimi WebBridge 仅作为回退链路。任务没有岗位计划、runner 不在线或扩展未连接时会明确阻止启动，不再显示为虚假的“运行中”。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
 
 ## 自动投递 Skill
 
@@ -198,7 +198,7 @@ JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml up -d
 
 除非你正在调试某个服务，否则不建议分别执行三个 `docker run`：容器间 DNS、依赖顺序、健康检查、SQLite 目录和模型 Volume 都已经由 Compose 配置好。
 
-GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Docker 只包含管理后台、本地 API 和 Embedding 服务；Chrome 扩展、BOSS Skill 及 Kimi WebBridge 仍需安装在用户浏览器和本机环境中，它们不会被打包进这三个服务镜像。
+GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Compose 使用本地 API 镜像额外启动轻量 runner 服务，因此仍然只有三个镜像，但会看到四个容器。Chrome 扩展仍需安装在用户浏览器中；BOSS Skill 与 Kimi WebBridge 只用于旧链路回退，不会被打包进镜像。
 
 当前可以管理个人档案、项目、简历资料、匹配规则、模型配置和职位快照；所有修改都会持久化到本地 SQLite。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将识别结果分别写入个人档案、项目库和简历库，随后自动重建向量索引。“简历模板”提供投递版式选择、网页预览和 PDF 示例，“向量知识库”可使用 768 维的 `jinaai/jina-embeddings-v2-base-zh` 重建本地索引并测试语义检索。
 

@@ -57,7 +57,11 @@ TRANSITIONS: dict[AutomationRunStatus, frozenset[AutomationRunStatus]] = {
         }
     ),
     AutomationRunStatus.INTERRUPTED: frozenset(
-        {AutomationRunStatus.RUNNING, AutomationRunStatus.CANCELLED}
+        {
+            AutomationRunStatus.RUNNING,
+            AutomationRunStatus.BLOCKED,
+            AutomationRunStatus.CANCELLED,
+        }
     ),
     AutomationRunStatus.COMPLETED: frozenset(),
     AutomationRunStatus.FAILED: frozenset(),
