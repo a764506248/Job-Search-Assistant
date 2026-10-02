@@ -1,0 +1,83 @@
+# 低配上线部署编排（2核2G 轻量机可用）
+#
+# 与根目录 docker-compose.yml 的差异：
+#   1. 不启动 embedding 容器，并设置 JSA_EMBEDDING_ENABLED=false
+#      → RAG 自动降级为 SQLite FTS5/BM25 关键词检索，省掉常驻 0.6~1.2GB 内存
+#   2. web 端口监听 0.0.0.0（根 compose 是 127.0.0.1，外网访问不到）
+#   3. 加了内存上限，避免单容器把整机拖垮
+#
+# 用法：
+#   docker compose -f docker-compose.deploy.yml up -d --build
+#
+# ⚠️ 前端构建（vite）峰值内存约 1.5GB，2核2G 机器直接 --build 可能 OOM。
+#    建议在本地构建好镜像推到 TCR 再拉取，或临时加 swap 后构建。
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  local-service:
+    build:
+      context: ./apps/local-service
+    expose:
+      - "8765"
+    environment:
+      JSA_HOST: 0.0.0.0
+      JSA_PORT: 8765
+      JSA_DATA_DIR: /data
+      JSA_EMBEDDING_ENABLED: "false"
+    volumes:
+      - ./deploy-data:/data
+    mem_limit: 768m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+# 说明：如后续机器升到 4核4G 以上，想恢复语义检索，把这一段加回来并在
+# local-service 里把 JSA_EMBEDDING_ENABLED 改成 "true"、JSA_EMBEDDING_URL 指向
+# embedding:8766 即可，无需改代码。
+#
+#   embedding:
+#     build:
+#       context: ./services/embedding
+#     environment:
+#       EMBEDDING_MODEL: jinaai/jina-embeddings-v2-base-zh
+#       FASTEMBED_CACHE_DIR: /models/fastembed
+#       HF_HOME: /models/fastembed/huggingface
+#       HF_HUB_DISABLE_XET: "1"
+#     volumes:
+#       - embedding-models:/models/fastembed
+#     healthcheck:
+#       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=3)"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 12
+#       start_period: 60s
+#     restart: unless-stopped
+#
+# volumes:
+#   embedding-models:

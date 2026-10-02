@@ -6,12 +6,20 @@ from .embedding import Embedder
 from .repositories import LibraryRepository, VectorRepository
 
 
+KEYWORD_ONLY_MODEL = "keyword-only (fts5/bm25)"
+
+NO_VECTOR_HINT = (
+    "embedding 服务未启用，本次仅使用 FTS5/BM25 关键词检索；"
+    "如需语义召回请在更高配置机器上启用 embedding 服务"
+)
+
+
 class RagService:
     def __init__(
         self,
         library: LibraryRepository,
         vectors: VectorRepository,
-        embedder: Embedder,
+        embedder: Embedder | None = None,
     ) -> None:
         self.library = library
         self.vectors = vectors
@@ -19,27 +27,48 @@ class RagService:
 
     def status(self) -> dict[str, Any]:
         index = self.vectors.status()
+        if self.embedder is None:
+            return {
+                **index,
+                "embeddingAvailable": False,
+                "mode": "keyword-only",
+                "embeddingService": {"status": "disabled", "hint": NO_VECTOR_HINT},
+            }
         try:
             service = self.embedder.health()
             available = service.get("status") == "ok"
         except RuntimeError:
             service = {"status": "offline", "model": self.embedder.model}
             available = False
-        return {**index, "embeddingAvailable": available, "embeddingService": service}
+        return {
+            **index,
+            "embeddingAvailable": available,
+            "mode": "hybrid" if available else "keyword-only",
+            "embeddingService": service,
+        }
 
     def rebuild(self) -> dict[str, Any]:
+        chunks = self._collect_knowledge_units()
+        if self.embedder is None:
+            # 仍然写入分块以建立 FTS5 索引，保证关键词检索可用。
+            count = self.vectors.replace_all(chunks, [[] for _ in chunks], KEYWORD_ONLY_MODEL)
+            return {**self.vectors.status(), "rebuilt": count, "mode": "keyword-only",
+                    "hint": NO_VECTOR_HINT}
         if self.embedder.health().get("status") != "ok":
             raise RuntimeError("embedding service is not ready")
-        chunks = self._collect_knowledge_units()
         vectors: list[list[float]] = []
         for start in range(0, len(chunks), 32):
             batch = [item["content"] for item in chunks[start : start + 32]]
             vectors.extend(self.embedder.embed(batch))
         count = self.vectors.replace_all(chunks, vectors, self.embedder.model)
-        return {**self.vectors.status(), "rebuilt": count}
+        return {**self.vectors.status(), "rebuilt": count, "mode": "hybrid"}
 
     def search(self, query: str, limit: int) -> list[dict[str, Any]]:
-        query_vector = self.embedder.embed([query])[0]
+        if self.embedder is None:
+            # 空向量传入时余弦相似度恒为 0，结果等价于纯关键词排序。
+            query_vector: list[float] = []
+        else:
+            query_vector = self.embedder.embed([query])[0]
         return self.vectors.search_hybrid(query, query_vector, limit)
 
     def list_chunks(self) -> list[dict[str, Any]]:

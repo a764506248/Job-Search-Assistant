@@ -60,9 +60,11 @@ def create_app(
     vector_repository = VectorRepository(resolved_database_path)
     client_log_repository = ClientLogRepository(resolved_database_path)
     delivery_repository = DeliveryRepository(resolved_database_path)
-    resolved_embedder = embedder or HttpEmbeddingClient(
-        settings.embedding_url, settings.embedding_model
-    )
+    resolved_embedder = embedder
+    if resolved_embedder is None and settings.embedding_enabled:
+        resolved_embedder = HttpEmbeddingClient(
+            settings.embedding_url, settings.embedding_model
+        )
     rag_service = RagService(library_repository, vector_repository, resolved_embedder)
     resolved_project_extractor = project_extractor or CloudProjectExtractor(library_repository)
     resolved_model_tester = model_tester or CloudModelConnectionTester()
