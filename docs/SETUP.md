@@ -2,6 +2,29 @@
 
 本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。基础后台、AI 能力、浏览器采集和自动投递不是同一组依赖，请按实际使用范围准备。
 
+> 阶段一的一键安装器、环境状态 API 和首次使用向导已有可试用首版；浏览器自动探测、简历确认和后台直接启动投递仍在开发。完整范围见[一键安装与自动投递产品化路线图](PRODUCTIZATION_ROADMAP.md)。
+
+## 0. 阶段一安装器（macOS/Linux 首版）
+
+从仓库根目录运行：
+
+```bash
+./scripts/install.sh --check
+./scripts/install.sh --install
+```
+
+安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，安装或升级 BOSS Skill（保留已有 `user_profile.json`），拉取三个容器镜像并打开 <http://127.0.0.1:8765/setup>。如果本地已有构建后的 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。首次完整拉取包含 Python/ONNX 运行依赖，启动后还可能下载向量模型，网络较慢时需要等待数分钟；安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
+
+升级、预演和卸载：
+
+```bash
+./scripts/install.sh --upgrade
+./scripts/install.sh --install --dry-run
+./scripts/install.sh --uninstall
+```
+
+卸载只停止容器并移除安装器托管的 Compose/扩展包，保留 `~/.job-search-assistant/data` 和 Skill 内的用户配置。版本组合由 [`scripts/release-manifest.env`](../scripts/release-manifest.env) 统一声明。当前是开发清单，镜像仍使用 `latest`；正式 Release 发布后应改为不可变版本标签。
+
 ## 1. 功能与依赖关系
 
 | 功能 | 必要依赖 |

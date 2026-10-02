@@ -44,21 +44,21 @@ from .domain.models import (
     DeliveryRecord,
     DeliveryRecordInput,
     HealthResponse,
+    JobAnalysisPlanRequest,
+    JobAnalysisPlanResponse,
     JobCaptureRequest,
     JobCaptureResponse,
     JobEvaluationRequest,
     JobEvaluationResponse,
-    JobAnalysisPlanRequest,
-    JobAnalysisPlanResponse,
     JobListResponse,
     JobTrackingUpdate,
     LibraryListResponse,
     LibraryRecord,
     LibraryRecordInput,
     ManualJobInput,
-    MaterialStrategy,
     MaterialPreviewRequest,
     MaterialPreviewResponse,
+    MaterialStrategy,
     ProfilePayload,
     RagChunkListResponse,
     RagRebuildResponse,
@@ -68,6 +68,8 @@ from .domain.models import (
     ResumeImportResponse,
     RiskRuleInput,
     RuleAction,
+    SetupCheck,
+    SetupStatusResponse,
     StoredJob,
 )
 from .project_extraction import (
@@ -177,6 +179,183 @@ def create_router(
             default_greeting=str(profile.get("defaultGreeting", "")).strip(),
             default_resume_image_available=image_available,
             matching_rules=matching_rules(),
+        )
+
+    def setup_status() -> SetupStatusResponse:
+        config = automation_config()
+        models = library_repository.list("models")
+        resumes = library_repository.list("resumes")
+        rag = rag_service.status()
+        checks = [
+            SetupCheck(
+                key="local-service",
+                label="本地服务",
+                status="ready",
+                message=f"本地 API v{__version__} 已运行",
+            )
+        ]
+
+        if rag["embeddingAvailable"]:
+            checks.append(
+                SetupCheck(
+                    key="embedding",
+                    label="向量服务",
+                    status="ready",
+                    message=f"向量模型 {rag.get('model') or '已连接'} 可用",
+                )
+            )
+        else:
+            checks.append(
+                SetupCheck(
+                    key="embedding",
+                    label="向量服务",
+                    status="blocked",
+                    message="向量服务未就绪，请检查 Docker 服务",
+                    blocking=True,
+                    action_label="查看安装说明",
+                    action_path="/setup#services",
+                )
+            )
+
+        verified_models = [
+            record
+            for record in models
+            if record["data"].get("lastVerificationStatus") == "ok"
+        ]
+        if verified_models:
+            checks.append(
+                SetupCheck(
+                    key="model",
+                    label="大模型连接",
+                    status="ready",
+                    message=f"已验证 {len(verified_models)} 个模型配置",
+                    action_label="管理模型",
+                    action_path="/models",
+                )
+            )
+        elif models:
+            checks.append(
+                SetupCheck(
+                    key="model",
+                    label="大模型连接",
+                    status="warning",
+                    message="模型已配置，但还没有通过连接测试",
+                    blocking=True,
+                    action_label="测试模型",
+                    action_path="/models",
+                )
+            )
+        else:
+            checks.append(
+                SetupCheck(
+                    key="model",
+                    label="大模型连接",
+                    status="blocked",
+                    message="尚未配置用于简历识别与材料生成的模型",
+                    blocking=True,
+                    action_label="配置模型",
+                    action_path="/models",
+                )
+            )
+
+        checks.append(
+            SetupCheck(
+                key="resume",
+                label="简历资料",
+                status="ready" if resumes else "blocked",
+                message=(
+                    f"已导入 {len(resumes)} 份简历"
+                    if resumes
+                    else "尚未导入简历"
+                ),
+                blocking=not resumes,
+                action_label="管理简历" if resumes else "导入简历",
+                action_path="/resumes",
+            )
+        )
+
+        indexed_chunks = int(rag.get("chunks", 0) or 0)
+        checks.append(
+            SetupCheck(
+                key="knowledge-index",
+                label="知识索引",
+                status="ready" if indexed_chunks else "blocked",
+                message=(
+                    f"已建立 {indexed_chunks} 个知识片段"
+                    if indexed_chunks
+                    else "知识索引为空，请导入简历或重建索引"
+                ),
+                blocking=not indexed_chunks,
+                action_label="查看知识库",
+                action_path="/knowledge",
+            )
+        )
+
+        missing_config: list[str] = []
+        if not config.target_roles:
+            missing_config.append("目标岗位")
+        if not config.city_code:
+            missing_config.append("投递城市")
+        if not config.search_keywords:
+            missing_config.append("搜索关键词")
+        if not config.default_greeting:
+            missing_config.append("默认招呼语")
+        checks.append(
+            SetupCheck(
+                key="delivery-config",
+                label="投递偏好",
+                status="ready" if not missing_config else "blocked",
+                message=(
+                    "目标岗位、城市、关键词与招呼语已配置"
+                    if not missing_config
+                    else f"还需配置：{'、'.join(missing_config)}"
+                ),
+                blocking=bool(missing_config),
+                action_label="完善个人资料",
+                action_path="/profile",
+            )
+        )
+
+        image_missing = config.send_resume_image and not config.default_resume_image_available
+        checks.append(
+            SetupCheck(
+                key="resume-image",
+                label="简历图片",
+                status="blocked" if image_missing else "ready",
+                message=(
+                    "已启用图片发送，但没有可用的默认简历图片"
+                    if image_missing
+                    else (
+                        "默认简历图片可用"
+                        if config.default_resume_image_available
+                        else "未启用简历图片发送，可稍后配置"
+                    )
+                ),
+                blocking=image_missing,
+                action_label="管理简历",
+                action_path="/resumes",
+            )
+        )
+
+        checks.append(
+            SetupCheck(
+                key="browser",
+                label="浏览器环境",
+                status="pending",
+                message="等待桌面安装器确认 Kimi、扩展与 BOSS 登录状态",
+                blocking=True,
+                action_label="查看安装步骤",
+                action_path="/setup#browser",
+            )
+        )
+        priority = {"ready": 0, "warning": 1, "pending": 2, "blocked": 3}
+        overall = max((check.status for check in checks), key=priority.__getitem__)
+        return SetupStatusResponse(
+            overall=overall,
+            completed=sum(check.status == "ready" for check in checks),
+            total=len(checks),
+            checks=checks,
+            checked_at=datetime.now(UTC),
         )
 
     def validate_model_data(data: dict[str, object]) -> None:
@@ -309,6 +488,10 @@ def create_router(
     @router.get("/automation/config", response_model=AutomationConfigResponse)
     def get_automation_config() -> AutomationConfigResponse:
         return automation_config()
+
+    @router.get("/setup/status", response_model=SetupStatusResponse)
+    def get_setup_status() -> SetupStatusResponse:
+        return setup_status()
 
     @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
     def create_client_log(request: ClientLogInput) -> ClientLogRecord:
@@ -516,7 +699,9 @@ def create_router(
                             "material_strategy": MaterialStrategy.BLOCKED,
                             "should_deliver": False,
                             "reasons": [
-                                f"岗位适合度 {match.suitability_score} 低于投递阈值 {suitability_threshold}"
+                                "岗位适合度 "
+                                f"{match.suitability_score} 低于投递阈值 "
+                                f"{suitability_threshold}"
                             ],
                         }
                     )
@@ -846,6 +1031,15 @@ def create_router(
                 data = {**existing["data"], **request.data}
                 data.pop("apiKeyConfigured", None)
                 data.pop("apiKeyHint", None)
+                connection_fields = ("provider", "modelId", "baseUrl", "apiKey")
+                if any(
+                    field in request.data
+                    and request.data[field] != existing["data"].get(field)
+                    for field in connection_fields
+                ):
+                    data.pop("lastVerificationStatus", None)
+                    data.pop("lastVerifiedAt", None)
+                    data.pop("lastVerifiedLatencyMs", None)
                 validate_model_data(data)
             result = library_repository.update(valid, record_id, request.name, data)
         except KeyError as error:
@@ -873,9 +1067,17 @@ def create_router(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="model configuration not found") from error
         try:
-            return model_tester.test(record["data"])
+            result = model_tester.test(record["data"])
         except RuntimeError as error:
             raise HTTPException(status_code=502, detail=str(error)) from error
+        data = {
+            **record["data"],
+            "lastVerificationStatus": "ok",
+            "lastVerifiedAt": datetime.now(UTC).isoformat(),
+            "lastVerifiedLatencyMs": result.get("latencyMs"),
+        }
+        library_repository.update("models", record_id, record["name"], data)
+        return result
 
     @router.get("/rag/status", response_model=RagStatus)
     def rag_status() -> RagStatus:

@@ -75,6 +75,27 @@ class HealthResponse(ApiModel):
     version: str
 
 
+SetupCheckStatus = Literal["ready", "pending", "warning", "blocked"]
+
+
+class SetupCheck(ApiModel):
+    key: str
+    label: str
+    status: SetupCheckStatus
+    message: str
+    blocking: bool = False
+    action_label: str | None = None
+    action_path: str | None = None
+
+
+class SetupStatusResponse(ApiModel):
+    overall: SetupCheckStatus
+    completed: int
+    total: int
+    checks: list[SetupCheck]
+    checked_at: datetime
+
+
 class ClientLogInput(ApiModel):
     source: Literal["extension-content", "extension-background", "extension-page"]
     level: Literal["warning", "error"] = "error"

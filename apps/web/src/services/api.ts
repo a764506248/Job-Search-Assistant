@@ -10,6 +10,7 @@ import type {
   RagStatus,
   ResumeImportResult,
   ResumeTemplate,
+  SetupStatus,
   StoredJob,
 } from '../types'
 
@@ -37,6 +38,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   health: () => request<HealthResponse>('/v1/health'),
+  setupStatus: () => request<SetupStatus>('/v1/setup/status'),
   jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
     const params = new URLSearchParams({
       page: String(options.page || 1),

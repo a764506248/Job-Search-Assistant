@@ -6,6 +6,26 @@ export interface HealthResponse {
   version: string
 }
 
+export type SetupCheckStatus = 'ready' | 'pending' | 'warning' | 'blocked'
+
+export interface SetupCheck {
+  key: string
+  label: string
+  status: SetupCheckStatus
+  message: string
+  blocking: boolean
+  actionLabel?: string
+  actionPath?: string
+}
+
+export interface SetupStatus {
+  overall: SetupCheckStatus
+  completed: number
+  total: number
+  checks: SetupCheck[]
+  checkedAt: string
+}
+
 export interface StoredJob {
   id: number
   platformJobId: string

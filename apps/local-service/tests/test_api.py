@@ -65,6 +65,26 @@ def test_health(tmp_path) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+
+    response = client.get("/v1/setup/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overall"] == "blocked"
+    assert payload["total"] == 8
+    checks = {item["key"]: item for item in payload["checks"]}
+    assert checks["local-service"]["status"] == "ready"
+    assert checks["embedding"]["status"] == "ready"
+    assert checks["model"]["status"] == "blocked"
+    assert checks["resume"]["actionPath"] == "/resumes"
+    assert checks["browser"]["status"] == "pending"
+    assert payload["checkedAt"]
+
+
 def test_extension_error_log_is_stored_locally(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     payload = {

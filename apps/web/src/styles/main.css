@@ -336,6 +336,50 @@ td small { color: var(--muted); }
 .resume-architecture strong { display: block; padding: 9px; background: #eef7f7; color: #007f8e; font-size: 9px; }
 .resume-architecture p { margin: 0; padding: 14px 9px; color: #526b7a; font-size: 8px; line-height: 1.8; }
 
+.setup-view { max-width: 1180px; }
+.setup-hero { position: relative; overflow: hidden; padding: 30px 34px; border-radius: 18px; background: linear-gradient(120deg, #153f35, #176b55); color: #f6fffa; display: flex; align-items: center; justify-content: space-between; gap: 30px; box-shadow: var(--shadow); }
+.setup-hero::after { content: ''; position: absolute; right: 130px; top: -90px; width: 230px; height: 230px; border: 1px solid rgba(255,255,255,.12); border-radius: 50%; box-shadow: 0 0 0 34px rgba(255,255,255,.025); }
+.setup-hero > div { position: relative; z-index: 1; }
+.setup-hero h2 { margin: 14px 0 8px; font-size: 27px; }
+.setup-hero p { max-width: 680px; margin: 0; color: #cfe4da; line-height: 1.7; }
+.setup-score { flex: 0 0 112px; width: 112px; aspect-ratio: 1; border: 1px solid rgba(255,255,255,.25); border-radius: 50%; display: grid; place-content: center; text-align: center; background: rgba(255,255,255,.08); }
+.setup-score strong { font: 700 26px/1 Georgia, serif; }
+.setup-score span { margin-top: 7px; color: #cfe4da; font-size: 10px; }
+.setup-error { margin-top: 18px; padding: 18px 20px; border: 1px solid #e7c5c5; border-radius: 12px; background: #fff5f5; display: flex; align-items: center; gap: 14px; color: var(--danger); }
+.setup-error span { flex: 1; font-size: 11px; }
+.setup-section { margin-top: 22px; }
+.setup-section-heading { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.setup-section-heading h2 { margin: 0; }
+.setup-check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.setup-check-card { min-height: 184px; padding: 18px; border: 1px solid var(--line); border-top: 3px solid #9ba7a1; border-radius: 13px; background: var(--surface); display: flex; flex-direction: column; box-shadow: 0 7px 24px rgba(31,50,42,.035); }
+.setup-check-card.is-ready { border-top-color: var(--brand); }
+.setup-check-card.is-warning, .setup-check-card.is-pending { border-top-color: #c38635; }
+.setup-check-card.is-blocked { border-top-color: var(--danger); }
+.setup-check-card header { display: flex; align-items: center; justify-content: space-between; }
+.setup-check-icon { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #edf2ef; color: #5f6d66; font-size: 12px; font-weight: 800; }
+.is-ready .setup-check-icon { background: var(--brand-soft); color: var(--brand); }
+.is-warning .setup-check-icon, .is-pending .setup-check-icon { background: #fff0dc; color: var(--warning); }
+.is-blocked .setup-check-icon { background: #f8e7e7; color: var(--danger); }
+.setup-status-label { padding: 4px 7px; border-radius: 999px; background: var(--surface-soft); color: var(--muted); font-size: 9px; font-weight: 750; }
+.setup-check-card h3 { margin: 15px 0 7px; font-size: 14px; }
+.setup-check-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.setup-check-card .ant-btn { align-self: flex-start; height: auto; margin: auto 0 -4px -15px; padding-bottom: 0; font-size: 10px; }
+.setup-browser-panel { padding: 24px 26px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+.setup-phase { padding: 5px 9px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); font-size: 9px; font-weight: 800; }
+.setup-browser-content { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 26px; align-items: stretch; margin-top: 15px; }
+.setup-browser-state { padding: 18px; border-radius: 12px; background: var(--surface-soft); display: flex; align-items: flex-start; gap: 12px; }
+.setup-browser-state strong { font-size: 13px; }
+.setup-browser-state p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.setup-browser-content ol { margin: 0; padding: 0; list-style: none; counter-reset: setup-step; display: grid; gap: 8px; }
+.setup-browser-content li { counter-increment: setup-step; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 3px 10px; }
+.setup-browser-content li::before { content: counter(setup-step); grid-row: 1 / 3; width: 24px; height: 24px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; font-size: 10px; font-weight: 800; }
+.setup-browser-content li strong { font-size: 11px; }
+.setup-browser-content li span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.setup-next-step { margin-top: 22px; padding: 23px 26px; border-radius: 15px; background: #e3efe9; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.setup-next-step h2 { margin-bottom: 7px; }
+.setup-next-step p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
+.setup-next-step .ant-btn { min-width: 132px; }
+
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
   .sidebar { padding-inline: 12px; }
@@ -346,6 +390,7 @@ td small { color: var(--muted); }
   main { padding: 28px 24px 50px; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .library-layout, .settings-grid, .template-layout { grid-template-columns: 1fr; }
+  .setup-check-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .template-picker { position: static; }
 }
 
@@ -379,4 +424,9 @@ td small { color: var(--muted); }
   .knowledge-detail-modal-body dl { grid-template-columns: 1fr; }
   .knowledge-modal-title small { white-space: normal; }
   .snapshot-pagination { justify-content: center; overflow-x: auto; }
+  .setup-hero, .setup-next-step { align-items: flex-start; }
+  .setup-score { display: none; }
+  .setup-check-grid, .setup-browser-content { grid-template-columns: 1fr; }
+  .setup-next-step { flex-direction: column; }
+  .setup-next-step .ant-btn { width: 100%; }
 }
