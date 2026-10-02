@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
     "python-docx>=1.2,<2" \
     "python-multipart>=0.0.20,<1" \
     "reportlab>=4.4,<5" \
-    "uvicorn>=0.35,<1"
+    "uvicorn>=0.35,<1" \
+    "websockets>=15,<16"
 COPY src ./src
 RUN pip install --no-cache-dir --no-deps .
 
