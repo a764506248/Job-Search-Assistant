@@ -23,8 +23,8 @@ describe('Boss chat safety helpers', () => {
     expect(chatJobTitleMatches(readChatIdentity(document), 'AI Agent工程师')).toBe(true)
   })
 
-  it('reads the current BOSS v5550 chat position bar', () => {
-    document.body.innerHTML = '<div class="chat-position-bar"><a class="bar-position-name">AI Agent策略工程师（剧情与分镜方向）</a></div>'
+  it('reads the current BOSS v5550 conversation position', () => {
+    document.body.innerHTML = '<div class="chat-position-content"><div class="position-main"><div class="position-content"><span class="position-name">AI Agent策略工程师（剧情与分镜方向）</span></div></div></div>'
     expect(readChatIdentity(document)?.title).toBe('AI Agent策略工程师（剧情与分镜方向）')
   })
 

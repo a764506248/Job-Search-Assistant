@@ -4,6 +4,8 @@ export interface ChatIdentity {
 }
 
 const TITLE_SELECTORS = [
+  '.chat-position-content .position-main .position-name',
+  '.chat-position-content .position-name',
   '.chat-position-bar .bar-position-name',
   '.bar-position-name',
   '.chat-info .job-name',
