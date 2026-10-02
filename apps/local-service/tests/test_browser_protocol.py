@@ -16,6 +16,18 @@ def test_pairing_code_is_one_time_and_token_authenticates() -> None:
     assert hub.authenticate("wrong-token") is False
 
 
+def test_pairing_token_survives_service_restart(tmp_path) -> None:
+    token_path = tmp_path / "browser-token.sha256"
+    first_hub = BrowserConnectionHub(token_path)
+    pairing = first_hub.create_pairing()
+    token = first_hub.exchange_pairing_code(pairing["code"])
+
+    restarted_hub = BrowserConnectionHub(token_path)
+
+    assert restarted_hub.authenticate(token) is True
+    assert token_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_extension_websocket_pairs_and_becomes_ready(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     pairing = client.post("/v1/browser/pairing").json()

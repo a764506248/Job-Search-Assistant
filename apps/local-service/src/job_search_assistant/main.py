@@ -63,7 +63,7 @@ def create_app(
     client_log_repository = ClientLogRepository(resolved_database_path)
     delivery_repository = DeliveryRepository(resolved_database_path)
     automation_repository = AutomationRepository(resolved_database_path)
-    browser_hub = BrowserConnectionHub()
+    browser_hub = BrowserConnectionHub(resolved_database_path.parent / "browser-token.sha256")
     resolved_embedder = embedder or HttpEmbeddingClient(
         settings.embedding_url, settings.embedding_model
     )

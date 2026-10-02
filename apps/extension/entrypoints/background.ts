@@ -88,16 +88,20 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       const url = new URL('https://www.zhipin.com/web/geek/jobs')
       url.searchParams.set('query', query)
       if (city) url.searchParams.set('city', city)
+      const ready = waitForTabReady(tab.id, url.toString())
       await browser.tabs.update(tab.id, { url: url.toString() })
-      return success(envelope, { navigationRequested: true, url: url.toString() })
+      await ready
+      return success(envelope, { navigationCompleted: true, url: url.toString() })
     }
     if (envelope.action === 'open_job') {
       const url = new URL(String(envelope.payload.url ?? ''))
       if (url.protocol !== 'https:' || !/(^|\.)zhipin\.com$/.test(url.hostname)) {
         return failure(envelope, '仅允许打开 BOSS 直聘 HTTPS 地址')
       }
+      const ready = waitForTabReady(tab.id, url.toString())
       await browser.tabs.update(tab.id, { url: url.toString() })
-      return success(envelope, { navigationRequested: true, url: url.toString() })
+      await ready
+      return success(envelope, { navigationCompleted: true, url: url.toString() })
     }
     const result = await browser.tabs.sendMessage(tab.id, {
       type: 'job-search-assistant:browser-action', envelope,
@@ -107,6 +111,28 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
   catch (error) {
     return failure(envelope, error instanceof Error ? error.message : String(error))
   }
+}
+
+async function waitForTabReady(tabId: number, expectedUrl: string, timeoutMs = 20_000): Promise<void> {
+  const expected = new URL(expectedUrl)
+  const isReady = (tab: { status?: string; url?: string }) => {
+    if (tab.status !== 'complete' || !tab.url) return false
+    const actual = new URL(tab.url)
+    return actual.hostname === expected.hostname && actual.pathname === expected.pathname
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      browser.tabs.onUpdated.removeListener(listener)
+      reject(new Error('BOSS 页面加载超时，未继续执行后续操作'))
+    }, timeoutMs)
+    const listener: Parameters<typeof browser.tabs.onUpdated.addListener>[0] = (updatedTabId, _changeInfo, updatedTab) => {
+      if (updatedTabId !== tabId || !isReady(updatedTab)) return
+      clearTimeout(timer)
+      browser.tabs.onUpdated.removeListener(listener)
+      resolve()
+    }
+    browser.tabs.onUpdated.addListener(listener)
+  })
 }
 
 function success(

@@ -65,6 +65,27 @@ class AutomationRepository:
             self._ensure_column(connection, "automation_runs", "runner_id", "TEXT")
             self._ensure_column(connection, "automation_runs", "heartbeat_at", "TEXT")
             now = datetime.now(UTC).isoformat()
+            legacy_failures = connection.execute(
+                """SELECT id FROM automation_runs
+                WHERE status = 'completed' AND success_count = 0 AND failure_count > 0"""
+            ).fetchall()
+            for (run_id,) in legacy_failures:
+                connection.execute(
+                    """UPDATE automation_runs SET status = 'failed', stop_reason = ?, updated_at = ?
+                    WHERE id = ?""",
+                    ("全部计划岗位处理失败", now, run_id),
+                )
+                self._append_event(
+                    connection,
+                    int(run_id),
+                    "status-corrected",
+                    "warning",
+                    {
+                        "from": "completed",
+                        "to": "failed",
+                        "reason": "历史任务全部岗位失败，已修正任务状态",
+                    },
+                )
             connection.execute(
                 """UPDATE automation_runs SET status = 'interrupted', updated_at = ?
                 WHERE status IN ('running', 'paused', 'stopping')""",
@@ -136,7 +157,7 @@ class AutomationRepository:
             self._upsert_runner(connection, runner_id, now)
         return {"runner_id": runner_id, "heartbeat_at": now, "online": True}
 
-    def runner_status(self, max_age_seconds: int = 10) -> dict[str, Any]:
+    def runner_status(self, max_age_seconds: int = 30) -> dict[str, Any]:
         self.initialize()
         with sqlite3.connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row

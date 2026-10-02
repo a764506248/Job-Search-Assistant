@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -31,10 +32,11 @@ class BrowserProtocolError(RuntimeError):
 class BrowserConnectionHub:
     """In-memory localhost pairing and request/response broker for the extension."""
 
-    def __init__(self) -> None:
+    def __init__(self, token_hash_path: Path | None = None) -> None:
+        self._token_hash_path = token_hash_path
         self._pairing_hash: str | None = None
         self._pairing_expires_at: datetime | None = None
-        self._token_hash: str | None = None
+        self._token_hash: str | None = self._load_token_hash()
         self._websocket: WebSocket | None = None
         self._extension_version: str | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -57,6 +59,7 @@ class BrowserConnectionHub:
             raise BrowserProtocolError("invalid or expired pairing code")
         token = secrets.token_urlsafe(32)
         self._token_hash = self._hash(token)
+        self._persist_token_hash(self._token_hash)
         self._pairing_hash = None
         self._pairing_expires_at = None
         return token
@@ -125,6 +128,21 @@ class BrowserConnectionHub:
         future = self._pending.get(request_id)
         if future is not None and not future.done():
             future.set_result(response)
+
+    def _load_token_hash(self) -> str | None:
+        if self._token_hash_path is None or not self._token_hash_path.is_file():
+            return None
+        value = self._token_hash_path.read_text(encoding="utf-8").strip()
+        return value if len(value) == 64 else None
+
+    def _persist_token_hash(self, token_hash: str) -> None:
+        if self._token_hash_path is None:
+            return
+        self._token_hash_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._token_hash_path.with_suffix(".tmp")
+        temporary.write_text(token_hash, encoding="utf-8")
+        temporary.chmod(0o600)
+        temporary.replace(self._token_hash_path)
 
     @staticmethod
     def _hash(value: str) -> str:

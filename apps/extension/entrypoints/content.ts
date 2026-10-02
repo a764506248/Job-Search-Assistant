@@ -76,11 +76,18 @@ async function handleBrowserAction(
   if (envelope.action === 'open_chat') {
     const expectedTitle = String(envelope.payload.expectedTitle ?? '')
     const expectedCompany = String(envelope.payload.expectedCompany ?? '')
-    const job = captureBossJob(document, location)
-    if (!job || job.title !== expectedTitle || job.companyName !== expectedCompany) {
+    const job = await waitForExpectedJob(expectedTitle, expectedCompany)
+    if (!job) {
+      const actual = captureBossJob(document, location)
       return {
         status: 'blocked',
-        evidence: { identityMatched: false, sideEffectExecuted: false },
+        evidence: {
+          identityMatched: false,
+          sideEffectExecuted: false,
+          actualTitle: actual?.title,
+          actualCompany: actual?.companyName,
+          actualJobId: actual?.platformJobId,
+        },
         error: '职位详情与任务目标不一致，未打开聊天',
       }
     }
@@ -116,6 +123,20 @@ async function handleBrowserAction(
     evidence: { sideEffectExecuted: false },
     error: `动作 ${envelope.action} 尚未在安全执行器中启用`,
   }
+}
+
+async function waitForExpectedJob(expectedTitle: string, expectedCompany: string) {
+  const deadline = Date.now() + 12_000
+  while (Date.now() < deadline) {
+    const job = captureBossJob(document, location)
+    if (chatIdentityMatches(
+      job ? { title: job.title, companyName: job.companyName } : null,
+      expectedTitle,
+      expectedCompany,
+    )) return job
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  return null
 }
 
 async function sendResumeWithPreview(

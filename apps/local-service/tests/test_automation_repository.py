@@ -77,6 +77,24 @@ def test_runner_heartbeat_reports_worker_online(tmp_path) -> None:
     assert repository.runner_status()["runner_id"] == "runner-a"
 
 
+def test_repository_corrects_legacy_all_failed_completed_run(tmp_path) -> None:
+    database_path = tmp_path / "automation.db"
+    repository = AutomationRepository(database_path)
+    run = repository.create_run({"plannedJobs": [{"jobId": "job-1"}]}, 1)
+    repository.transition(run["id"], "validating")
+    repository.transition(run["id"], "ready")
+    repository.transition(run["id"], "running")
+    repository.record_progress(run["id"], "job-1", "failure", "identity-mismatch")
+    repository.transition(run["id"], "completed", "plan-finished")
+
+    reloaded = AutomationRepository(database_path)
+    corrected = reloaded.get_run(run["id"])
+
+    assert corrected["status"] == "failed"
+    assert corrected["stop_reason"] == "全部计划岗位处理失败"
+    assert reloaded.list_events(run["id"])[-1]["event_type"] == "status-corrected"
+
+
 def test_failed_action_can_be_retried(tmp_path) -> None:
     repository = AutomationRepository(tmp_path / "jobs.sqlite3")
     run = repository.create_run({}, 1)

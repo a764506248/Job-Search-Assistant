@@ -25,9 +25,20 @@
         </article>
       </section>
       <section class="panel automation-events">
-        <div class="panel-heading"><h2>实时事件</h2><span>{{ selected ? `任务 #${selected.id}` : '请选择任务' }}</span></div>
-        <div v-if="selected?.stopReason" class="automation-blocker">{{ selected.stopReason }}</div>
-        <div v-if="report" class="automation-report-summary">动作 {{ report.actions.length }} · 成功 {{ report.actions.filter(item => item.status === 'succeeded').length }} · 失败 {{ report.actions.filter(item => item.status === 'failed').length }}</div>
+        <div class="panel-heading">
+          <h2>实时事件</h2>
+          <div class="automation-event-controls">
+            <span>{{ selected ? `任务 #${selected.id}` : '请选择任务' }}</span>
+            <a-button v-if="selected?.status === 'running'" size="small" @click="control(selected, 'pause')">暂停投递</a-button>
+            <a-button v-if="selected?.status === 'paused'" size="small" type="primary" @click="control(selected, 'resume')">继续投递</a-button>
+            <a-button v-if="selected && ['running','paused'].includes(selected.status)" size="small" danger @click="control(selected, 'stop')">停止</a-button>
+          </div>
+        </div>
+        <div v-if="selected?.stopReason" class="automation-blocker" :class="{ neutral: !isErrorStatus(selected.status) }">{{ reasonText(selected.stopReason) }}</div>
+        <div v-if="report" class="automation-report-summary">
+          <strong>投递结果</strong>：成功 {{ report.run.successCount }} · 失败 {{ report.run.failureCount }}
+          <span>浏览器动作：成功 {{ actionSuccessCount }} · 失败 {{ actionFailureCount }}</span>
+        </div>
         <div v-if="!events.length" class="library-empty">暂无事件。</div>
         <ol v-else><li v-for="event in events" :key="event.id"><span>#{{ event.sequence }}</span><strong>{{ eventName(event.eventType) }}</strong><time>{{ formatTime(event.createdAt) }}</time><p>{{ eventText(event) }}</p></li></ol>
       </section>
@@ -36,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
@@ -52,26 +63,38 @@ const report = ref<AutomationReport>()
 const setup = ref<SetupStatus>()
 const browser = ref<BrowserProtocolStatus>()
 let stream: EventSource | undefined
+let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const names: Record<string, string> = { draft: '待启动', validating: '校验中', ready: '已就绪', running: '运行中', paused: '已暂停', stopping: '停止中', interrupted: '已中断', completed: '已完成', failed: '失败', blocked: '被阻止', cancelled: '已取消' }
-const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'status-changed': '状态变化', 'runner-awaiting-host': '等待执行器', 'runner-claimed': '执行器已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
+const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'status-changed': '状态变化', 'status-corrected': '状态已修正', 'runner-awaiting-host': '等待执行器', 'runner-claimed': '执行器已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
 const statusName = (status: string) => names[status] || status
 const eventName = (event: string) => eventNames[event] || event
 const runnerReady = computed(() => setup.value?.checks.some(item => item.key === 'automation-runner' && item.status === 'ready') ?? false)
+const actionSuccessCount = computed(() => report.value?.actions.filter(item => item.status === 'succeeded').length ?? 0)
+const actionFailureCount = computed(() => report.value?.actions.filter(item => item.status === 'failed').length ?? 0)
 const plannedCount = (run: AutomationRun) => Array.isArray(run.configSnapshot.plannedJobs) ? run.configSnapshot.plannedJobs.length : 0
+const isErrorStatus = (status: string) => ['failed', 'blocked', 'cancelled'].includes(status)
+const reasonText = (reason: string) => ({ 'plan-finished': '计划处理结束', 'user-requested': '用户已停止任务' }[reason] || reason)
+const actionNames: Record<string, string> = { open_job: '打开岗位', open_chat: '打开沟通', validate_identity: '校验岗位身份', send_greeting: '发送问候语', send_resume: '发送简历' }
 const eventText = (event: AutomationEvent) => {
   if (event.payload.message || event.payload.reason) return event.payload.message || event.payload.reason
   if (event.eventType === 'status-changed') return `${statusName(event.payload.from)} → ${statusName(event.payload.to)}`
   if (event.eventType === 'run-created') return `目标 ${event.payload.target} 个岗位`
+  if (event.eventType === 'action-claimed') return `${actionNames[event.payload.actionType] || event.payload.actionType}已开始`
+  if (event.eventType === 'action-finished') {
+    const label = actionNames[event.payload.actionType] || event.payload.actionType
+    return event.payload.status === 'succeeded' ? `${label}成功` : `${label}失败：${event.payload.error || '未通过安全校验'}`
+  }
   return JSON.stringify(event.payload)
 }
 
 async function load() { const [runList, setupStatus, browserStatus] = await Promise.all([api.automationRuns(), api.setupStatus(), api.browserStatus()]); runs.value = runList.items; setup.value = setupStatus; browser.value = browserStatus }
 async function createRun() { creating.value = true; try { const run = await api.createAutomationRun(targetCount.value); await load(); await selectRun(run); const count = plannedCount(run); count ? message.success(`任务已创建，计划处理 ${count} 个岗位`) : message.warning('任务没有可执行岗位，启动时会被阻止；请先采集岗位后重新创建') } catch (error) { message.error((error as Error).message) } finally { creating.value = false } }
 async function control(run: AutomationRun, action: 'start' | 'pause' | 'resume' | 'stop') { try { selected.value = await api.controlAutomationRun(run.id, action); await load(); await loadEvents(run.id) } catch (error) { message.error((error as Error).message) } }
-async function loadEvents(id: number) { report.value = await api.automationReport(id); events.value = report.value.events }
+async function loadEvents(id: number) { report.value = await api.automationReport(id); events.value = report.value.events; selected.value = report.value.run }
 async function selectRun(run: AutomationRun) { selected.value = run; await loadEvents(run.id); stream?.close(); stream = new EventSource(`/v1/automation/runs/${run.id}/events/stream?after=${events.value.at(-1)?.sequence || 0}`); stream.onmessage = () => loadEvents(run.id) }
 
-onBeforeUnmount(() => stream?.close())
+onMounted(() => { refreshTimer = setInterval(() => { void load(); if (selected.value) void loadEvents(selected.value.id) }, 3000) })
+onBeforeUnmount(() => { stream?.close(); if (refreshTimer) clearInterval(refreshTimer) })
 useRefresh(load)
 </script>

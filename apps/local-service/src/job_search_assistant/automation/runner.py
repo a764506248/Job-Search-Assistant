@@ -23,6 +23,39 @@ class LocalApi:
         with urllib.request.urlopen(request, timeout=130) as response:
             return json.load(response)
 
+    def get(self, path: str) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+
+
+class RunHalted(Exception):
+    """Raised when a task was stopped while the runner was executing it."""
+
+
+def wait_until_runnable(
+    api: LocalApi,
+    run_id: int,
+    runner_id: str,
+    *,
+    poll_seconds: float = 1.0,
+) -> None:
+    """Cooperatively honor pause/resume/stop before every browser side effect."""
+    while True:
+        run = api.get(f"/v1/automation/runs/{run_id}")
+        status = str(run.get("status", ""))
+        if status == "running":
+            return
+        if status != "paused":
+            raise RunHalted(status or "unknown")
+        api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
+        api.post(f"/v1/automation/runs/{run_id}/heartbeat", {"runnerId": runner_id})
+        time.sleep(max(poll_seconds, 0.2))
+
 
 def browser_action(
     api: LocalApi,
@@ -33,6 +66,8 @@ def browser_action(
     action: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    wait_until_runnable(api, run_id, runner_id)
+    api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
     return api.post(
         f"/v1/automation/runs/{run_id}/browser-action",
         {
@@ -95,126 +130,132 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
         )
         return
 
-    for job in planned_jobs:
-        if not isinstance(job, dict):
-            continue
-        job_id = str(job.get("jobId", ""))
-        expected_title = str(job.get("title", ""))
-        expected_company = str(job.get("companyName", ""))
-        greeting = str(job.get("greeting", ""))
-        job_url = str(job.get("url", ""))
-        if not all((job_id, job_url, expected_title, expected_company, greeting)):
-            record_progress(
-                api,
-                run_id,
-                runner_id,
-                job_id or "unknown",
-                "failure",
-                "计划字段不完整",
-            )
-            continue
-
-        opened = browser_action(
-            api,
-            run_id,
-            runner_id,
-            job_id=job_id,
-            action="open_job",
-            payload={"url": job_url},
-        )
-        if opened.get("result", {}).get("status") != "success":
-            record_progress(api, run_id, runner_id, job_id, "failure", "open-job-failed")
-            continue
-        time.sleep(2)
-
-        chat = browser_action(
-            api,
-            run_id,
-            runner_id,
-            job_id=job_id,
-            action="open_chat",
-            payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
-        )
-        if chat.get("result", {}).get("status") != "success":
-            record_progress(api, run_id, runner_id, job_id, "failure", "open-chat-failed")
-            continue
-
-        identity = browser_action(
-            api,
-            run_id,
-            runner_id,
-            job_id=job_id,
-            action="validate_identity",
-            payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
-        )
-        if identity.get("result", {}).get("status") != "success":
-            record_progress(api, run_id, runner_id, job_id, "failure", "identity-mismatch")
-            continue
-
-        sent = browser_action(
-            api,
-            run_id,
-            runner_id,
-            job_id=job_id,
-            action="send_greeting",
-            payload={
-                "expectedTitle": expected_title,
-                "expectedCompany": expected_company,
-                "text": greeting,
-            },
-        )
-        greeting_status = sent.get("result", {}).get("status")
-        if greeting_status != "success":
-            record_progress(
-                api,
-                run_id,
-                runner_id,
-                job_id,
-                "failure",
-                f"greeting-{greeting_status}",
-            )
-            finish_run(
-                api,
-                run_id,
-                runner_id,
-                "blocked",
-                f"问候语发送未确认成功：{greeting_status or 'unknown'}",
-            )
-            return
-
-        if config.get("sendResumeImage"):
-            resume = browser_action(
-                api,
-                run_id,
-                runner_id,
-                job_id=job_id,
-                action="send_resume",
-                payload={
-                    "expectedTitle": expected_title,
-                    "expectedCompany": expected_company,
-                },
-            )
-            resume_status = resume.get("result", {}).get("status")
-            if resume_status != "success":
+    success_count = 0
+    failure_count = 0
+    try:
+        for job in planned_jobs:
+            wait_until_runnable(api, run_id, runner_id)
+            if not isinstance(job, dict):
+                failure_count += 1
+                record_progress(api, run_id, runner_id, "unknown", "failure", "计划格式错误")
+                continue
+            job_id = str(job.get("jobId", ""))
+            expected_title = str(job.get("title", ""))
+            expected_company = str(job.get("companyName", ""))
+            greeting = str(job.get("greeting", ""))
+            job_url = str(job.get("url", ""))
+            if not all((job_id, job_url, expected_title, expected_company, greeting)):
+                failure_count += 1
                 record_progress(
                     api,
                     run_id,
                     runner_id,
-                    job_id,
+                    job_id or "unknown",
                     "failure",
-                    f"resume-{resume_status}",
+                    "计划字段不完整",
                 )
-                finish_run(
+                continue
+
+            opened = browser_action(
+                api,
+                run_id,
+                runner_id,
+                job_id=job_id,
+                action="open_job",
+                payload={"url": job_url},
+            )
+            if opened.get("result", {}).get("status") != "success":
+                failure_count += 1
+                reason = opened.get("result", {}).get("error") or "打开岗位失败"
+                record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                continue
+
+            chat = browser_action(
+                api,
+                run_id,
+                runner_id,
+                job_id=job_id,
+                action="open_chat",
+                payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
+            )
+            if chat.get("result", {}).get("status") != "success":
+                failure_count += 1
+                reason = chat.get("result", {}).get("error") or "打开沟通失败"
+                record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                continue
+
+            identity = browser_action(
+                api,
+                run_id,
+                runner_id,
+                job_id=job_id,
+                action="validate_identity",
+                payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
+            )
+            if identity.get("result", {}).get("status") != "success":
+                failure_count += 1
+                reason = identity.get("result", {}).get("error") or "岗位身份校验失败"
+                record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                continue
+
+            sent = browser_action(
+                api,
+                run_id,
+                runner_id,
+                job_id=job_id,
+                action="send_greeting",
+                payload={
+                    "expectedTitle": expected_title,
+                    "expectedCompany": expected_company,
+                    "text": greeting,
+                },
+            )
+            greeting_status = sent.get("result", {}).get("status")
+            if greeting_status != "success":
+                failure_count += 1
+                reason = sent.get("result", {}).get("error") or (
+                    f"问候语发送失败：{greeting_status or 'unknown'}"
+                )
+                record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                finish_run(api, run_id, runner_id, "blocked", str(reason))
+                return
+
+            if config.get("sendResumeImage"):
+                resume = browser_action(
                     api,
                     run_id,
                     runner_id,
-                    "blocked",
-                    f"简历发送未确认成功：{resume_status or 'unknown'}",
+                    job_id=job_id,
+                    action="send_resume",
+                    payload={
+                        "expectedTitle": expected_title,
+                        "expectedCompany": expected_company,
+                    },
                 )
-                return
-        record_progress(api, run_id, runner_id, job_id, "success", "delivery-confirmed")
+                resume_status = resume.get("result", {}).get("status")
+                if resume_status != "success":
+                    failure_count += 1
+                    reason = resume.get("result", {}).get("error") or (
+                        f"简历发送失败：{resume_status or 'unknown'}"
+                    )
+                    record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                    finish_run(api, run_id, runner_id, "blocked", str(reason))
+                    return
+            success_count += 1
+            record_progress(api, run_id, runner_id, job_id, "success", "投递已确认")
+    except RunHalted:
+        return
 
-    finish_run(api, run_id, runner_id, "completed", "plan-finished")
+    try:
+        wait_until_runnable(api, run_id, runner_id)
+    except RunHalted:
+        return
+    if failure_count and not success_count:
+        finish_run(api, run_id, runner_id, "failed", "全部计划岗位处理失败")
+    elif failure_count:
+        finish_run(api, run_id, runner_id, "completed", f"处理完成，{failure_count} 个岗位失败")
+    else:
+        finish_run(api, run_id, runner_id, "completed", "全部计划岗位处理完成")
 
 
 def run_loop(
