@@ -65,6 +65,10 @@
 
 ## Chrome 扩展：简历图片测试版
 
+![智能求职助手动漫风安全投递展示：问候语验证、简历预览与确认发送](docs/assets/job-assistant-anime-showcase.png)
+
+> 安全投递示意图已去除真实姓名、企业、账号、头像、聊天内容和简历信息；画面中的人物与数据均为虚构内容。
+
 当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
 
 先构建并在 Chrome 中加载产物：
