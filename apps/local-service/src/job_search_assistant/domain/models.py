@@ -133,6 +133,8 @@ class AutomationRun(ApiModel):
     failure_count: int
     current_keyword: str | None = None
     current_job_id: str | None = None
+    runner_id: str | None = None
+    heartbeat_at: datetime | None = None
     stop_reason: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -156,6 +158,98 @@ class AutomationEvent(ApiModel):
 
 class AutomationEventListResponse(ApiModel):
     items: list[AutomationEvent]
+
+
+class AutomationRunnerClaimResponse(ApiModel):
+    run: AutomationRun | None = None
+
+
+class AutomationHeartbeatRequest(ApiModel):
+    runner_id: str = Field(min_length=1, max_length=100)
+
+
+class AutomationRunnerFinishRequest(AutomationHeartbeatRequest):
+    status: Literal["completed", "failed", "blocked", "cancelled"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class AutomationProgressRequest(AutomationHeartbeatRequest):
+    job_id: str = Field(min_length=1, max_length=300)
+    outcome: Literal["success", "failure", "skipped"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class AutomationActionClaimRequest(ApiModel):
+    job_id: str = Field(min_length=1, max_length=300)
+    action_type: str = Field(min_length=1, max_length=100)
+
+
+class AutomationAction(ApiModel):
+    idempotency_key: str
+    run_id: int
+    job_id: str
+    action_type: str
+    status: Literal["pending", "succeeded", "failed", "uncertain"]
+    attempt_count: int
+    last_error: str | None = None
+    updated_at: datetime
+
+
+class AutomationActionClaimResponse(ApiModel):
+    action: AutomationAction
+    execute: bool
+
+
+class AutomationActionResultRequest(ApiModel):
+    succeeded: bool
+    error: str | None = Field(default=None, max_length=2000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutomationReport(ApiModel):
+    run: AutomationRun
+    actions: list[AutomationAction]
+    events: list[AutomationEvent]
+
+
+class BrowserPairingResponse(ApiModel):
+    code: str
+    expires_at: datetime
+    protocol_version: str
+
+
+class BrowserProtocolStatus(ApiModel):
+    connected: bool
+    paired: bool
+    protocol_version: str
+    extension_version: str | None = None
+
+
+class BrowserTestActionRequest(ApiModel):
+    action: Literal["ping", "session_status", "capture_job"] = "ping"
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BrowserActionResponse(ApiModel):
+    request_id: str
+    status: Literal[
+        "success", "failed", "blocked", "confirmation_required", "uncertain"
+    ]
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class AutomationBrowserActionRequest(AutomationHeartbeatRequest):
+    job_id: str = Field(min_length=1, max_length=300)
+    action: str = Field(min_length=1, max_length=100)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    deadline_ms: int = Field(default=20_000, ge=1_000, le=120_000)
+
+
+class AutomationBrowserActionResponse(ApiModel):
+    idempotency_key: str
+    execute: bool
+    result: BrowserActionResponse | None = None
 
 
 class ClientLogInput(ApiModel):

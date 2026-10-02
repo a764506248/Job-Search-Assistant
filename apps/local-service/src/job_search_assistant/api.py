@@ -19,12 +19,20 @@ from fastapi import (
     Query,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
     status,
 )
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__
+from .automation.browser_protocol import (
+    ALLOWED_ACTIONS,
+    PROTOCOL_VERSION,
+    BrowserConnectionHub,
+    BrowserProtocolError,
+)
 from .domain import (
     DecisionRequest,
     DecisionResponse,
@@ -37,13 +45,27 @@ from .domain import (
 from .domain.models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
+    AutomationActionClaimRequest,
+    AutomationActionClaimResponse,
+    AutomationActionResultRequest,
+    AutomationBrowserActionRequest,
+    AutomationBrowserActionResponse,
     AutomationConfigResponse,
     AutomationEventListResponse,
+    AutomationHeartbeatRequest,
+    AutomationProgressRequest,
+    AutomationReport,
     AutomationRun,
     AutomationRunCreateRequest,
     AutomationRunListResponse,
+    AutomationRunnerClaimResponse,
+    AutomationRunnerFinishRequest,
+    BrowserActionResponse,
+    BrowserPairingResponse,
     BrowserProbeRequest,
     BrowserProbeResponse,
+    BrowserProtocolStatus,
+    BrowserTestActionRequest,
     CapturedJob,
     ClientLogInput,
     ClientLogListResponse,
@@ -119,6 +141,7 @@ def create_router(
     greeting_generator: GreetingGenerator,
     resume_image_dir: Path,
     automation_repository: AutomationRepository,
+    browser_hub: BrowserConnectionHub,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
     greeting_generation_ids: set[int] = set()
@@ -368,7 +391,9 @@ def create_router(
         if not probe_fresh:
             browser_probe = None
 
-        webbridge_ready = bool(
+        unified_extension_ready = bool(browser_hub.status()["connected"])
+
+        webbridge_ready = unified_extension_ready or bool(
             browser_probe
             and browser_probe.get("webbridgeRunning")
             and browser_probe.get("kimiExtensionConnected")
@@ -376,10 +401,12 @@ def create_router(
         checks.append(
             SetupCheck(
                 key="kimi-webbridge",
-                label="Kimi WebBridge",
+                label="浏览器控制通道",
                 status="ready" if webbridge_ready else ("blocked" if browser_probe else "pending"),
                 message=(
-                    "WebBridge 正在运行，Kimi 浏览器扩展已连接"
+                    "统一扩展已通过本地协议连接"
+                    if unified_extension_ready
+                    else "WebBridge 正在运行，Kimi 浏览器扩展已连接"
                     if webbridge_ready
                     else (
                         "WebBridge 或 Kimi 浏览器扩展未连接"
@@ -393,7 +420,7 @@ def create_router(
             )
         )
 
-        project_extension_ready = bool(
+        project_extension_ready = unified_extension_ready or bool(
             browser_probe and browser_probe.get("projectExtensionReady")
         )
         extension_required = config.send_resume_image
@@ -407,7 +434,9 @@ def create_router(
                     else ("blocked" if extension_required and browser_probe else "warning")
                 ),
                 message=(
-                    "项目扩展已在 BOSS 页面显示操作面板"
+                    "统一扩展已连接，可执行简历预览协议"
+                    if unified_extension_ready
+                    else "项目扩展已在 BOSS 页面显示操作面板"
                     if project_extension_ready
                     else (
                         "已开启简历图片发送，必须确认项目扩展可用"
@@ -439,14 +468,16 @@ def create_router(
         )
 
         skill_version = str(browser_probe.get("skillVersion", "")) if browser_probe else ""
-        skill_ready = skill_version == EXPECTED_SKILL_VERSION
+        skill_ready = unified_extension_ready or skill_version == EXPECTED_SKILL_VERSION
         checks.append(
             SetupCheck(
                 key="skill-version",
                 label="BOSS Skill",
                 status="ready" if skill_ready else ("blocked" if skill_version else "pending"),
                 message=(
-                    f"BOSS Skill v{EXPECTED_SKILL_VERSION} 已安装"
+                    "统一扩展模式无需安装 BOSS Skill"
+                    if unified_extension_ready
+                    else f"BOSS Skill v{EXPECTED_SKILL_VERSION} 已安装"
                     if skill_ready
                     else (
                         f"需要 v{EXPECTED_SKILL_VERSION}，当前为 v{skill_version}"
@@ -596,6 +627,65 @@ def create_router(
             greeting_generation_ids.add(snapshot_id)
         background_tasks.add_task(run_greeting_task, snapshot_id)
 
+    @router.post("/browser/pairing", response_model=BrowserPairingResponse)
+    def create_browser_pairing() -> BrowserPairingResponse:
+        return BrowserPairingResponse.model_validate(browser_hub.create_pairing())
+
+    @router.get("/browser/status", response_model=BrowserProtocolStatus)
+    def get_browser_status() -> BrowserProtocolStatus:
+        return BrowserProtocolStatus.model_validate(browser_hub.status())
+
+    @router.post("/browser/actions/test", response_model=BrowserActionResponse)
+    async def test_browser_action(request: BrowserTestActionRequest) -> BrowserActionResponse:
+        try:
+            response = await browser_hub.dispatch(
+                run_id=0,
+                action=request.action,
+                payload=request.payload,
+                deadline_ms=5_000,
+            )
+        except BrowserProtocolError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return BrowserActionResponse.model_validate(response)
+
+    @router.websocket("/browser/ws")
+    async def browser_websocket(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            hello = await websocket.receive_json()
+            if hello.get("type") != "hello" or hello.get("protocolVersion") != PROTOCOL_VERSION:
+                await websocket.send_json(
+                    {"type": "error", "error": "incompatible browser protocol"}
+                )
+                await websocket.close(code=1002)
+                return
+            token = str(hello.get("token", ""))
+            if not browser_hub.authenticate(token):
+                try:
+                    token = browser_hub.exchange_pairing_code(str(hello.get("pairingCode", "")))
+                except BrowserProtocolError as error:
+                    await websocket.send_json({"type": "error", "error": str(error)})
+                    await websocket.close(code=1008)
+                    return
+                await websocket.send_json(
+                    {
+                        "type": "paired",
+                        "token": token,
+                        "protocolVersion": PROTOCOL_VERSION,
+                    }
+                )
+            browser_hub.attach(websocket, str(hello.get("extensionVersion", "unknown")))
+            await websocket.send_json(
+                {"type": "ready", "protocolVersion": PROTOCOL_VERSION}
+            )
+            while True:
+                response = await websocket.receive_json()
+                browser_hub.resolve(response)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            browser_hub.detach(websocket)
+
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse(version=__version__)
@@ -647,6 +737,33 @@ def create_router(
     def create_automation_run(request: AutomationRunCreateRequest) -> AutomationRun:
         config = automation_config().model_dump(mode="json", by_alias=True)
         config.update(request.config)
+        if "plannedJobs" not in config:
+            planned_jobs: list[dict[str, object]] = []
+            for job in job_repository.list_recent(limit=min(request.target_count * 3, 500)):
+                if job.has_communicated:
+                    continue
+                _, default_greeting, match = build_job_material_context(
+                    job,
+                    minimum_suitability_score=int(config["minimumSuitabilityScore"]),
+                    minimum_customization_confidence=int(
+                        config["minimumCustomizationConfidence"]
+                    ),
+                    rules=matching_rules(),
+                )
+                if not match.decision.should_deliver:
+                    continue
+                planned_jobs.append(
+                    {
+                        "jobId": job.platform_job_id,
+                        "url": job.url,
+                        "title": job.title,
+                        "companyName": job.company_name,
+                        "greeting": job.generated_greeting or default_greeting,
+                    }
+                )
+                if len(planned_jobs) >= request.target_count:
+                    break
+            config["plannedJobs"] = planned_jobs
         return AutomationRun.model_validate(
             automation_repository.create_run(config, request.target_count)
         )
@@ -657,9 +774,176 @@ def create_router(
             items=[AutomationRun.model_validate(run) for run in automation_repository.list_runs()]
         )
 
+    @router.post(
+        "/automation/runner/claim", response_model=AutomationRunnerClaimResponse
+    )
+    def claim_automation_run(
+        request: AutomationHeartbeatRequest,
+    ) -> AutomationRunnerClaimResponse:
+        run = automation_repository.claim_next_run(request.runner_id)
+        return AutomationRunnerClaimResponse(
+            run=AutomationRun.model_validate(run) if run else None
+        )
+
+    @router.post("/automation/runs/{run_id}/heartbeat", response_model=AutomationRun)
+    def heartbeat_automation_run(
+        run_id: int, request: AutomationHeartbeatRequest
+    ) -> AutomationRun:
+        try:
+            return AutomationRun.model_validate(
+                automation_repository.heartbeat(run_id, request.runner_id)
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except PermissionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/automation/runs/{run_id}/progress", response_model=AutomationRun)
+    def update_automation_progress(
+        run_id: int, request: AutomationProgressRequest
+    ) -> AutomationRun:
+        try:
+            automation_repository.heartbeat(run_id, request.runner_id)
+            return AutomationRun.model_validate(
+                automation_repository.record_progress(
+                    run_id, request.job_id, request.outcome, request.reason
+                )
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except PermissionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/automation/runs/{run_id}/runner-finish", response_model=AutomationRun)
+    def finish_automation_run(
+        run_id: int, request: AutomationRunnerFinishRequest
+    ) -> AutomationRun:
+        try:
+            automation_repository.heartbeat(run_id, request.runner_id)
+            return AutomationRun.model_validate(
+                automation_repository.transition(run_id, request.status, request.reason)
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except (PermissionError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post(
+        "/automation/runs/{run_id}/browser-action",
+        response_model=AutomationBrowserActionResponse,
+    )
+    async def execute_automation_browser_action(
+        run_id: int, request: AutomationBrowserActionRequest
+    ) -> AutomationBrowserActionResponse:
+        if request.action not in ALLOWED_ACTIONS:
+            raise HTTPException(status_code=422, detail="unsupported browser action")
+        if request.action in {"send_greeting", "send_resume"} and not all(
+            request.payload.get(field) for field in ("expectedTitle", "expectedCompany")
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="send actions require expectedTitle and expectedCompany",
+            )
+        try:
+            automation_repository.heartbeat(run_id, request.runner_id)
+            action, execute = automation_repository.claim_action(
+                run_id, request.job_id, request.action
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except PermissionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if not execute:
+            replay_status = (
+                "success"
+                if action["status"] == "succeeded"
+                else "uncertain"
+                if action["status"] == "uncertain"
+                else "blocked"
+            )
+            return AutomationBrowserActionResponse(
+                idempotency_key=action["idempotency_key"],
+                execute=False,
+                result=BrowserActionResponse(
+                    request_id=action["idempotency_key"],
+                    status=replay_status,
+                    evidence={"idempotentReplay": True},
+                    error=(
+                        "existing action is not safe to execute again"
+                        if replay_status != "success"
+                        else None
+                    ),
+                ),
+            )
+        try:
+            result = await browser_hub.dispatch(
+                run_id=run_id,
+                action=request.action,
+                payload=request.payload,
+                deadline_ms=request.deadline_ms,
+            )
+            parsed = BrowserActionResponse.model_validate(result)
+            succeeded = None if parsed.status == "uncertain" else parsed.status == "success"
+            automation_repository.finish_action(
+                action["idempotency_key"],
+                succeeded=succeeded,
+                error=parsed.error,
+                evidence=parsed.evidence,
+            )
+            return AutomationBrowserActionResponse(
+                idempotency_key=action["idempotency_key"],
+                execute=True,
+                result=parsed,
+            )
+        except BrowserProtocolError as error:
+            automation_repository.finish_action(
+                action["idempotency_key"], succeeded=False, error=str(error)
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post(
+        "/automation/runs/{run_id}/actions/claim",
+        response_model=AutomationActionClaimResponse,
+    )
+    def claim_automation_action(
+        run_id: int, request: AutomationActionClaimRequest
+    ) -> AutomationActionClaimResponse:
+        try:
+            action, execute = automation_repository.claim_action(
+                run_id, request.job_id, request.action_type
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        return AutomationActionClaimResponse(action=action, execute=execute)
+
+    @router.post(
+        "/automation/actions/{idempotency_key:path}/result",
+        response_model=AutomationActionClaimResponse,
+    )
+    def finish_automation_action(
+        idempotency_key: str, request: AutomationActionResultRequest
+    ) -> AutomationActionClaimResponse:
+        try:
+            action = automation_repository.finish_action(
+                idempotency_key,
+                succeeded=request.succeeded,
+                error=request.error,
+                evidence=request.evidence,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation action not found") from error
+        return AutomationActionClaimResponse(action=action, execute=False)
+
     @router.get("/automation/runs/{run_id}", response_model=AutomationRun)
     def get_automation_run(run_id: int) -> AutomationRun:
         return automation_run(run_id)
+
+    @router.get("/automation/runs/{run_id}/report", response_model=AutomationReport)
+    def get_automation_report(run_id: int) -> AutomationReport:
+        try:
+            return AutomationReport.model_validate(automation_repository.report(run_id))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
 
     @router.post("/automation/runs/{run_id}/start", response_model=AutomationRun)
     def start_automation_run(run_id: int) -> AutomationRun:

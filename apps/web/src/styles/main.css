@@ -378,6 +378,13 @@ td small { color: var(--muted); }
 .setup-browser-panel { padding: 24px 26px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .setup-phase { padding: 5px 9px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-deep); font-size: 9px; font-weight: 800; }
 .setup-browser-content { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 26px; align-items: stretch; margin-top: 15px; }
+.browser-pairing-card { grid-column: 1 / -1; padding: 20px; border: 1px solid rgba(58, 113, 91, .18); border-radius: 12px; background: linear-gradient(145deg, #f3fbf7, #eef4ff); }
+.browser-pairing-card h3 { margin: 12px 0 8px; }
+.browser-pairing-card p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.browser-pairing-code { display: block; margin: 14px 0; color: var(--brand); font: 700 30px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .18em; }
+.browser-pairing-ready { color: #087f5b !important; font-weight: 700; }
+.browser-pairing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.browser-pairing-message { margin: 12px 0 0; }
 .setup-browser-states { display: grid; gap: 8px; }
 .setup-browser-state { padding: 18px; border-radius: 12px; background: var(--surface-soft); display: flex; align-items: flex-start; gap: 12px; }
 .setup-browser-state strong { font-size: 13px; }
@@ -411,6 +418,7 @@ td small { color: var(--muted); }
 .automation-runs article span, .automation-events .panel-heading span { color: var(--muted); font-size: 9px; }
 .automation-actions { display: flex; gap: 5px; }
 .automation-blocker { margin: 14px 18px 0; padding: 10px; border-radius: 8px; background: #fff1f1; color: var(--danger); font-size: 10px; }
+.automation-report-summary { margin: 12px 18px 0; color: var(--muted); font-size: 10px; }
 .automation-events ol { margin: 0; padding: 10px 18px 18px; list-style: none; }
 .automation-events li { display: grid; grid-template-columns: 30px 1fr auto; gap: 5px 9px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 10px; }
 .automation-events li p { grid-column: 2 / -1; margin: 0; color: var(--muted); }

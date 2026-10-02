@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .api import create_router
+from .automation.browser_protocol import BrowserConnectionHub
 from .config import settings
 from .embedding import Embedder, HttpEmbeddingClient
 from .project_extraction import (
@@ -62,6 +63,7 @@ def create_app(
     client_log_repository = ClientLogRepository(resolved_database_path)
     delivery_repository = DeliveryRepository(resolved_database_path)
     automation_repository = AutomationRepository(resolved_database_path)
+    browser_hub = BrowserConnectionHub()
     resolved_embedder = embedder or HttpEmbeddingClient(
         settings.embedding_url, settings.embedding_model
     )
@@ -85,6 +87,7 @@ def create_app(
             resolved_greeting_generator,
             resolved_database_path.parent / "resume-images",
             automation_repository,
+            browser_hub,
         )
     )
     return application

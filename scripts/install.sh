@@ -22,6 +22,9 @@ SKILL_DIR="$CODEX_ROOT/skills/boss-zhipin-assistant"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.release.yml"
 SOURCE_DIR="$INSTALL_DIR/source"
 EXTENSION_ZIP="$INSTALL_DIR/job-search-assistant-chrome-mv3.zip"
+RUNNER_SCRIPT="$INSTALL_DIR/automation-runner.py"
+RUNNER_PID="$INSTALL_DIR/automation-runner.pid"
+RUNNER_LOG="$INSTALL_DIR/automation-runner.log"
 
 usage() {
   cat <<'EOF'
@@ -163,6 +166,34 @@ package_extension() {
   fi
 }
 
+install_runner() {
+  run cp "$SOURCE_DIR/scripts/automation-runner.py" "$RUNNER_SCRIPT"
+  run chmod +x "$RUNNER_SCRIPT"
+}
+
+stop_runner() {
+  [ -f "$RUNNER_PID" ] || return 0
+  [ "$DRY_RUN" -eq 1 ] && { say "[dry-run] 停止宿主 automation runner"; return; }
+  runner_pid=$(cat "$RUNNER_PID" 2>/dev/null || true)
+  case "$runner_pid" in
+    ''|*[!0-9]*) ;;
+    *) kill "$runner_pid" 2>/dev/null || true ;;
+  esac
+  run rm -f "$RUNNER_PID"
+}
+
+start_runner() {
+  [ "$DRY_RUN" -eq 1 ] && { say "[dry-run] 启动宿主 automation runner"; return; }
+  stop_runner
+  if ! has_command python3; then
+    say "! 未检测到 python3，后台任务 API 可用，但宿主 runner 未启动"
+    return
+  fi
+  nohup python3 "$RUNNER_SCRIPT" >"$RUNNER_LOG" 2>&1 &
+  printf '%s\n' "$!" >"$RUNNER_PID"
+  say "✓ 宿主 runner 已启动（日志：$RUNNER_LOG）"
+}
+
 wait_for_service() {
   [ "$DRY_RUN" -eq 1 ] && return 0
   say "等待本地服务健康（首次下载向量模型可能需要几分钟）…"
@@ -212,8 +243,9 @@ open_setup() {
 }
 
 uninstall() {
+  stop_runner
   if [ -f "$COMPOSE_FILE" ] && has_command docker; then run compose down; fi
-  run rm -f "$COMPOSE_FILE" "$EXTENSION_ZIP"
+  run rm -f "$COMPOSE_FILE" "$EXTENSION_ZIP" "$RUNNER_SCRIPT" "$RUNNER_LOG"
   say "已停止服务并移除安装器托管包。用户数据保留在 $INSTALL_DIR/data"
   say "Skill 保留在 ${SKILL_DIR}，避免误删 user_profile.json。"
 }
@@ -237,10 +269,12 @@ prepare_source
 run cp "$SOURCE_DIR/docker-compose.release.yml" "$COMPOSE_FILE"
 install_skill
 package_extension
+install_runner
 say "正在拉取三个服务镜像；首次安装会下载 Python/ONNX 依赖和向量模型，耗时取决于网络。"
 run compose pull
 run compose up -d
 wait_for_service
+start_runner
 probe_browser_environment
 open_setup
 say "完成。首次使用向导：$JSA_SETUP_URL"

@@ -36,6 +36,19 @@ export interface BrowserProbe {
   checkedAt?: string
 }
 
+export interface BrowserProtocolStatus {
+  connected: boolean
+  paired: boolean
+  protocolVersion: string
+  extensionVersion?: string
+}
+
+export interface BrowserPairing {
+  code: string
+  expiresAt: string
+  protocolVersion: string
+}
+
 export interface SetupTestRunResult {
   ok: boolean
   mode: 'dry-run'
@@ -55,6 +68,8 @@ export interface AutomationRun {
   failureCount: number
   currentKeyword?: string
   currentJobId?: string
+  runnerId?: string
+  heartbeatAt?: string
   stopReason?: string
   createdAt: string
   startedAt?: string
@@ -70,6 +85,23 @@ export interface AutomationEvent {
   level: string
   payload: JsonData
   createdAt: string
+}
+
+export interface AutomationAction {
+  idempotencyKey: string
+  runId: number
+  jobId: string
+  actionType: string
+  status: 'pending' | 'succeeded' | 'failed' | 'uncertain'
+  attemptCount: number
+  lastError?: string
+  updatedAt: string
+}
+
+export interface AutomationReport {
+  run: AutomationRun
+  actions: AutomationAction[]
+  events: AutomationEvent[]
 }
 
 export interface StoredJob {

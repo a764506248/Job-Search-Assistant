@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Search Assistant</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">JOB SEARCH ASSISTANT</p>
+      <h1>浏览器连接</h1>
+      <p id="status" class="status">正在检查本地连接…</p>
+      <label for="pairing-code">后台显示的 6 位配对码</label>
+      <input id="pairing-code" inputmode="numeric" maxlength="6" placeholder="000000">
+      <button id="pair" type="button">连接本地服务</button>
+      <p class="hint">扩展只响应白名单动作；发送问候语和简历前仍需明确确认。</p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

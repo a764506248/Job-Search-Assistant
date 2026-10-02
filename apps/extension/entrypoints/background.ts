@@ -1,11 +1,124 @@
+import {
+  BROWSER_PROTOCOL_VERSION,
+  isBrowserActionEnvelope,
+  type BrowserActionEnvelope,
+  type BrowserActionResult,
+} from '../src/automation/protocol'
+
+const WS_URL = 'ws://127.0.0.1:8765/v1/browser/ws'
+const TOKEN_KEY = 'browserProtocolToken'
+const PAIRING_CODE_KEY = 'browserPairingCode'
+
 export default defineBackground(() => {
-  console.info('[Job Search Assistant] resume image test background ready')
+  let socket: WebSocket | undefined
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  let retryMs = 1000
+
+  const connect = async () => {
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
+    const stored = await browser.storage.local.get([TOKEN_KEY, PAIRING_CODE_KEY])
+    const token = typeof stored[TOKEN_KEY] === 'string' ? stored[TOKEN_KEY] : ''
+    const pairingCode = typeof stored[PAIRING_CODE_KEY] === 'string' ? stored[PAIRING_CODE_KEY] : ''
+    if (!token && !pairingCode) return
+    socket = new WebSocket(WS_URL)
+    socket.addEventListener('open', () => {
+      socket?.send(JSON.stringify({
+        type: 'hello', token, pairingCode,
+        protocolVersion: BROWSER_PROTOCOL_VERSION,
+        extensionVersion: browser.runtime.getManifest().version,
+      }))
+    })
+    socket.addEventListener('message', async (event) => {
+      const message: unknown = JSON.parse(String(event.data))
+      if (isPairedMessage(message)) {
+        await browser.storage.local.set({ [TOKEN_KEY]: message.token })
+        await browser.storage.local.remove(PAIRING_CODE_KEY)
+        retryMs = 1000
+        return
+      }
+      if (isReadyMessage(message)) {
+        retryMs = 1000
+        return
+      }
+      if (!isBrowserActionEnvelope(message)) return
+      const result = await executeBrowserAction(message)
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(result))
+    })
+    socket.addEventListener('close', scheduleReconnect)
+    socket.addEventListener('error', () => socket?.close())
+  }
+
+  const scheduleReconnect = () => {
+    socket = undefined
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectTimer = setTimeout(() => void connect(), retryMs)
+    retryMs = Math.min(retryMs * 2, 30_000)
+  }
 
   browser.runtime.onMessage.addListener((message: unknown) => {
-    if (!isDefaultResumeImageRequest(message)) return
-    return fetchDefaultResumeImage()
+    if (isDefaultResumeImageRequest(message)) return fetchDefaultResumeImage()
+    if (isPairingRequest(message)) {
+      return browser.storage.local
+        .set({ [PAIRING_CODE_KEY]: message.code })
+        .then(() => { socket?.close(); return connect() })
+        .then(() => ({ ok: true }))
+    }
+    if (isConnectionStatusRequest(message)) {
+      return Promise.resolve({
+        connected: socket?.readyState === WebSocket.OPEN,
+        protocolVersion: BROWSER_PROTOCOL_VERSION,
+      })
+    }
   })
+  void connect()
 })
+
+async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<BrowserActionResult> {
+  if (envelope.action === 'ping') {
+    return success(envelope, { extensionAlive: true, protocolVersion: BROWSER_PROTOCOL_VERSION })
+  }
+  const tabs = await browser.tabs.query({ url: ['https://zhipin.com/*', 'https://*.zhipin.com/*'] })
+  const tab = tabs.find(item => item.active) ?? tabs[0]
+  if (!tab?.id) return failure(envelope, '没有找到已登录的 BOSS 页面')
+  try {
+    if (envelope.action === 'navigate_search') {
+      const query = String(envelope.payload.query ?? '').trim()
+      const city = String(envelope.payload.cityCode ?? '').trim()
+      if (!query) return failure(envelope, '搜索关键词不能为空')
+      const url = new URL('https://www.zhipin.com/web/geek/jobs')
+      url.searchParams.set('query', query)
+      if (city) url.searchParams.set('city', city)
+      await browser.tabs.update(tab.id, { url: url.toString() })
+      return success(envelope, { navigationRequested: true, url: url.toString() })
+    }
+    if (envelope.action === 'open_job') {
+      const url = new URL(String(envelope.payload.url ?? ''))
+      if (url.protocol !== 'https:' || !/(^|\.)zhipin\.com$/.test(url.hostname)) {
+        return failure(envelope, '仅允许打开 BOSS 直聘 HTTPS 地址')
+      }
+      await browser.tabs.update(tab.id, { url: url.toString() })
+      return success(envelope, { navigationRequested: true, url: url.toString() })
+    }
+    const result = await browser.tabs.sendMessage(tab.id, {
+      type: 'job-search-assistant:browser-action', envelope,
+    }) as Omit<BrowserActionResult, 'requestId'>
+    return { requestId: envelope.requestId, ...result }
+  }
+  catch (error) {
+    return failure(envelope, error instanceof Error ? error.message : String(error))
+  }
+}
+
+function success(
+  envelope: BrowserActionEnvelope,
+  evidence: Record<string, unknown>,
+): BrowserActionResult {
+  return { requestId: envelope.requestId, status: 'success', evidence }
+}
+
+function failure(envelope: BrowserActionEnvelope, error: string): BrowserActionResult {
+  return { requestId: envelope.requestId, status: 'failed', evidence: {}, error }
+}
 
 interface DefaultResumeImageRequest {
   type: 'job-search-assistant:get-default-resume-image'
@@ -16,6 +129,26 @@ interface DefaultResumeImageResponse {
   base64: string
   contentType: string
   filename: string
+}
+
+function isPairingRequest(message: unknown): message is { type: 'job-search-assistant:pair'; code: string } {
+  const request = message as { type?: unknown, code?: unknown }
+  return !!request && request.type === 'job-search-assistant:pair' && typeof request.code === 'string'
+}
+
+function isConnectionStatusRequest(message: unknown): boolean {
+  return !!message && typeof message === 'object'
+    && (message as { type?: unknown }).type === 'job-search-assistant:connection-status'
+}
+
+function isPairedMessage(message: unknown): message is { type: 'paired'; token: string } {
+  const response = message as { type?: unknown, token?: unknown }
+  return !!response && response.type === 'paired' && typeof response.token === 'string'
+}
+
+function isReadyMessage(message: unknown): message is { type: 'ready' } {
+  return !!message && typeof message === 'object'
+    && (message as { type?: unknown }).type === 'ready'
 }
 
 function isDefaultResumeImageRequest(message: unknown): message is DefaultResumeImageRequest {

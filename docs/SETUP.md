@@ -2,15 +2,22 @@
 
 本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。基础后台、AI 能力、浏览器采集和自动投递不是同一组依赖，请按实际使用范围准备。
 
-> 阶段一的一键安装器、环境状态 API、首次使用向导、简历确认、浏览器探针和无副作用安全测试已有可试用首版；后台直接启动真实投递仍在开发。完整范围见[一键安装与自动投递产品化路线图](PRODUCTIZATION_ROADMAP.md)。
+> 一键安装、首次使用向导和后台任务控制已有首版；统一扩展处于协议预览阶段。真实发送仍要求页面内人工确认，并保留 Kimi + Skill 旧链路作为回退。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
 
-## 0. 阶段一安装器（macOS/Linux 首版）
+## 0. 一键安装器
 
 从仓库根目录运行：
 
 ```bash
 ./scripts/install.sh --check
 ./scripts/install.sh --install
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\install.ps1 -Mode check
+.\scripts\install.ps1 -Mode install
 ```
 
 安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，安装或升级 BOSS Skill（保留已有 `user_profile.json`），拉取三个容器镜像并打开 <http://127.0.0.1:8765/setup>。如果本地已有构建后的 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。首次完整拉取包含 Python/ONNX 运行依赖，启动后还可能下载向量模型，网络较慢时需要等待数分钟；安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
@@ -152,7 +159,7 @@ http://host.docker.internal:端口
 
 同时需要保证该模型服务允许来自 Docker 的连接。互联网模型 API 可以直接使用其 HTTPS 地址。
 
-## 4. 项目自带浏览器扩展（v0.2.3 图片测试版）
+## 4. 项目自带浏览器扩展（v0.3.0 统一协议预览版）
 
 ### 4.1 从 GitHub Actions 下载
 
@@ -178,7 +185,9 @@ npm run build:extension
 5. 登录 BOSS 直聘并打开“消息”页；
 6. 重新构建后必须在扩展卡片上点击“重新加载”，再刷新 BOSS 页面。
 
-当前版本只启用默认简历图片发送面板，原职位采集、分析和同步入口暂时停用，但源码和测试仍保留。面板支持拖拽和折叠；折叠后仍显示“加载”和“发送”按钮。完整手工流程为：
+加载扩展后，先打开后台“安装向导”，生成 6 位一次性配对码；再点击 Chrome 工具栏中的扩展图标输入配对码。扩展通过 `ws://127.0.0.1:8765/v1/browser/ws` 连接，只接受固定白名单动作。服务重启后需要重新配对。
+
+当前版本启用默认简历图片面板、岗位读取和身份校验。面板支持拖拽和折叠；折叠后仍显示“加载”和“发送”按钮。完整手工图片流程为：
 
 1. 在 BOSS 消息页选中目标联系人；
 2. 点击“仅加载图片预览”，确认扩展状态包含“尚未发送”；
@@ -188,9 +197,9 @@ npm run build:extension
 
 扩展依赖 `https://www.zhipin.com/*` 和 `http://127.0.0.1/*` 权限，通过后台脚本读取 `GET /v1/resumes/default-image`，不需要开启 Chrome 的“允许访问文件网址”。若页面中未出现面板、找不到聊天图片控件或图片未发送，应停止自动投递并检查扩展是否已重新加载、本地服务是否在线以及 BOSS 页面结构是否变化。
 
-## 5. Skill 与 Kimi 自动投递
+## 5. Skill 与 Kimi 回退链路
 
-自动投递使用 BOSS Skill 编排：Kimi WebBridge 负责页面读取、联系人/岗位点击和问候语发送；项目自带 Chrome 扩展负责默认简历图片的读取、预览和注入；本地 API 负责档案、规则、RAG、职位快照、材料决策和投递记录。
+统一扩展完成受控真实账号验收前，BOSS Skill + Kimi WebBridge 仍是稳定回退链路：Kimi 负责页面读取、联系人/岗位点击和问候语发送；项目扩展负责默认简历图片的读取、预览和注入；本地 API 负责档案、规则、RAG、职位快照、材料决策和投递记录。
 
 ### 5.1 安装 Kimi 浏览器扩展
 
@@ -240,7 +249,7 @@ python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
 - WebBridge daemon 可通过 `http://127.0.0.1:10086` 访问；
 - Chrome 中已登录 BOSS；
 - `boss-zhipin-deliver` Skill v5.10.0 或更高版本已安装；
-- 项目自带 Chrome 扩展 v0.2.3 或更高版本已加载并刷新 BOSS 页面；
+- 项目自带 Chrome 扩展 v0.3.0 或更高版本已加载并刷新 BOSS 页面；
 - Skill 的本地服务地址为 `http://127.0.0.1:8765`；
 - 已在后台配置个人档案、匹配规则、默认问候语和模型；
 - 发送简历图片前，已重新导入 PDF、生成第一页图片并选为默认投递图片；

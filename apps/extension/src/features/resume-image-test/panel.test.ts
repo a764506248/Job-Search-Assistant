@@ -17,8 +17,8 @@ describe('resume image test panel', () => {
     mountResumeImageTestPanel(document)
     const hosts = document.querySelectorAll('#job-search-assistant-image-test-host')
     expect(hosts).toHaveLength(1)
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('原采集与同步功能已暂停')
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.2.3')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('自动发送仍需用户确认')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.3.0')
     expect(hosts[0]?.shadowRoot?.textContent).toContain('仅加载图片预览')
   })
 

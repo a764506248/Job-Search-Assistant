@@ -58,6 +58,8 @@ class AutomationRepository:
                 );
                 """
             )
+            self._ensure_column(connection, "automation_runs", "runner_id", "TEXT")
+            self._ensure_column(connection, "automation_runs", "heartbeat_at", "TEXT")
             now = datetime.now(UTC).isoformat()
             connection.execute(
                 """UPDATE automation_runs SET status = 'interrupted', updated_at = ?
@@ -92,6 +94,188 @@ class AutomationRepository:
         result = dict(row)
         result["config_snapshot"] = json.loads(result.pop("config_snapshot_json"))
         return result
+
+    def claim_next_run(self, runner_id: str) -> dict[str, Any] | None:
+        """Atomically claim the oldest runnable task for one host runner."""
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                """SELECT id FROM automation_runs
+                WHERE status = 'running' AND runner_id IS NULL
+                ORDER BY id LIMIT 1"""
+            ).fetchone()
+            if row is None:
+                return None
+            run_id = int(row["id"])
+            connection.execute(
+                """UPDATE automation_runs SET runner_id = ?, heartbeat_at = ?, updated_at = ?
+                WHERE id = ? AND runner_id IS NULL""",
+                (runner_id, now, now, run_id),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                "runner-claimed",
+                "info",
+                {"runnerId": runner_id},
+            )
+        return self.get_run(run_id)
+
+    def heartbeat(self, run_id: int, runner_id: str) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            cursor = connection.execute(
+                """UPDATE automation_runs SET heartbeat_at = ?, updated_at = ?
+                WHERE id = ? AND runner_id = ?""",
+                (now, now, run_id, runner_id),
+            )
+            if cursor.rowcount != 1:
+                raise PermissionError("automation run is not claimed by this runner")
+        return self.get_run(run_id)
+
+    def record_progress(
+        self,
+        run_id: int,
+        job_id: str,
+        outcome: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        self.get_run(run_id)
+        success_delta = 1 if outcome == "success" else 0
+        failure_delta = 1 if outcome == "failure" else 0
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """UPDATE automation_runs SET current_job_id = ?,
+                success_count = success_count + ?, failure_count = failure_count + ?,
+                updated_at = ? WHERE id = ?""",
+                (job_id, success_delta, failure_delta, now, run_id),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                "job-finished",
+                "info" if outcome == "success" else "warning",
+                {"jobId": job_id, "outcome": outcome, "reason": reason},
+            )
+        return self.get_run(run_id)
+
+    def claim_action(
+        self,
+        run_id: int,
+        job_id: str,
+        action_type: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Create or retry an action and report whether a side effect may execute."""
+        self.get_run(run_id)
+        idempotency_key = f"{run_id}:{job_id}:{action_type}"
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM automation_actions WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if existing is not None and existing["status"] in {
+                "pending",
+                "succeeded",
+                "uncertain",
+            }:
+                return dict(existing), False
+            if existing is None:
+                connection.execute(
+                    """INSERT INTO automation_actions(
+                        idempotency_key, run_id, job_id, action_type, status,
+                        attempt_count, updated_at
+                    ) VALUES (?, ?, ?, ?, 'pending', 1, ?)""",
+                    (idempotency_key, run_id, job_id, action_type, now),
+                )
+            else:
+                connection.execute(
+                    """UPDATE automation_actions SET status = 'pending',
+                    attempt_count = attempt_count + 1, last_error = NULL, updated_at = ?
+                    WHERE idempotency_key = ?""",
+                    (now, idempotency_key),
+                )
+            self._append_event(
+                connection,
+                run_id,
+                "action-claimed",
+                "info",
+                {"jobId": job_id, "actionType": action_type, "idempotencyKey": idempotency_key},
+            )
+            row = connection.execute(
+                "SELECT * FROM automation_actions WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return dict(row), True
+
+    def finish_action(
+        self,
+        idempotency_key: str,
+        *,
+        succeeded: bool | None,
+        error: str | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT * FROM automation_actions WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(idempotency_key)
+            status = "uncertain" if succeeded is None else ("succeeded" if succeeded else "failed")
+            connection.execute(
+                """UPDATE automation_actions SET status = ?, last_error = ?, updated_at = ?
+                WHERE idempotency_key = ?""",
+                (status, error, now, idempotency_key),
+            )
+            self._append_event(
+                connection,
+                int(row["run_id"]),
+                "action-finished",
+                "warning" if succeeded is None else ("info" if succeeded else "error"),
+                {
+                    "jobId": row["job_id"],
+                    "actionType": row["action_type"],
+                    "idempotencyKey": idempotency_key,
+                    "status": status,
+                    "error": error,
+                    "evidence": evidence or {},
+                },
+            )
+            result = connection.execute(
+                "SELECT * FROM automation_actions WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return dict(result)
+
+    def list_actions(self, run_id: int) -> list[dict[str, Any]]:
+        self.get_run(run_id)
+        with sqlite3.connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM automation_actions WHERE run_id = ? ORDER BY updated_at",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def report(self, run_id: int) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        return {
+            "run": run,
+            "actions": self.list_actions(run_id),
+            "events": self.list_events(run_id),
+        }
 
     def list_runs(self) -> list[dict[str, Any]]:
         self.initialize()
@@ -185,3 +369,14 @@ class AutomationRepository:
                 datetime.now(UTC).isoformat(),
             ),
         )
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

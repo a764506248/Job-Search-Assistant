@@ -56,7 +56,7 @@ export function mountResumeImageTestPanel(doc: Document): void {
   if (doc.getElementById(HOST_ID)) return
   const host = doc.createElement('div')
   host.id = HOST_ID
-  host.dataset.version = '0.2.3'
+  host.dataset.version = '0.3.0'
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
     <style>
@@ -88,8 +88,8 @@ export function mountResumeImageTestPanel(doc: Document): void {
         <button class="toggle" title="折叠" aria-label="折叠">−</button>
       </div>
       <div class="body">
-        <div class="version">v0.2.3 · image-test · 标题栏可拖拽</div>
-        <div class="paused">原采集与同步功能已暂停</div>
+        <div class="version">v0.3.0 · unified-protocol-preview · 标题栏可拖拽</div>
+        <div class="paused">自动发送仍需用户确认</div>
         <div class="status">请先进入 BOSS 聊天并选中目标联系人。</div>
         <img alt="默认简历图片预览">
         <button class="load">1. 仅加载图片预览</button>
@@ -165,7 +165,7 @@ export function mountResumeImageTestPanel(doc: Document): void {
   compactSendButton.addEventListener('click', sendImage)
 }
 
-async function loadDefaultImage(): Promise<{ file: File; url: string }> {
+export async function loadDefaultImage(): Promise<{ file: File; url: string }> {
   const response = await browser.runtime.sendMessage({ type: GET_IMAGE_MESSAGE }) as ImageResponse
   if (!response?.ok || !response.base64) throw new Error('扩展后台没有返回默认简历图片')
   const binary = atob(response.base64)

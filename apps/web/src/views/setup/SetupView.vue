@@ -46,6 +46,22 @@
           <span class="setup-phase">阶段 1</span>
         </div>
         <div class="setup-browser-content">
+          <div class="browser-pairing-card">
+            <span class="setup-phase">阶段 3 预览</span>
+            <h3>统一浏览器扩展</h3>
+            <p v-if="browserProtocol?.connected" class="browser-pairing-ready">
+              已连接扩展 {{ browserProtocol.extensionVersion || '' }} · 协议 {{ browserProtocol.protocolVersion }}
+            </p>
+            <template v-else>
+              <p>点击生成一次性配对码，在扩展弹窗中输入。配对码 10 分钟后失效。</p>
+              <strong v-if="pairing" class="browser-pairing-code">{{ pairing.code }}</strong>
+            </template>
+            <div class="browser-pairing-actions">
+              <a-button v-if="!browserProtocol?.connected" type="primary" :loading="pairingLoading" @click="createPairing">生成配对码</a-button>
+              <a-button :loading="browserTesting" @click="testUnifiedExtension">测试连接</a-button>
+            </div>
+            <p v-if="browserMessage" class="browser-pairing-message">{{ browserMessage }}</p>
+          </div>
           <div class="setup-browser-states">
             <div v-for="check in browserChecks" :key="check.key" class="setup-browser-state" :class="`is-${check.status}`">
               <span class="setup-check-icon">{{ statusIcon(check.status) }}</span>
@@ -86,7 +102,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
-import type { BrowserProbe, SetupCheckStatus, SetupStatus, SetupTestRunResult } from '../../types'
+import type { BrowserPairing, BrowserProbe, BrowserProtocolStatus, SetupCheckStatus, SetupStatus, SetupTestRunResult } from '../../types'
 
 const router = useRouter()
 const status = ref<SetupStatus>()
@@ -95,6 +111,11 @@ const error = ref('')
 const savingProbe = ref(false)
 const testingSetup = ref(false)
 const testResult = ref<SetupTestRunResult>()
+const browserProtocol = ref<BrowserProtocolStatus>()
+const pairing = ref<BrowserPairing>()
+const pairingLoading = ref(false)
+const browserTesting = ref(false)
+const browserMessage = ref('')
 const browserKeys = new Set(['kimi-webbridge', 'project-extension', 'boss-login', 'skill-version'])
 const probe = ref<BrowserProbe>({
   webbridgeRunning: false,
@@ -133,10 +154,37 @@ async function load() {
   error.value = ''
   try {
     status.value = await api.setupStatus()
+    browserProtocol.value = await api.browserStatus()
   } catch (reason) {
     error.value = (reason as Error).message
   } finally {
     loading.value = false
+  }
+}
+
+async function createPairing() {
+  pairingLoading.value = true
+  browserMessage.value = ''
+  try {
+    pairing.value = await api.createBrowserPairing()
+  } catch (reason) {
+    browserMessage.value = (reason as Error).message
+  } finally {
+    pairingLoading.value = false
+  }
+}
+
+async function testUnifiedExtension() {
+  browserTesting.value = true
+  browserMessage.value = ''
+  try {
+    const result = await api.testBrowserConnection()
+    browserMessage.value = result.status === 'success' ? '扩展响应正常，安全测试未执行页面点击。' : `扩展返回：${result.status}`
+    await load()
+  } catch (reason) {
+    browserMessage.value = (reason as Error).message
+  } finally {
+    browserTesting.value = false
   }
 }
 
