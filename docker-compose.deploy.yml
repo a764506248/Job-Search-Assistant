@@ -20,6 +20,8 @@ services:
         # 国内服务器默认走腾讯云镜像源；境外或本地构建时传 --build-arg 覆盖为空
         NPM_REGISTRY: ${JSA_NPM_REGISTRY:-https://mirrors.tencentyun.com/npm/}
     ports:
+      # 80 是标准 HTTP 端口，云平台防火墙通常默认放行；8080 多数需手动加规则
+      - "80:80"
       - "8080:80"
     depends_on:
       local-service:
