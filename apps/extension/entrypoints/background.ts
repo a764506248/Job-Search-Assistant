@@ -4,6 +4,7 @@ import {
   type BrowserActionEnvelope,
   type BrowserActionResult,
 } from '../src/automation/protocol'
+import { isClosedMessageChannel } from '../src/automation/message-channel'
 
 const WS_URL = 'ws://127.0.0.1:8765/v1/browser/ws'
 const TOKEN_KEY = 'browserProtocolToken'
@@ -103,13 +104,70 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       await ready
       return success(envelope, { navigationCompleted: true, url: url.toString() })
     }
-    const result = await browser.tabs.sendMessage(tab.id, {
-      type: 'job-search-assistant:browser-action', envelope,
-    }) as Omit<BrowserActionResult, 'requestId'>
-    return { requestId: envelope.requestId, ...result }
+    try {
+      const result = await sendBrowserActionToTab(tab.id, envelope)
+      return { requestId: envelope.requestId, ...result }
+    }
+    catch (error) {
+      if (envelope.action === 'open_chat' && isClosedMessageChannel(error)) {
+        return await recoverOpenChatAfterNavigation(tab.id, envelope)
+      }
+      throw error
+    }
   }
   catch (error) {
     return failure(envelope, error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function sendBrowserActionToTab(
+  tabId: number,
+  envelope: BrowserActionEnvelope,
+): Promise<Omit<BrowserActionResult, 'requestId'>> {
+  return browser.tabs.sendMessage(tabId, {
+    type: 'job-search-assistant:browser-action', envelope,
+  }) as Promise<Omit<BrowserActionResult, 'requestId'>>
+}
+
+async function recoverOpenChatAfterNavigation(
+  tabId: number,
+  envelope: BrowserActionEnvelope,
+): Promise<BrowserActionResult> {
+  const deadline = Date.now() + Math.min(envelope.deadlineMs, 12_000)
+  const validationEnvelope: BrowserActionEnvelope = {
+    ...envelope,
+    action: 'validate_identity',
+    payload: { ...envelope.payload, requireChat: true },
+  }
+  let lastResult: Omit<BrowserActionResult, 'requestId'> | undefined
+
+  while (Date.now() < deadline) {
+    try {
+      lastResult = await sendBrowserActionToTab(tabId, validationEnvelope)
+      if (lastResult.status === 'success') {
+        return success(envelope, {
+          ...lastResult.evidence,
+          chatOpened: true,
+          recoveredAfterNavigation: true,
+        })
+      }
+    }
+    catch (error) {
+      if (!isClosedMessageChannel(error)) throw error
+    }
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+
+  return {
+    requestId: envelope.requestId,
+    status: 'blocked',
+    evidence: {
+      ...(lastResult?.evidence ?? {}),
+      chatOpened: false,
+      sideEffectExecuted: true,
+      recoveredAfterNavigation: false,
+    },
+    error: lastResult?.error ?? '已点击沟通入口，但页面跳转后未能确认目标岗位聊天页',
   }
 }
 

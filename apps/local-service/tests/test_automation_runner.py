@@ -101,6 +101,8 @@ def test_runner_sends_job_id_for_browser_identity_checks() -> None:
     ]
     assert identity_calls
     assert all(call["payload"]["expectedJobId"] == "job-1" for call in identity_calls)
+    validate_call = next(call for call in identity_calls if call["action"] == "validate_identity")
+    assert validate_call["payload"]["requireChat"] is True
 
 
 def test_runner_stops_before_next_browser_action_when_cancelled() -> None:

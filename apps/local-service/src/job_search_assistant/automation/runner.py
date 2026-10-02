@@ -198,6 +198,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                     "expectedJobId": job_id,
                     "expectedTitle": expected_title,
                     "expectedCompany": expected_company,
+                    "requireChat": True,
                 },
             )
             if identity.get("result", {}).get("status") != "success":

@@ -61,8 +61,10 @@ async function handleBrowserAction(
     const job = captureBossJob(document, location)
     const expectedJobId = String(envelope.payload.expectedJobId ?? '')
     const expectedTitle = String(envelope.payload.expectedTitle ?? '')
-    const identityMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
-      || (!!job
+    const requireChat = envelope.payload.requireChat === true
+    const chatMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
+    const identityMatched = chatMatched
+      || (!requireChat && !!job
         && (!expectedJobId || job.platformJobId === expectedJobId)
         && sameJobTitle(job.title, expectedTitle))
     return {
@@ -72,7 +74,11 @@ async function handleBrowserAction(
         actualTitle: chatIdentity?.title ?? job?.title,
         actualCompany: chatIdentity?.companyName ?? job?.companyName,
       },
-      error: identityMatched ? undefined : '当前岗位与任务目标不一致，已停止操作',
+      error: identityMatched
+        ? undefined
+        : requireChat
+          ? '尚未进入目标岗位聊天页'
+          : '当前岗位与任务目标不一致，已停止操作',
     }
   }
   if (envelope.action === 'open_chat') {
