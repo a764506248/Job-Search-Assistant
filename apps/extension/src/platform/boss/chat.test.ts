@@ -23,6 +23,11 @@ describe('Boss chat safety helpers', () => {
     expect(chatJobTitleMatches(readChatIdentity(document), 'AI Agent工程师')).toBe(true)
   })
 
+  it('reads the current BOSS v5550 chat position bar', () => {
+    document.body.innerHTML = '<div class="chat-position-bar"><a class="bar-position-name">AI Agent策略工程师（剧情与分镜方向）</a></div>'
+    expect(readChatIdentity(document)?.title).toBe('AI Agent策略工程师（剧情与分镜方向）')
+  })
+
   it('fills only a recognized editor and finds an exact send button', () => {
     document.body.innerHTML = '<div class="chat-editor"><div contenteditable="true"></div></div><button>发送</button><button>发送简历</button>'
     const editor = findChatEditor(document)!

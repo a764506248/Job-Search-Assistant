@@ -13,6 +13,7 @@ const PAIRING_CODE_KEY = 'browserPairingCode'
 export default defineBackground(() => {
   let socket: WebSocket | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined
   let retryMs = 1000
 
   const connect = async () => {
@@ -28,6 +29,12 @@ export default defineBackground(() => {
         protocolVersion: BROWSER_PROTOCOL_VERSION,
         extensionVersion: browser.runtime.getManifest().version,
       }))
+      if (keepaliveTimer) clearInterval(keepaliveTimer)
+      keepaliveTimer = setInterval(() => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'keepalive', sentAt: Date.now() }))
+        }
+      }, 20_000)
     })
     socket.addEventListener('message', async (event) => {
       const message: unknown = JSON.parse(String(event.data))
@@ -51,6 +58,8 @@ export default defineBackground(() => {
 
   const scheduleReconnect = () => {
     socket = undefined
+    if (keepaliveTimer) clearInterval(keepaliveTimer)
+    keepaliveTimer = undefined
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = setTimeout(() => void connect(), retryMs)
     retryMs = Math.min(retryMs * 2, 30_000)
