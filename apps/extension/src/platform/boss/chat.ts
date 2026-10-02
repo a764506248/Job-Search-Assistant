@@ -1,6 +1,6 @@
 export interface ChatIdentity {
   title: string
-  companyName: string
+  companyName?: string
 }
 
 const TITLE_SELECTORS = [
@@ -27,17 +27,15 @@ const EDITOR_SELECTORS = [
 export function readChatIdentity(doc: Document): ChatIdentity | null {
   const title = firstText(doc, TITLE_SELECTORS)
   const companyName = firstText(doc, COMPANY_SELECTORS)
-  return title && companyName ? { title, companyName } : null
+  return title ? { title, companyName: companyName || undefined } : null
 }
 
-export function chatIdentityMatches(
+export function chatJobTitleMatches(
   identity: ChatIdentity | null,
   expectedTitle: string,
-  expectedCompany: string,
 ): boolean {
   return !!identity
     && normalize(identity.title) === normalize(expectedTitle)
-    && normalize(identity.companyName) === normalize(expectedCompany)
 }
 
 export function findChatEditor(doc: Document): HTMLElement | null {

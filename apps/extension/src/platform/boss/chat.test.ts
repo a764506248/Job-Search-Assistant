@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  chatIdentityMatches,
+  chatJobTitleMatches,
   fillChatEditor,
   findChatEditor,
   findSendButton,
@@ -11,11 +11,16 @@ import {
 describe('Boss chat safety helpers', () => {
   beforeEach(() => { document.body.innerHTML = '' })
 
-  it('requires exact normalized job and company identity', () => {
+  it('requires the normalized job title but does not compare company names', () => {
     document.body.innerHTML = '<header class="chat-header"><b class="job-name">AI Agent 工程师</b><span class="company-name">示例 科技</span></header>'
     const identity = readChatIdentity(document)
-    expect(chatIdentityMatches(identity, 'AI Agent工程师', '示例科技')).toBe(true)
-    expect(chatIdentityMatches(identity, '后端工程师', '示例科技')).toBe(false)
+    expect(chatJobTitleMatches(identity, 'AI Agent工程师')).toBe(true)
+    expect(chatJobTitleMatches(identity, '后端工程师')).toBe(false)
+  })
+
+  it('can validate a chat title when the company field is absent', () => {
+    document.body.innerHTML = '<header class="chat-header"><b class="job-name">AI Agent 工程师</b></header>'
+    expect(chatJobTitleMatches(readChatIdentity(document), 'AI Agent工程师')).toBe(true)
   })
 
   it('fills only a recognized editor and finds an exact send button', () => {

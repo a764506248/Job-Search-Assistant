@@ -7,7 +7,7 @@ import {
 import type { BrowserActionEnvelope, BrowserActionResult } from '../src/automation/protocol'
 import { captureBossJob } from '../src/platform/boss/capture'
 import {
-  chatIdentityMatches,
+  chatJobTitleMatches,
   fillChatEditor,
   findChatEditor,
   findSendButton,
@@ -59,10 +59,12 @@ async function handleBrowserAction(
   if (envelope.action === 'validate_identity') {
     const chatIdentity = readChatIdentity(document)
     const job = captureBossJob(document, location)
+    const expectedJobId = String(envelope.payload.expectedJobId ?? '')
     const expectedTitle = String(envelope.payload.expectedTitle ?? '')
-    const expectedCompany = String(envelope.payload.expectedCompany ?? '')
-    const identityMatched = chatIdentityMatches(chatIdentity, expectedTitle, expectedCompany)
-      || (!!job && job.title === expectedTitle && job.companyName === expectedCompany)
+    const identityMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
+      || (!!job
+        && (!expectedJobId || job.platformJobId === expectedJobId)
+        && sameJobTitle(job.title, expectedTitle))
     return {
       status: identityMatched ? 'success' : 'blocked',
       evidence: {
@@ -75,8 +77,8 @@ async function handleBrowserAction(
   }
   if (envelope.action === 'open_chat') {
     const expectedTitle = String(envelope.payload.expectedTitle ?? '')
-    const expectedCompany = String(envelope.payload.expectedCompany ?? '')
-    const job = await waitForExpectedJob(expectedTitle, expectedCompany)
+    const expectedJobId = String(envelope.payload.expectedJobId ?? '')
+    const job = await waitForExpectedJob(expectedJobId, expectedTitle)
     if (!job) {
       const actual = captureBossJob(document, location)
       return {
@@ -103,7 +105,7 @@ async function handleBrowserAction(
     button.click()
     await new Promise(resolve => setTimeout(resolve, 1200))
     const chatIdentity = readChatIdentity(document)
-    const chatMatched = chatIdentityMatches(chatIdentity, expectedTitle, expectedCompany)
+    const chatMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
     return chatMatched
       ? { status: 'success', evidence: { identityMatched: true, chatOpened: true } }
       : {
@@ -125,18 +127,20 @@ async function handleBrowserAction(
   }
 }
 
-async function waitForExpectedJob(expectedTitle: string, expectedCompany: string) {
+async function waitForExpectedJob(expectedJobId: string, expectedTitle: string) {
   const deadline = Date.now() + 12_000
   while (Date.now() < deadline) {
     const job = captureBossJob(document, location)
-    if (chatIdentityMatches(
-      job ? { title: job.title, companyName: job.companyName } : null,
-      expectedTitle,
-      expectedCompany,
-    )) return job
+    if (job
+      && (!expectedJobId || job.platformJobId === expectedJobId)
+      && sameJobTitle(job.title, expectedTitle)) return job
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   return null
+}
+
+function sameJobTitle(actual: string, expected: string): boolean {
+  return actual.replace(/\s+/g, '').toLowerCase() === expected.replace(/\s+/g, '').toLowerCase()
 }
 
 async function sendResumeWithPreview(
@@ -145,7 +149,7 @@ async function sendResumeWithPreview(
   const expectedTitle = String(envelope.payload.expectedTitle ?? '')
   const expectedCompany = String(envelope.payload.expectedCompany ?? '')
   const identity = readChatIdentity(document)
-  if (!chatIdentityMatches(identity, expectedTitle, expectedCompany)) {
+  if (!chatJobTitleMatches(identity, expectedTitle)) {
     return {
       status: 'blocked',
       evidence: { identityMatched: false, sideEffectExecuted: false },
@@ -239,7 +243,7 @@ async function sendGreetingWithConfirmation(
   const expectedCompany = String(envelope.payload.expectedCompany ?? '')
   const text = String(envelope.payload.text ?? '').trim()
   const identity = readChatIdentity(document)
-  if (!text || !chatIdentityMatches(identity, expectedTitle, expectedCompany)) {
+  if (!text || !chatJobTitleMatches(identity, expectedTitle)) {
     return {
       status: 'blocked',
       evidence: { identityMatched: false, sideEffectExecuted: false },

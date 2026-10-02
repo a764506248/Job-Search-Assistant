@@ -176,7 +176,11 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                 runner_id,
                 job_id=job_id,
                 action="open_chat",
-                payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
+                payload={
+                    "expectedJobId": job_id,
+                    "expectedTitle": expected_title,
+                    "expectedCompany": expected_company,
+                },
             )
             if chat.get("result", {}).get("status") != "success":
                 failure_count += 1
@@ -190,7 +194,11 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                 runner_id,
                 job_id=job_id,
                 action="validate_identity",
-                payload={"expectedTitle": expected_title, "expectedCompany": expected_company},
+                payload={
+                    "expectedJobId": job_id,
+                    "expectedTitle": expected_title,
+                    "expectedCompany": expected_company,
+                },
             )
             if identity.get("result", {}).get("status") != "success":
                 failure_count += 1

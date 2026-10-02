@@ -88,6 +88,21 @@ def test_runner_marks_all_failed_plan_as_failed() -> None:
     assert finish["reason"] == "全部计划岗位处理失败"
 
 
+def test_runner_sends_job_id_for_browser_identity_checks() -> None:
+    api = ExecutingApi(action_status="success")
+
+    execute_run(api, planned_run(), "compose-runner", dry_run=False)
+
+    identity_calls = [
+        body
+        for path, body in api.calls
+        if path.endswith("/browser-action")
+        and body["action"] in {"open_chat", "validate_identity"}
+    ]
+    assert identity_calls
+    assert all(call["payload"]["expectedJobId"] == "job-1" for call in identity_calls)
+
+
 def test_runner_stops_before_next_browser_action_when_cancelled() -> None:
     class CancelledApi(ExecutingApi):
         def get(self, path: str) -> dict[str, Any]:
