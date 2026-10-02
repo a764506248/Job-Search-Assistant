@@ -4,6 +4,7 @@ import {
   mountResumeImageTestPanel,
   putFileIntoInput,
 } from '../src/features/resume-image-test/panel'
+import { confirmGreetingSend } from '../src/features/confirmation/greeting'
 import type { BrowserActionEnvelope, BrowserActionResult } from '../src/automation/protocol'
 import { captureBossJob } from '../src/platform/boss/capture'
 import {
@@ -256,26 +257,60 @@ async function sendGreetingWithConfirmation(
       error: '聊天页岗位或公司与任务目标不一致，已停止发送',
     }
   }
-  const confirmed = window.confirm(
-    `确认发送问候语？\n岗位：${expectedTitle}\n公司：${expectedCompany}\n\n${text}`,
+  if (outgoingTextObserved(document, text)) {
+    return {
+      status: 'success',
+      evidence: {
+        identityMatched: true,
+        alreadyPresent: true,
+        sideEffectExecuted: false,
+      },
+    }
+  }
+  const decision = await confirmGreetingSend(
+    expectedTitle,
+    expectedCompany,
+    text,
+    confirmationTimeoutMs(envelope),
   )
-  if (!confirmed) {
+  if (decision !== 'confirmed') {
     return {
       status: 'confirmation_required',
-      evidence: { identityMatched: true, sideEffectExecuted: false },
-      error: '用户取消发送',
+      evidence: {
+        identityMatched: true,
+        userConfirmed: false,
+        confirmationExpired: decision === 'expired',
+        sideEffectExecuted: false,
+      },
+      error: decision === 'expired' ? '确认超时，未发送' : '用户取消发送',
+    }
+  }
+  const identityAfterConfirmation = readChatIdentity(document)
+  if (!chatJobTitleMatches(identityAfterConfirmation, expectedTitle)) {
+    return {
+      status: 'blocked',
+      evidence: { identityMatched: false, userConfirmed: true, sideEffectExecuted: false },
+      error: '确认期间当前聊天岗位已变化，未发送',
     }
   }
   const editor = findChatEditor(document)
-  const sendButton = findSendButton(document)
-  if (!editor || !sendButton) {
+  if (!editor) {
     return {
       status: 'blocked',
-      evidence: { identityMatched: true, sideEffectExecuted: false },
-      error: '未找到唯一聊天编辑器或发送按钮',
+      evidence: { identityMatched: true, userConfirmed: true, sideEffectExecuted: false },
+      error: '未找到聊天编辑器',
     }
   }
   fillChatEditor(editor, text)
+  await new Promise(resolve => setTimeout(resolve, 100))
+  const sendButton = findSendButton(document)
+  if (!sendButton) {
+    return {
+      status: 'blocked',
+      evidence: { identityMatched: true, userConfirmed: true, sideEffectExecuted: false },
+      error: '问候语已填入，但发送按钮不可用，未点击发送',
+    }
+  }
   sendButton.click()
   await new Promise(resolve => setTimeout(resolve, 800))
   const messageBubbleObserved = outgoingTextObserved(document, text)
@@ -296,4 +331,8 @@ async function sendGreetingWithConfirmation(
         evidence,
         error: '已点击发送，但未同时观察到消息气泡和编辑器清空；禁止自动重试',
       }
+}
+
+function confirmationTimeoutMs(envelope: BrowserActionEnvelope): number {
+  return Math.max(1_000, Math.min(envelope.deadlineMs - 2_000, 58_000))
 }

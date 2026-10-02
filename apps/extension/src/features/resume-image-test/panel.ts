@@ -56,7 +56,7 @@ export function mountResumeImageTestPanel(doc: Document): void {
   if (doc.getElementById(HOST_ID)) return
   const host = doc.createElement('div')
   host.id = HOST_ID
-  host.dataset.version = '0.3.4'
+  host.dataset.version = '0.3.5'
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
     <style>
@@ -88,7 +88,7 @@ export function mountResumeImageTestPanel(doc: Document): void {
         <button class="toggle" title="折叠" aria-label="折叠">−</button>
       </div>
       <div class="body">
-        <div class="version">v0.3.4 · boss-conversation-position · 标题栏可拖拽</div>
+        <div class="version">v0.3.5 · visible-send-confirmation · 标题栏可拖拽</div>
         <div class="paused">自动发送仍需用户确认</div>
         <div class="status">请先进入 BOSS 聊天并选中目标联系人。</div>
         <img alt="默认简历图片预览">

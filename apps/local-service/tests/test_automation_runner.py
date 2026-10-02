@@ -105,6 +105,19 @@ def test_runner_sends_job_id_for_browser_identity_checks() -> None:
     assert validate_call["payload"]["requireChat"] is True
 
 
+def test_runner_allows_time_for_visible_send_confirmation() -> None:
+    api = ExecutingApi(action_status="success")
+
+    execute_run(api, planned_run(), "compose-runner", dry_run=False)
+
+    send_call = next(
+        body
+        for path, body in api.calls
+        if path.endswith("/browser-action") and body["action"] == "send_greeting"
+    )
+    assert send_call["deadlineMs"] == 60_000
+
+
 def test_runner_stops_before_next_browser_action_when_cancelled() -> None:
     class CancelledApi(ExecutingApi):
         def get(self, path: str) -> dict[str, Any]:

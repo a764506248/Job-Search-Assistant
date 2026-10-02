@@ -65,6 +65,7 @@ def browser_action(
     job_id: str,
     action: str,
     payload: dict[str, Any],
+    deadline_ms: int = 20_000,
 ) -> dict[str, Any]:
     wait_until_runnable(api, run_id, runner_id)
     api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
@@ -75,6 +76,7 @@ def browser_action(
             "jobId": job_id,
             "action": action,
             "payload": payload,
+            "deadlineMs": deadline_ms,
         },
     )
 
@@ -218,6 +220,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                     "expectedCompany": expected_company,
                     "text": greeting,
                 },
+                deadline_ms=60_000,
             )
             greeting_status = sent.get("result", {}).get("status")
             if greeting_status != "success":
@@ -240,6 +243,7 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                         "expectedTitle": expected_title,
                         "expectedCompany": expected_company,
                     },
+                    deadline_ms=60_000,
                 )
                 resume_status = resume.get("result", {}).get("status")
                 if resume_status != "success":
