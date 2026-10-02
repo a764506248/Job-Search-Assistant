@@ -5,9 +5,11 @@ from .library import LibraryRepository
 from .vectors import VectorRepository
 
 __all__ = [
+    "AutomationRepository",
     "ClientLogRepository",
     "DeliveryRepository",
     "JobRepository",
     "LibraryRepository",
     "VectorRepository",
 ]
+from .automation import AutomationRepository
