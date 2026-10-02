@@ -314,16 +314,22 @@ def _visible_message_count(text):
         var expected = normalize({encoded});
         var input = document.querySelector('#chat-input[contenteditable="true"]');
         var inputRect = input ? input.getBoundingClientRect() : null;
-        var preferred = Array.from(document.querySelectorAll(
+        // ★ 只在右侧会话区范围内查找：左侧会话列表会渲染各会话最后一条消息的
+        // 预览（.last-msg-text），全局查找会把别的会话里已发送过的相同问候语
+        // 误判为"当前会话已发送"，从而跳过发送并谎报成功。
+        var conv = document.querySelector('.chat-conversation');
+        var scope = conv || document;
+        var preferred = Array.from(scope.querySelectorAll(
             '.message-content, .message-text, .chat-message, .item-myself .text, ' +
             '[class*="message"] [class*="text"], [class*="message"] [class*="content"]'
         ));
-        var nodes = preferred.length ? preferred : Array.from(document.querySelectorAll('*'));
+        var nodes = preferred.length ? preferred : Array.from(scope.querySelectorAll('*'));
         var matches = nodes.filter(function(el){{
             if (normalize(el.innerText || el.textContent) !== expected) return false;
             if (el === input || el.closest(
                 '#chat-input, [contenteditable="true"], textarea, input, button, ' +
-                '.sentence-panel, .chat-editor, .chat-input, .chat-operate'
+                '.sentence-panel, .chat-editor, .chat-input, .chat-operate, ' +
+                '.user-list, .friend-content, .friend-content-warp'
             )) return false;
             var r = el.getBoundingClientRect();
             var s = window.getComputedStyle(el);
@@ -479,12 +485,39 @@ def _click_visible_send_button(max_wait=5.0):
         """)
 
 
-def _wait_for_greeting_delivery(greeting, before, max_wait=20.0):
-    """等待目标消息气泡出现，并确认编辑器已清空。"""
-    attempts = max(1, int(max_wait / 0.5))
-    for _ in range(attempts):
-        if _visible_message_count(greeting) > before and not _chat_input_text():
-            return True
+def _delivered_status_count():
+    """统计会话内状态为「送达/已读」的消息数。
+
+    BOSS 前端在点击发送后会先乐观渲染一条本地气泡（此时还没有 [送达] 标记），
+    真正的落库由随后的 XHR 完成。只看到气泡就判定成功会把尚未发出的消息
+    记成已发送；必须等到状态标记出现，才算服务端已接收。
+    """
+    return int(evaluate("""
+    (function(){
+        var conv = document.querySelector('.chat-conversation');
+        if (!conv) return 0;
+        return Array.from(conv.querySelectorAll('.message-status')).filter(function(el){
+            var t = (el.innerText || el.textContent || '').replace(/\\s+/g, '');
+            return t.indexOf('送达') >= 0 || t.indexOf('已读') >= 0;
+        }).length;
+    })()
+    """) or 0)
+
+
+def _wait_for_greeting_delivery(greeting, before, max_wait=25.0, min_wait=3.0):
+    """等待目标消息气泡出现，并确认编辑器已清空、服务端已标记送达。
+
+    min_wait: 点击发送后的最小停留时间。过早返回会让调用方立刻导航回搜索页，
+    从而中断尚未完成的发送 XHR —— 表现为脚本报成功、HR 侧却收不到消息。
+    """
+    started = time.time()
+    before_status = _delivered_status_count()
+    while time.time() - started < max_wait:
+        if time.time() - started >= min_wait:
+            if (_visible_message_count(greeting) > before
+                    and _delivered_status_count() > before_status
+                    and not _chat_input_text()):
+                return True
         time.sleep(0.5)
     return False
 
@@ -703,6 +736,9 @@ def deliver_inplace(job_id, job_info=None, greeting_text=None, send_resume_image
             image_ok, image_detail = _send_default_resume_image(send_resume_image)
             status = 'success' if image_ok else 'fail'
             detail = f"{greeting_detail}；{image_detail}"
+        # 发送后必须给 XHR 留出落地时间再离开页面：提前导航会中断请求，
+        # 前端气泡是乐观渲染的，页面一卸载消息就丢了。
+        time.sleep(3)
         restored, restore_detail = _restore_source_page(source_url)
         if not restored and status == 'success':
             detail = f"{detail}；警告: {restore_detail}"
