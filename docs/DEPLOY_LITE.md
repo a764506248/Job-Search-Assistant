@@ -23,23 +23,37 @@ sudo chmod 600 /swapfile
 sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
-# 2. 装 Docker
-curl -fsSL https://get.docker.com | sudo sh
-sudo apt install -y docker-compose-plugin
+# 2. 装 Docker（国内建议走 apt；官方 get.docker.com 脚本拉境外站点易超时）
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2   # Ubuntu 24.04 的 compose v2 包名
+sudo usermod -aG docker "$USER"   # 重新登录后生效
 
-# 3. 拉代码
+# 3. 配置镜像加速（国内机器不配会拉不动基础镜像）
+sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
+}
+JSON
+sudo systemctl restart docker
+
+# 4. 拉代码（GitHub 在国内服务器常连不上，可从本机 scp 打包代码）
 git clone https://github.com/a764506248/Job-Search-Assistant.git
 cd Job-Search-Assistant
 git checkout deploy/lite-no-embedding
 
-# 4. 起服务（建议加 swap 后再构建；前端 vite 构建峰值约 1.5GB）
+# 5. 起服务（compose 已内置腾讯云 PyPI/npm 源，可用环境变量覆盖）
 docker compose -f docker-compose.deploy.yml up -d --build
 
-# 5. 验证
+# 6. 验证
 curl http://127.0.0.1:8080/healthz          # 应返回 ok
 curl http://127.0.0.1:8080/v1/health        # API 健康
 curl http://127.0.0.1:8080/v1/rag/status    # mode 应为 keyword-only
 ```
+
+国内网络相关：`docker-compose.deploy.yml` 默认把 `PIP_INDEX_URL` 指向
+`mirrors.tencentyun.com/pypi/simple`、`NPM_REGISTRY` 指向 `mirrors.tencentyun.com/npm/`。
+非腾讯云环境或境外构建时用环境变量覆盖，例如
+`JSA_PIP_INDEX_URL=https://pypi.org/simple JSA_NPM_REGISTRY=https://registry.npmjs.org`。
 
 浏览器访问 `http://<公网IP>:8080`。
 

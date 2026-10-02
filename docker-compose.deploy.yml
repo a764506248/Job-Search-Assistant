@@ -16,6 +16,9 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # 国内服务器默认走腾讯云镜像源；境外或本地构建时传 --build-arg 覆盖为空
+        NPM_REGISTRY: ${JSA_NPM_REGISTRY:-https://mirrors.tencentyun.com/npm/}
     ports:
       - "8080:80"
     depends_on:
@@ -33,6 +36,8 @@ services:
   local-service:
     build:
       context: ./apps/local-service
+      args:
+        PIP_INDEX_URL: ${JSA_PIP_INDEX_URL:-https://mirrors.tencentyun.com/pypi/simple}
     expose:
       - "8765"
     environment:
