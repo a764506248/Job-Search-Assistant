@@ -173,6 +173,8 @@ docker compose -f docker-compose.release.yml ps
 docker compose -f docker-compose.release.yml logs -f
 ```
 
+服务器公网部署请使用 `docker-compose.server.yml`，它拉取固定 GHCR 版本镜像、启动 `automation-runner`，并将业务数据保存在同级 `deploy-data/`。发布流程和回滚命令见 [`docs/DEPLOY_SERVER.md`](docs/DEPLOY_SERVER.md)。不要把服务器凭据或 `deploy-data/` 提交到 Git。
+
 管理后台访问 <http://127.0.0.1:8765>。运行数据保存在 Compose 文件同级的 `data/`，更新或重建容器不会删除这些数据。更新镜像并重启：
 
 ```bash

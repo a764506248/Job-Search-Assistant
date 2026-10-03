@@ -1,0 +1,49 @@
+# 服务器部署编排：只拉取 GHCR 预构建镜像，不在低配服务器本地构建。
+# 数据目录必须保持为 ./deploy-data:/data，避免更新容器时切换到空数据库。
+services:
+  web:
+    image: ghcr.io/a764506248/job-search-assistant-web:${JSA_IMAGE_TAG:-latest}
+    ports:
+      - "80:80"
+    depends_on:
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  local-service:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    expose:
+      - "8765"
+    environment:
+      JSA_HOST: 0.0.0.0
+      JSA_PORT: 8765
+      JSA_DATA_DIR: /data
+    volumes:
+      - ./deploy-data:/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  automation-runner:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    command:
+      - job-search-assistant-runner
+      - --base-url
+      - http://local-service:8765
+    depends_on:
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: unless-stopped
