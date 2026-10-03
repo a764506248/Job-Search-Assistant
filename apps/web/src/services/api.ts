@@ -56,7 +56,10 @@ export const api = {
   createAutomationRun: (targetCount: number) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config: {} })),
   automationEvents: (id: number) => request<{ items: AutomationEvent[] }>(`/v1/automation/runs/${id}/events`),
   automationReport: (id: number) => request<AutomationReport>(`/v1/automation/runs/${id}/report`),
-  controlAutomationRun: (id: number, action: 'start' | 'pause' | 'resume' | 'stop') => request<AutomationRun>(`/v1/automation/runs/${id}/${action}`, { method: 'POST' }),
+  controlAutomationRun: (id: number, action: 'start' | 'pause' | 'resume' | 'stop', selectedJobIds?: string[]) => request<AutomationRun>(
+    `/v1/automation/runs/${id}/${action}`,
+    action === 'start' && selectedJobIds ? json('POST', { selectedJobIds }) : { method: 'POST' },
+  ),
   jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
     const params = new URLSearchParams({
       page: String(options.page || 1),

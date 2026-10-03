@@ -7,7 +7,9 @@
 → 一键启动三个 Docker 服务
 → 安装并配对一个浏览器扩展
 → 导入、识别并确认简历
-→ 在后台创建并启动任务
+→ 在后台创建投递计划
+→ 核对并勾选企业、岗位和问候语
+→ 确认后启动任务
 → 查看实时事件，必要时暂停、恢复或停止
 ```
 
@@ -61,6 +63,10 @@ draft → validating → ready → running ↔ paused
 ```
 
 `pending` 或 `succeeded` 动作不会再次执行；`failed` 动作会增加尝试次数后重试。每次认领与结果都会写入事件表，报告接口返回任务、动作和事件的完整审计视图。
+
+### 4.1 投递清单确认
+
+`POST /v1/automation/runs` 只创建 `draft` 草稿，不会触发 runner 或浏览器动作。控制台必须展示快照中的 `plannedJobs`，至少包含企业、岗位和问候语，并允许用户取消勾选。用户点击“确认并启动”时，`POST /v1/automation/runs/{runId}/start` 携带 `selectedJobIds`；服务端校验这些岗位属于原始计划，将所选子集重新冻结到 `configSnapshot.plannedJobs`，同步修正 `targetCount`，写入 `plan-confirmed` 审计事件，然后才进入校验和运行状态。空清单、重复 ID 或计划外岗位均拒绝启动。
 
 ## 5. 浏览器动作协议
 

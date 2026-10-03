@@ -61,6 +61,7 @@ from .domain.models import (
     AutomationRunnerClaimResponse,
     AutomationRunnerFinishRequest,
     AutomationRunnerStatus,
+    AutomationRunStartRequest,
     BrowserActionResponse,
     BrowserPairingResponse,
     BrowserProbeRequest,
@@ -976,7 +977,9 @@ def create_router(
             raise HTTPException(status_code=404, detail="automation run not found") from error
 
     @router.post("/automation/runs/{run_id}/start", response_model=AutomationRun)
-    def start_automation_run(run_id: int) -> AutomationRun:
+    def start_automation_run(
+        run_id: int, request: AutomationRunStartRequest | None = None
+    ) -> AutomationRun:
         run = automation_run(run_id)
         if run.status == "interrupted":
             planned_jobs = run.config_snapshot.get("plannedJobs", [])
@@ -1008,6 +1011,28 @@ def create_router(
         ]
         if active:
             raise HTTPException(status_code=409, detail="another automation run is active")
+        if request is not None and request.selected_job_ids is not None:
+            requested_ids = request.selected_job_ids
+            if not requested_ids:
+                raise HTTPException(status_code=422, detail="请至少选择一个待投岗位")
+            if len(requested_ids) != len(set(requested_ids)):
+                raise HTTPException(status_code=422, detail="待投岗位不能重复选择")
+            planned_jobs = run.config_snapshot.get("plannedJobs", [])
+            if not isinstance(planned_jobs, list):
+                planned_jobs = []
+            jobs_by_id = {
+                str(job.get("jobId")): job
+                for job in planned_jobs
+                if isinstance(job, dict) and job.get("jobId")
+            }
+            missing_ids = [job_id for job_id in requested_ids if job_id not in jobs_by_id]
+            if missing_ids:
+                raise HTTPException(status_code=422, detail="所选岗位不属于当前任务计划")
+            run = AutomationRun.model_validate(
+                automation_repository.confirm_plan(
+                    run_id, [jobs_by_id[job_id] for job_id in requested_ids]
+                )
+            )
         automation_repository.transition(run_id, "validating")
         planned_jobs = run.config_snapshot.get("plannedJobs", [])
         if not isinstance(planned_jobs, list) or not planned_jobs:

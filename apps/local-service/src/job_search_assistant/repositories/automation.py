@@ -120,6 +120,39 @@ class AutomationRepository:
         result["config_snapshot"] = json.loads(result.pop("config_snapshot_json"))
         return result
 
+    def confirm_plan(
+        self, run_id: int, planned_jobs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Freeze the user-confirmed subset before any runner can claim the task."""
+        run = self.get_run(run_id)
+        if run["status"] != "draft":
+            raise ValueError(f"run plan cannot be confirmed from {run['status']}")
+        config = dict(run["config_snapshot"])
+        config["plannedJobs"] = planned_jobs
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """UPDATE automation_runs SET config_snapshot_json = ?, target_count = ?,
+                updated_at = ? WHERE id = ?""",
+                (
+                    json.dumps(config, ensure_ascii=False),
+                    len(planned_jobs),
+                    now,
+                    run_id,
+                ),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                "plan-confirmed",
+                "info",
+                {
+                    "selectedCount": len(planned_jobs),
+                    "companies": [job.get("companyName", "") for job in planned_jobs],
+                },
+            )
+        return self.get_run(run_id)
+
     def claim_next_run(self, runner_id: str) -> dict[str, Any] | None:
         """Atomically claim the oldest runnable task for one host runner."""
         self.initialize()

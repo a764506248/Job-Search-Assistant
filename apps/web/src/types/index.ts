@@ -77,6 +77,16 @@ export interface AutomationRun {
   updatedAt: string
 }
 
+export interface PlannedAutomationJob {
+  jobId: string
+  url: string
+  title: string
+  companyName: string
+  greeting?: string
+  salaryText?: string
+  location?: string
+}
+
 export interface AutomationEvent {
   id: number
   runId: number

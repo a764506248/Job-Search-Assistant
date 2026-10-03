@@ -48,7 +48,9 @@
 → 一键启动
 → 按引导安装浏览器扩展
 → 导入并确认简历
-→ 点击“开始投递”
+→ 创建投递计划
+→ 核对企业、岗位和问候语，取消不想投递的项目
+→ 点击“确认并启动”
 ```
 
 阶段范围、API、状态机、安全边界、迁移和验收标准见[产品化路线图](docs/PRODUCTIZATION_ROADMAP.md)，当前代码状态与协议说明见[自动投递技术设计](docs/AUTOMATION_TECHNICAL_DESIGN.md)。
@@ -57,7 +59,7 @@
 
 ![Job Search Assistant 整体工作流](docs/assets/system-workflow.svg)
 
-系统以本地 API 和 SQLite 为业务事实源。新链路由 Docker 内置 runner 认领已有岗位计划，再通过统一 Chrome 扩展执行白名单浏览器动作；旧版 Skill + Kimi WebBridge 仅作为回退链路。任务没有岗位计划、runner 不在线或扩展未连接时会明确阻止启动，不再显示为虚假的“运行中”。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
+系统以本地 API 和 SQLite 为业务事实源。创建任务只会生成草稿并展示待投企业、岗位与问候语；用户勾选并点击“确认并启动”后，服务端才冻结最终清单，Docker 内置 runner 才能认领任务，再通过统一 Chrome 扩展执行白名单浏览器动作。旧版 Skill + Kimi WebBridge 仅作为回退链路。任务没有岗位计划、runner 不在线或扩展未连接时会明确阻止启动，不再显示为虚假的“运行中”。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
 
 ## 自动投递 Skill
 

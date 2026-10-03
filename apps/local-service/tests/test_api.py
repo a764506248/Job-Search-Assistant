@@ -188,6 +188,85 @@ def test_automation_run_blocks_zero_job_plan_before_running(tmp_path) -> None:
     assert "没有可执行的岗位计划" in started.json()["stopReason"]
 
 
+def test_automation_run_starts_only_with_user_confirmed_jobs(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+    jobs = [
+        {
+            "jobId": "job-1",
+            "url": "https://www.zhipin.com/job_detail/job-1.html",
+            "title": "AI Agent 工程师",
+            "companyName": "甲公司",
+            "greeting": "您好，想沟通岗位一。",
+        },
+        {
+            "jobId": "job-2",
+            "url": "https://www.zhipin.com/job_detail/job-2.html",
+            "title": "RAG 工程师",
+            "companyName": "乙公司",
+            "greeting": "您好，想沟通岗位二。",
+        },
+    ]
+    created = client.post(
+        "/v1/automation/runs",
+        json={"targetCount": 2, "config": {"plannedJobs": jobs}},
+    ).json()
+
+    started = client.post(
+        f"/v1/automation/runs/{created['id']}/start",
+        json={"selectedJobIds": ["job-2"]},
+    )
+
+    assert started.status_code == 200
+    payload = started.json()
+    assert payload["targetCount"] == 1
+    assert [job["jobId"] for job in payload["configSnapshot"]["plannedJobs"]] == [
+        "job-2"
+    ]
+    events = client.get(
+        f"/v1/automation/runs/{created['id']}/events"
+    ).json()["items"]
+    assert [event["eventType"] for event in events] == [
+        "run-created",
+        "plan-confirmed",
+        "status-changed",
+        "status-changed",
+    ]
+    assert events[1]["payload"]["companies"] == ["乙公司"]
+
+
+def test_automation_run_rejects_empty_confirmed_plan(tmp_path) -> None:
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())
+    )
+    created = client.post(
+        "/v1/automation/runs",
+        json={
+            "targetCount": 1,
+            "config": {
+                "plannedJobs": [
+                    {
+                        "jobId": "job-1",
+                        "url": "https://www.zhipin.com/job_detail/job-1.html",
+                        "title": "AI Agent 工程师",
+                        "companyName": "示例公司",
+                    }
+                ]
+            },
+        },
+    ).json()
+
+    response = client.post(
+        f"/v1/automation/runs/{created['id']}/start",
+        json={"selectedJobIds": []},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "请至少选择一个待投岗位"
+    assert client.get(f"/v1/automation/runs/{created['id']}").json()["status"] == "draft"
+
+
 def test_runner_heartbeat_endpoint_updates_setup_check(tmp_path) -> None:
     client = TestClient(
         create_app(tmp_path / "jobs.sqlite3", embedder=MaterialPreviewEmbedder())

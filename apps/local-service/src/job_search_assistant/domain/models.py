@@ -124,6 +124,10 @@ class AutomationRunCreateRequest(ApiModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class AutomationRunStartRequest(ApiModel):
+    selected_job_ids: list[str] | None = None
+
+
 class AutomationRun(ApiModel):
     id: int
     status: str

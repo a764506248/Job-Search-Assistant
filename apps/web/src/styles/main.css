@@ -427,6 +427,20 @@ td small { color: var(--muted); }
 .automation-event-controls { display: flex; align-items: center; gap: 7px; }
 .automation-report-summary { display: flex; gap: 14px; margin: 12px 18px 0; color: var(--muted); font-size: 10px; }
 .automation-report-summary strong { color: var(--ink); }
+.automation-plan { padding: 14px 18px 18px; }
+.automation-plan-toolbar { padding: 11px 12px; border-radius: 9px; background: var(--surface-soft); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 10px; }
+.automation-plan-toolbar label { display: flex; align-items: center; gap: 7px; color: var(--ink); font-weight: 700; cursor: pointer; }
+.automation-plan input[type='checkbox'] { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--brand); }
+.automation-plan-list { max-height: 530px; margin-top: 10px; overflow: auto; display: grid; gap: 8px; }
+.automation-plan-job { padding: 13px; border: 1px solid var(--line); border-radius: 10px; display: flex; align-items: flex-start; gap: 11px; background: #fff; cursor: pointer; transition: border-color .18s, background .18s; }
+.automation-plan-job.chosen { border-color: #a9d5c6; background: #f5fbf8; }
+.automation-plan-job-copy { min-width: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+.automation-plan-job-copy strong { overflow-wrap: anywhere; }
+.automation-plan-job-copy b { color: var(--brand-deep); font-size: 10px; text-align: right; }
+.automation-plan-job-copy small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; }
+.automation-plan-job-copy em { grid-column: 1 / -1; padding-top: 7px; border-top: 1px dashed var(--line); color: #52645b; font-size: 9px; line-height: 1.6; font-style: normal; }
+.automation-plan footer { margin-top: 12px; padding-top: 13px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.automation-plan footer p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.6; }
 .automation-events ol { margin: 0; padding: 10px 18px 18px; list-style: none; }
 .automation-events li { display: grid; grid-template-columns: 30px 1fr auto; gap: 5px 9px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 10px; }
 .automation-events li p { grid-column: 2 / -1; margin: 0; color: var(--muted); }
@@ -483,4 +497,7 @@ td small { color: var(--muted); }
   .setup-next-step { flex-direction: column; }
   .setup-next-step .ant-btn { width: 100%; }
   .automation-command { align-items: stretch; flex-direction: column; }
+  .automation-plan-toolbar, .automation-plan footer { align-items: stretch; flex-direction: column; }
+  .automation-plan-job-copy { grid-template-columns: 1fr; }
+  .automation-plan-job-copy b, .automation-plan-job-copy small, .automation-plan-job-copy em { grid-column: 1; text-align: left; }
 }

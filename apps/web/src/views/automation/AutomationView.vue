@@ -17,7 +17,7 @@
         <article v-for="run in runs" :key="run.id" :class="{ selected: selected?.id === run.id }" @click="selectRun(run)">
           <div><strong>#{{ run.id }} · {{ statusName(run.status) }}</strong><span>计划 {{ plannedCount(run) }} · 目标 {{ run.targetCount }} · 成功 {{ run.successCount }} · 失败 {{ run.failureCount }}</span><span>{{ run.runnerId ? `执行器 ${run.runnerId} · 心跳 ${run.heartbeatAt ? formatTime(run.heartbeatAt) : '等待中'}` : '尚未被执行器认领' }}</span></div>
           <div class="automation-actions" @click.stop>
-            <a-button v-if="run.status === 'draft' || run.status === 'interrupted'" size="small" @click="control(run, 'start')">启动</a-button>
+            <a-button v-if="run.status === 'interrupted'" size="small" @click="control(run, 'start')">重新启动</a-button>
             <a-button v-if="run.status === 'running'" size="small" @click="control(run, 'pause')">暂停</a-button>
             <a-button v-if="run.status === 'paused'" size="small" @click="control(run, 'resume')">继续</a-button>
             <a-button v-if="['running','paused'].includes(run.status)" size="small" danger @click="control(run, 'stop')">停止</a-button>
@@ -26,7 +26,7 @@
       </section>
       <section class="panel automation-events">
         <div class="panel-heading">
-          <h2>实时事件</h2>
+          <h2>{{ selected?.status === 'draft' ? '待执行企业' : '实时事件' }}</h2>
           <div class="automation-event-controls">
             <span>{{ selected ? `任务 #${selected.id}` : '请选择任务' }}</span>
             <a-button v-if="selected?.status === 'running'" size="small" @click="control(selected, 'pause')">暂停投递</a-button>
@@ -34,6 +34,29 @@
             <a-button v-if="selected && ['running','paused'].includes(selected.status)" size="small" danger @click="control(selected, 'stop')">停止</a-button>
           </div>
         </div>
+        <div v-if="selected?.status === 'draft'" class="automation-plan">
+          <div v-if="plannedJobs.length" class="automation-plan-toolbar">
+            <label><input type="checkbox" :checked="allJobsSelected" @change="toggleAllJobs" /> 全选当前计划</label>
+            <span>已选 {{ selectedJobIds.length }} / {{ plannedJobs.length }} 个岗位 · {{ selectedCompanyCount }} 家企业</span>
+          </div>
+          <div v-if="!plannedJobs.length" class="library-empty">当前任务没有可执行岗位，请先采集和分析岗位后重新创建。</div>
+          <div v-else class="automation-plan-list">
+            <label v-for="job in plannedJobs" :key="job.jobId" class="automation-plan-job" :class="{ chosen: selectedJobIds.includes(job.jobId) }">
+              <input type="checkbox" :checked="selectedJobIds.includes(job.jobId)" @change="toggleJob(job.jobId)" />
+              <span class="automation-plan-job-copy">
+                <strong>{{ job.companyName || '未知企业' }}</strong>
+                <b>{{ job.title || '未知岗位' }}</b>
+                <small v-if="job.salaryText || job.location">{{ [job.salaryText, job.location].filter(Boolean).join(' · ') }}</small>
+                <em>{{ job.greeting || '未生成问候语' }}</em>
+              </span>
+            </label>
+          </div>
+          <footer v-if="plannedJobs.length">
+            <p>只有勾选的岗位会写入最终计划。点击后执行器才会认领任务并操作浏览器。</p>
+            <a-button type="primary" :disabled="!selectedJobIds.length" :loading="starting" @click="confirmAndStart">确认并启动（{{ selectedJobIds.length }}）</a-button>
+          </footer>
+        </div>
+        <template v-else>
         <div v-if="selected?.stopReason" class="automation-blocker" :class="{ neutral: !isErrorStatus(selected.status) }">{{ reasonText(selected.stopReason) }}</div>
         <div v-if="report" class="automation-report-summary">
           <strong>投递结果</strong>：成功 {{ report.run.successCount }} · 失败 {{ report.run.failureCount }}
@@ -41,6 +64,7 @@
         </div>
         <div v-if="!events.length" class="library-empty">暂无事件。</div>
         <ol v-else><li v-for="event in events" :key="event.id"><span>#{{ event.sequence }}</span><strong>{{ eventName(event.eventType) }}</strong><time>{{ formatTime(event.createdAt) }}</time><p>{{ eventText(event) }}</p></li></ol>
+        </template>
       </section>
     </div>
   </div>
@@ -52,26 +76,32 @@ import { message } from 'ant-design-vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
 import { formatTime } from '../../utils/format'
-import type { AutomationEvent, AutomationReport, AutomationRun, BrowserProtocolStatus, SetupStatus } from '../../types'
+import type { AutomationEvent, AutomationReport, AutomationRun, BrowserProtocolStatus, PlannedAutomationJob, SetupStatus } from '../../types'
 
 const targetCount = ref(20)
 const creating = ref(false)
+const starting = ref(false)
 const runs = ref<AutomationRun[]>([])
 const selected = ref<AutomationRun>()
 const events = ref<AutomationEvent[]>([])
 const report = ref<AutomationReport>()
 const setup = ref<SetupStatus>()
 const browser = ref<BrowserProtocolStatus>()
+const selectedJobIds = ref<string[]>([])
+const selectionRunId = ref<number>()
 let stream: EventSource | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const names: Record<string, string> = { draft: '待启动', validating: '校验中', ready: '已就绪', running: '运行中', paused: '已暂停', stopping: '停止中', interrupted: '已中断', completed: '已完成', failed: '失败', blocked: '被阻止', cancelled: '已取消' }
-const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'status-changed': '状态变化', 'status-corrected': '状态已修正', 'runner-awaiting-host': '等待执行器', 'runner-claimed': '执行器已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
+const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'plan-confirmed': '投递清单已确认', 'status-changed': '状态变化', 'status-corrected': '状态已修正', 'runner-awaiting-host': '等待执行器', 'runner-claimed': '执行器已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
 const statusName = (status: string) => names[status] || status
 const eventName = (event: string) => eventNames[event] || event
 const runnerReady = computed(() => setup.value?.checks.some(item => item.key === 'automation-runner' && item.status === 'ready') ?? false)
 const actionSuccessCount = computed(() => report.value?.actions.filter(item => item.status === 'succeeded').length ?? 0)
 const actionFailureCount = computed(() => report.value?.actions.filter(item => item.status === 'failed').length ?? 0)
+const plannedJobs = computed<PlannedAutomationJob[]>(() => Array.isArray(selected.value?.configSnapshot.plannedJobs) ? selected.value!.configSnapshot.plannedJobs : [])
+const allJobsSelected = computed(() => plannedJobs.value.length > 0 && selectedJobIds.value.length === plannedJobs.value.length)
+const selectedCompanyCount = computed(() => new Set(plannedJobs.value.filter(job => selectedJobIds.value.includes(job.jobId)).map(job => job.companyName)).size)
 const plannedCount = (run: AutomationRun) => Array.isArray(run.configSnapshot.plannedJobs) ? run.configSnapshot.plannedJobs.length : 0
 const isErrorStatus = (status: string) => ['failed', 'blocked', 'cancelled'].includes(status)
 const reasonText = (reason: string) => ({ 'plan-finished': '计划处理结束', 'user-requested': '用户已停止任务' }[reason] || reason)
@@ -80,6 +110,7 @@ const eventText = (event: AutomationEvent) => {
   if (event.payload.message || event.payload.reason) return event.payload.message || event.payload.reason
   if (event.eventType === 'status-changed') return `${statusName(event.payload.from)} → ${statusName(event.payload.to)}`
   if (event.eventType === 'run-created') return `目标 ${event.payload.target} 个岗位`
+  if (event.eventType === 'plan-confirmed') return `已确认 ${event.payload.selectedCount} 个岗位：${(event.payload.companies || []).join('、')}`
   if (event.eventType === 'action-claimed') return `${actionNames[event.payload.actionType] || event.payload.actionType}已开始`
   if (event.eventType === 'action-finished') {
     const label = actionNames[event.payload.actionType] || event.payload.actionType
@@ -89,10 +120,24 @@ const eventText = (event: AutomationEvent) => {
 }
 
 async function load() { const [runList, setupStatus, browserStatus] = await Promise.all([api.automationRuns(), api.setupStatus(), api.browserStatus()]); runs.value = runList.items; setup.value = setupStatus; browser.value = browserStatus }
-async function createRun() { creating.value = true; try { const run = await api.createAutomationRun(targetCount.value); await load(); await selectRun(run); const count = plannedCount(run); count ? message.success(`任务已创建，计划处理 ${count} 个岗位`) : message.warning('任务没有可执行岗位，启动时会被阻止；请先采集岗位后重新创建') } catch (error) { message.error((error as Error).message) } finally { creating.value = false } }
+async function createRun() { creating.value = true; try { const run = await api.createAutomationRun(targetCount.value); await load(); await selectRun(run); const count = plannedCount(run); count ? message.success(`任务已创建，请确认 ${count} 个待投岗位`) : message.warning('任务没有可执行岗位；请先采集岗位后重新创建') } catch (error) { message.error((error as Error).message) } finally { creating.value = false } }
 async function control(run: AutomationRun, action: 'start' | 'pause' | 'resume' | 'stop') { try { selected.value = await api.controlAutomationRun(run.id, action); await load(); await loadEvents(run.id) } catch (error) { message.error((error as Error).message) } }
+function resetPlanSelection(run: AutomationRun) { selectionRunId.value = run.id; selectedJobIds.value = (Array.isArray(run.configSnapshot.plannedJobs) ? run.configSnapshot.plannedJobs : []).map((job: PlannedAutomationJob) => job.jobId) }
+function toggleJob(jobId: string) { selectedJobIds.value = selectedJobIds.value.includes(jobId) ? selectedJobIds.value.filter(id => id !== jobId) : [...selectedJobIds.value, jobId] }
+function toggleAllJobs() { selectedJobIds.value = allJobsSelected.value ? [] : plannedJobs.value.map(job => job.jobId) }
+async function confirmAndStart() {
+  if (!selected.value || !selectedJobIds.value.length) return message.warning('请至少选择一个待投岗位')
+  starting.value = true
+  try {
+    const runId = selected.value.id
+    selected.value = await api.controlAutomationRun(runId, 'start', selectedJobIds.value)
+    message.success(`已确认 ${selectedJobIds.value.length} 个岗位，执行器即将开始处理`)
+    await load()
+    await loadEvents(runId)
+  } catch (error) { message.error((error as Error).message) } finally { starting.value = false }
+}
 async function loadEvents(id: number) { report.value = await api.automationReport(id); events.value = report.value.events; selected.value = report.value.run }
-async function selectRun(run: AutomationRun) { selected.value = run; await loadEvents(run.id); stream?.close(); stream = new EventSource(`/v1/automation/runs/${run.id}/events/stream?after=${events.value.at(-1)?.sequence || 0}`); stream.onmessage = () => loadEvents(run.id) }
+async function selectRun(run: AutomationRun) { selected.value = run; if (selectionRunId.value !== run.id) resetPlanSelection(run); await loadEvents(run.id); stream?.close(); stream = new EventSource(`/v1/automation/runs/${run.id}/events/stream?after=${events.value.at(-1)?.sequence || 0}`); stream.onmessage = () => loadEvents(run.id) }
 
 onMounted(() => { refreshTimer = setInterval(() => { void load(); if (selected.value) void loadEvents(selected.value.id) }, 3000) })
 onBeforeUnmount(() => { stream?.close(); if (refreshTimer) clearInterval(refreshTimer) })
