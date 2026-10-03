@@ -86,3 +86,37 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # 构建完成后自动部署到腾讯云轻量服务器。
+  # 只在打 tag（v*）时触发，避免 main 分支的日常提交把未验证的镜像推上线。
+  # 需要的仓库 Secrets：
+  #   SSH_HOST  - 服务器 IP
+  #   SSH_KEY   - 部署专用私钥（对应服务器 ~/.ssh/authorized_keys 里的公钥）
+  deploy:
+    name: Deploy to server
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ubuntu
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          # local-service 镜像 381MB，实测拉取约 6 分钟，留足余量
+          command_timeout: 20m
+          script: |
+            set -e
+            cd ~/Job-Search-Assistant
+            export JSA_IMAGE_TAG="${{ github.ref_name }}"
+            echo "=== 部署版本: $JSA_IMAGE_TAG ==="
+            docker compose -f docker-compose.server.yml pull
+            docker compose -f docker-compose.server.yml up -d
+            sleep 15
+            echo "=== 容器状态 ==="
+            docker compose -f docker-compose.server.yml ps
+            echo "=== 健康检查 ==="
+            curl -sf http://127.0.0.1/v1/health && echo " ← 通过"
+            curl -sf http://127.0.0.1/healthz && echo " ← nginx 通过"
