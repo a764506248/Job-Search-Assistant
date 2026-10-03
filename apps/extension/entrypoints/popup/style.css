@@ -5,8 +5,6 @@ main { padding: 22px; }
 h1 { margin: 6px 0 12px; font-size: 22px; }
 .status { padding: 10px 12px; border-radius: 10px; background: #fff2df; color: #8b581b; font-size: 13px; }
 .status.ready { background: #def6eb; color: #0b6a4f; }
-label { display: block; margin: 18px 0 7px; color: #52665d; font-size: 12px; }
-input { box-sizing: border-box; width: 100%; padding: 11px 12px; border: 1px solid #bfd3ca; border-radius: 9px; font: 600 18px/1 monospace; letter-spacing: .2em; }
-button { width: 100%; margin-top: 10px; padding: 11px; border: 0; border-radius: 9px; background: #087f5f; color: white; font-weight: 700; cursor: pointer; }
+button { width: 100%; margin-top: 14px; padding: 11px; border: 0; border-radius: 9px; background: #087f5f; color: white; font-weight: 700; cursor: pointer; }
 button:disabled { opacity: .55; cursor: wait; }
 .hint { margin: 14px 0 0; color: #718079; font-size: 11px; line-height: 1.55; }

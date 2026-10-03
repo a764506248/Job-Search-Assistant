@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -7,7 +8,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import (
@@ -82,6 +83,8 @@ from .domain.models import (
     JobCaptureResponse,
     JobEvaluationRequest,
     JobEvaluationResponse,
+    JobInsightRequest,
+    JobInsightResponse,
     JobListResponse,
     JobTrackingUpdate,
     LibraryListResponse,
@@ -92,27 +95,25 @@ from .domain.models import (
     MaterialPreviewResponse,
     MaterialStrategy,
     ProfilePayload,
-    RagChunkListResponse,
-    RagRebuildResponse,
-    RagSearchRequest,
-    RagSearchResponse,
-    RagStatus,
     ResumeConfirmationResponse,
     ResumeImportResponse,
     RiskRuleInput,
     RuleAction,
+    RuleMatch,
     SetupCheck,
     SetupStatusResponse,
     SetupTestRunResponse,
     StoredJob,
 )
+from .domain.salary import evaluate_salary_policy, normalize_salary_text
+from .knowledge import KnowledgeSearchService
 from .project_extraction import (
     GreetingGenerator,
+    JobAnalysisGenerator,
     MaterialPreviewGenerator,
     ModelConnectionTester,
     ProjectExtractor,
 )
-from .rag import RagService
 from .repositories import (
     AutomationRepository,
     ClientLogRepository,
@@ -128,7 +129,41 @@ from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
 logger = logging.getLogger("job_search_assistant.client")
-EXPECTED_SKILL_VERSION = "5.10.0"
+MIN_COLLECTION_EXTENSION_VERSION = (0, 4, 11)
+COLLECTION_BATCH_SIZE = 10
+COLLECTION_BATCH_DEADLINE_MS = 30_000
+MAX_COLLECTION_BATCH_DEADLINE_MS = 330_000
+COLLECTION_FILTER_KEYS = (
+    "jobType",
+    "salary",
+    "experience",
+    "degree",
+    "industry",
+    "scale",
+)
+
+
+def extension_supports_collection(version: object) -> bool:
+    parts = [int(value) for value in re.findall(r"\d+", str(version))[:3]]
+    parts.extend([0] * (3 - len(parts)))
+    return tuple(parts) >= MIN_COLLECTION_EXTENSION_VERSION
+
+
+def browser_protocol_error_message(error: BrowserProtocolError, action: str) -> str:
+    message = str(error)
+    if "browser action timed out" in message:
+        if action == "collect_jobs":
+            return "扩展采集单批职位超时，请适当降低岗位采集间隔"
+        labels = {
+            "session_status": "检查 BOSS 登录状态",
+            "navigate_search": "打开 BOSS 搜索页",
+        }
+        return f"{labels.get(action, '浏览器操作')}超时（30 秒）"
+    if "browser extension disconnected" in message:
+        return "统一 Chrome 扩展连接已断开"
+    if "browser extension is not connected" in message:
+        return "统一 Chrome 扩展未连接"
+    return message
 
 
 def create_router(
@@ -136,11 +171,12 @@ def create_router(
     library_repository: LibraryRepository,
     client_log_repository: ClientLogRepository,
     delivery_repository: DeliveryRepository,
-    rag_service: RagService,
+    knowledge_search: KnowledgeSearchService,
     project_extractor: ProjectExtractor,
     model_tester: ModelConnectionTester,
     material_preview_generator: MaterialPreviewGenerator,
     greeting_generator: GreetingGenerator,
+    job_analysis_generator: JobAnalysisGenerator,
     resume_image_dir: Path,
     automation_repository: AutomationRepository,
     browser_hub: BrowserConnectionHub,
@@ -148,6 +184,45 @@ def create_router(
     router = APIRouter(prefix="/v1")
     greeting_generation_ids: set[int] = set()
     greeting_generation_lock = Lock()
+    collection_lock = asyncio.Lock()
+    scheduled_collection_run_ids: set[int] = set()
+    collection_schedule_lock = Lock()
+
+    def schedule_automation_collection(
+        run_id: int, background_tasks: BackgroundTasks
+    ) -> bool:
+        """Queue one collection pipeline without allowing duplicate in-process work."""
+        with collection_schedule_lock:
+            if run_id in scheduled_collection_run_ids:
+                return False
+            scheduled_collection_run_ids.add(run_id)
+        background_tasks.add_task(run_automation_collection_safely, run_id)
+        return True
+
+    def collection_is_scheduled(run_id: int) -> bool:
+        with collection_schedule_lock:
+            return run_id in scheduled_collection_run_ids
+
+    def another_collection_is_scheduled(run_id: int) -> bool:
+        with collection_schedule_lock:
+            return any(
+                queued_run_id != run_id
+                for queued_run_id in scheduled_collection_run_ids
+            )
+
+    def save_extension_browser_probe(*, boss_logged_in: bool) -> None:
+        previous_probe = library_repository.get_setup_state("browser-probe") or {}
+        library_repository.save_setup_state(
+            "browser-probe",
+            {
+                "webbridgeRunning": True,
+                "kimiExtensionConnected": True,
+                "projectExtensionReady": True,
+                "bossLoggedIn": boss_logged_in,
+                "skillVersion": str(previous_probe.get("skillVersion", "")),
+                "source": "extension",
+            },
+        )
 
     def string_list(value: object) -> list[str]:
         if isinstance(value, list):
@@ -200,12 +275,16 @@ def create_router(
             image_available = True
         except KeyError:
             image_available = False
+        raw_minimum_salary = profile.get("minimumSalaryK", 20)
+        minimum_salary_k = int(
+            20 if raw_minimum_salary is None or raw_minimum_salary == "" else raw_minimum_salary
+        )
         return AutomationConfigResponse(
             target_roles=target_roles,
             target_cities=target_cities,
             city_code=city_code,
             search_keywords=keywords,
-            minimum_salary_k=int(profile.get("minimumSalaryK", 20) or 20),
+            minimum_salary_k=minimum_salary_k,
             daily_target=int(profile.get("dailyTarget", 20) or 20),
             minimum_suitability_score=int(
                 profile.get("minimumSuitabilityScore", 60) or 60
@@ -229,7 +308,6 @@ def create_router(
             if record["data"].get("confirmationStatus", "confirmed") == "confirmed"
         ]
         pending_resumes = len(all_resumes) - len(resumes)
-        rag = rag_service.status()
         checks = [
             SetupCheck(
                 key="local-service",
@@ -238,28 +316,6 @@ def create_router(
                 message=f"本地 API v{__version__} 已运行",
             )
         ]
-
-        if rag["embeddingAvailable"]:
-            checks.append(
-                SetupCheck(
-                    key="embedding",
-                    label="向量服务",
-                    status="ready",
-                    message=f"向量模型 {rag.get('model') or '已连接'} 可用",
-                )
-            )
-        else:
-            checks.append(
-                SetupCheck(
-                    key="embedding",
-                    label="向量服务",
-                    status="blocked",
-                    message="向量服务未就绪，请检查 Docker 服务",
-                    blocking=True,
-                    action_label="查看安装说明",
-                    action_path="/setup#services",
-                )
-            )
 
         verified_models = [
             record
@@ -319,23 +375,6 @@ def create_router(
                 blocking=not resumes,
                 action_label="管理简历" if resumes else "导入简历",
                 action_path="/resumes",
-            )
-        )
-
-        indexed_chunks = int(rag.get("chunks", 0) or 0)
-        checks.append(
-            SetupCheck(
-                key="knowledge-index",
-                label="知识索引",
-                status="ready" if indexed_chunks else "blocked",
-                message=(
-                    f"已建立 {indexed_chunks} 个知识片段"
-                    if indexed_chunks
-                    else "知识索引为空，请导入简历或重建索引"
-                ),
-                blocking=not indexed_chunks,
-                action_label="查看知识库",
-                action_path="/knowledge",
             )
         )
 
@@ -410,30 +449,29 @@ def create_router(
         if not probe_fresh:
             browser_probe = None
 
-        unified_extension_ready = bool(browser_hub.status()["connected"])
-
-        webbridge_ready = unified_extension_ready or bool(
-            browser_probe
-            and browser_probe.get("webbridgeRunning")
-            and browser_probe.get("kimiExtensionConnected")
+        browser_state = browser_hub.status()
+        browser_connected = bool(browser_state["connected"])
+        extension_version = browser_state.get("extensionVersion")
+        unified_extension_ready = browser_connected and extension_supports_collection(
+            extension_version
         )
+
         checks.append(
             SetupCheck(
                 key="kimi-webbridge",
-                label="浏览器控制通道",
-                status="ready" if webbridge_ready else ("blocked" if browser_probe else "pending"),
+                label="统一浏览器扩展",
+                status="ready" if unified_extension_ready else "blocked",
                 message=(
-                    "统一扩展已通过本地协议连接"
+                    f"Chrome 扩展 v{extension_version} 已连接，可搜索、采集并执行投递"
                     if unified_extension_ready
-                    else "WebBridge 正在运行，Kimi 浏览器扩展已连接"
-                    if webbridge_ready
                     else (
-                        "WebBridge 或 Kimi 浏览器扩展未连接"
-                        if browser_probe
-                        else "尚未检查 Kimi WebBridge"
+                        f"当前扩展 v{extension_version} 不支持当前自动投递协议，"
+                        "请重新加载 v0.4.11 或更高版本"
+                        if browser_connected
+                        else "统一 Chrome 扩展未连接；无需安装 Kimi WebBridge"
                     )
                 ),
-                blocking=not webbridge_ready,
+                blocking=not unified_extension_ready,
                 action_label="检查浏览器环境",
                 action_path="/setup#browser",
             )
@@ -470,43 +508,49 @@ def create_router(
         )
 
         boss_logged_in = bool(browser_probe and browser_probe.get("bossLoggedIn"))
+        boss_login_checked = browser_probe is not None
         checks.append(
             SetupCheck(
                 key="boss-login",
                 label="BOSS 登录",
-                status="ready" if boss_logged_in else ("blocked" if browser_probe else "pending"),
+                status=(
+                    "ready"
+                    if boss_logged_in
+                    else "blocked"
+                    if boss_login_checked
+                    else "pending"
+                ),
                 message=(
                     "已确认 BOSS 账号处于登录状态"
                     if boss_logged_in
-                    else ("BOSS 登录状态未通过确认" if browser_probe else "尚未确认 BOSS 登录状态")
+                    else (
+                        "BOSS 登录状态未通过确认"
+                        if boss_login_checked
+                        else "启动采集时将由统一扩展自动确认 BOSS 登录状态"
+                        if unified_extension_ready
+                        else "尚未确认 BOSS 登录状态"
+                    )
                 ),
-                blocking=not boss_logged_in,
+                blocking=not boss_logged_in and (
+                    boss_login_checked or not unified_extension_ready
+                ),
                 action_label="检查浏览器环境",
                 action_path="/setup#browser",
             )
         )
 
         skill_version = str(browser_probe.get("skillVersion", "")) if browser_probe else ""
-        skill_ready = unified_extension_ready or skill_version == EXPECTED_SKILL_VERSION
         checks.append(
             SetupCheck(
                 key="skill-version",
-                label="BOSS Skill",
-                status="ready" if skill_ready else ("blocked" if skill_version else "pending"),
+                label="旧版 BOSS Skill（可选）",
+                status="ready",
                 message=(
-                    "统一扩展模式无需安装 BOSS Skill"
-                    if unified_extension_ready
-                    else f"BOSS Skill v{EXPECTED_SKILL_VERSION} 已安装"
-                    if skill_ready
-                    else (
-                        f"需要 v{EXPECTED_SKILL_VERSION}，当前为 v{skill_version}"
-                        if skill_version
-                        else "尚未确认 BOSS Skill 版本"
-                    )
+                    f"检测到旧版 Skill v{skill_version}；新流程不会调用它"
+                    if skill_version
+                    else "新流程不需要安装 Skill；职位采集由统一 Chrome 扩展完成"
                 ),
-                blocking=not skill_ready,
-                action_label="检查浏览器环境",
-                action_path="/setup#browser",
+                blocking=False,
             )
         )
         priority = {"ready": 0, "warning": 1, "pending": 2, "blocked": 3}
@@ -535,13 +579,6 @@ def create_router(
         data["apiKeyHint"] = f"••••{api_key[-4:]}" if api_key else ""
         return LibraryRecord.model_validate(safe_record)
 
-    def sync_knowledge_index() -> None:
-        """Best-effort automatic entity index sync; data writes remain available offline."""
-        try:
-            rag_service.rebuild()
-        except RuntimeError as error:
-            logger.warning("knowledge index sync skipped: %s", error)
-
     def build_job_material_context(
         job: StoredJob,
         *,
@@ -564,13 +601,7 @@ def create_router(
         query = "\n".join(
             part for part in [job.title, " ".join(job.skills), job.description] if part
         )
-        try:
-            evidence = rag_service.search(query, 8)
-        except RuntimeError as error:
-            logger.warning(
-                "greeting vector evidence unavailable for job=%s: %s", job.id, error
-            )
-            evidence = []
+        evidence = knowledge_search.search(query, 8)
         match = build_automatic_match(match_request, evidence)
         profile = library_repository.get_profile()
         resumes = [
@@ -582,7 +613,7 @@ def create_router(
         context = {
             "job": job.model_dump(mode="json", by_alias=True),
             "profile": profile,
-            "vectorEvidence": [
+            "localEvidence": [
                 item.model_dump(mode="json", by_alias=True) for item in match.evidence
             ],
             "defaultGreeting": default_greeting,
@@ -594,6 +625,52 @@ def create_router(
             },
         }
         return context, default_greeting, match
+
+    def build_local_job_insight(
+        job: StoredJob, match: AutomaticJobMatchResponse
+    ) -> dict[str, object]:
+        strengths = [
+            f"{item.source_name}：{item.content[:120]}"
+            for item in match.evidence[:4]
+        ]
+        gaps = [
+            requirement.explanation
+            for requirement in match.analysis.risk_requirements
+        ]
+        if not match.evidence:
+            gaps.append("当前知识库没有检索到足够的个人经历证据，匹配结论需要人工核实")
+        if match.customization_confidence < 80:
+            gaps.append(
+                f"定制材料可信度为 {match.customization_confidence}，"
+                "建议补充与岗位相关的项目或经历证据"
+            )
+
+        strategy_labels = {
+            MaterialStrategy.CUSTOM: "可基于现有证据定制问候语和简历",
+            MaterialStrategy.DEFAULT: "建议先使用默认材料，并人工确认岗位要求",
+            MaterialStrategy.BLOCKED: "当前规则建议暂停投递，先处理风险或补足信息",
+        }
+        recommendations = [
+            strategy_labels[match.decision.material_strategy],
+            *match.decision.reasons,
+        ]
+        recommendations = list(dict.fromkeys(recommendations))
+        focus = job.skills[:4] or [job.title]
+        interview_questions = [
+            f"请准备一个能够证明你具备“{item}”能力的真实案例，说明你的职责、行动和结果。"
+            for item in focus
+        ]
+        conclusion = "建议进一步评估" if match.decision.should_deliver else "当前不建议直接投递"
+        return {
+            "summary": (
+                f"岗位适合度 {match.suitability_score}，材料定制可信度 "
+                f"{match.customization_confidence}；{conclusion}。"
+            ),
+            "strengths": strengths,
+            "gaps": list(dict.fromkeys(gaps)),
+            "recommendations": recommendations,
+            "interviewQuestions": interview_questions,
+        }
 
     def generate_and_store_greeting(snapshot_id: int) -> None:
         try:
@@ -607,7 +684,7 @@ def create_router(
                     for key in (
                         "job",
                         "profile",
-                        "vectorEvidence",
+                        "localEvidence",
                         "defaultGreeting",
                         "match",
                     )
@@ -764,40 +841,210 @@ def create_router(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="automation run not found") from error
 
+    def validate_planned_job_salaries(
+        config_snapshot: dict[str, object],
+        planned_jobs: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        current_config = automation_config()
+        raw_minimum_salary = config_snapshot.get("minimumSalaryK", 0)
+        raw_rules = config_snapshot.get("matchingRules", [])
+        try:
+            snapshot_minimum_salary_k = int(raw_minimum_salary or 0)
+            minimum_salary_k = max(
+                snapshot_minimum_salary_k,
+                current_config.minimum_salary_k,
+            )
+            if not isinstance(raw_rules, list):
+                raise ValueError("matchingRules must be a list")
+            snapshot_rules = [RiskRuleInput.model_validate(rule) for rule in raw_rules]
+        except (TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=422,
+                detail="任务薪资策略配置无效，请重新采集职位并创建任务",
+            ) from error
+        rules_by_signature: dict[
+            tuple[str, str, tuple[str, ...], RuleAction, int, bool], RiskRuleInput
+        ] = {}
+        for rule in [*snapshot_rules, *current_config.matching_rules]:
+            signature = (
+                rule.id,
+                rule.name,
+                tuple(rule.patterns),
+                rule.action,
+                rule.score_penalty,
+                rule.enabled,
+            )
+            rules_by_signature[signature] = rule
+        rules = list(rules_by_signature.values())
+
+        normalized_jobs: list[dict[str, object]] = []
+        failures: list[str] = []
+        for item in planned_jobs:
+            if not isinstance(item, dict):
+                failures.append("任务包含无法识别的岗位计划")
+                continue
+            job = dict(item)
+            normalized_salary = normalize_salary_text(
+                str(job["salaryText"]) if job.get("salaryText") is not None else None
+            )
+            job["salaryText"] = normalized_salary
+            normalized_jobs.append(job)
+            salary_policy = evaluate_salary_policy(
+                normalized_salary,
+                minimum_salary_k=minimum_salary_k,
+                rules=rules,
+            )
+            if salary_policy.allowed:
+                continue
+            label = str(
+                job.get("companyName")
+                or job.get("title")
+                or job.get("jobId")
+                or "未知岗位"
+            )
+            reasons = "；".join(
+                violation.reason for violation in salary_policy.violations
+            )
+            failures.append(f"{label}：{reasons}")
+
+        if failures:
+            raise HTTPException(
+                status_code=422,
+                detail="薪资策略校验未通过，已阻止启动：" + "；".join(failures),
+            )
+        return normalized_jobs
+
+    def approved_browser_payload(
+        run: dict[str, object], request: AutomationBrowserActionRequest
+    ) -> dict[str, object]:
+        """Validate a send capability and replace it with server-owned evidence.
+
+        The approval token is a runner-to-API capability.  It is deliberately
+        removed before dispatch so neither the extension nor browser page can
+        observe or replay it.
+        """
+        payload = dict(request.payload)
+        if request.action not in {"send_greeting", "send_resume"}:
+            return payload
+        if run.get("status") != "running":
+            raise HTTPException(
+                status_code=409,
+                detail="发送操作仅允许在已确认且运行中的任务执行",
+            )
+        config = run.get("config_snapshot")
+        if not isinstance(config, dict):
+            raise HTTPException(status_code=409, detail="任务缺少已确认的投递清单")
+        confirmation = config.get("planConfirmation")
+        planned_jobs = config.get("plannedJobs")
+        if not isinstance(confirmation, dict) or not isinstance(planned_jobs, list):
+            raise HTTPException(status_code=409, detail="任务缺少已确认的投递清单")
+        selected_job_ids = confirmation.get("selectedJobIds")
+        supplied_token = payload.get("approvalToken")
+        if (
+            confirmation.get("status") != "confirmed"
+            or not isinstance(selected_job_ids, list)
+            or request.job_id not in {str(job_id) for job_id in selected_job_ids}
+            or not isinstance(supplied_token, str)
+            or not automation_repository.approval_token_matches(
+                int(run["id"]), supplied_token
+            )
+        ):
+            raise HTTPException(status_code=409, detail="发送操作未获得当前投递清单授权")
+        planned_job = next(
+            (
+                job
+                for job in planned_jobs
+                if isinstance(job, dict) and str(job.get("jobId", "")) == request.job_id
+            ),
+            None,
+        )
+        if planned_job is None:
+            raise HTTPException(status_code=409, detail="发送岗位不属于已确认的投递清单")
+        expected_fields = {
+            "expectedJobId": request.job_id,
+            "expectedTitle": str(planned_job.get("title", "")),
+            "expectedCompany": str(planned_job.get("companyName", "")),
+        }
+        if request.action == "send_greeting":
+            expected_fields["text"] = str(planned_job.get("greeting", ""))
+        if any(payload.get(key) != value or not value for key, value in expected_fields.items()):
+            raise HTTPException(
+                status_code=409,
+                detail="发送内容与用户确认的投递清单不一致",
+            )
+        payload.pop("approvalToken", None)
+        payload.pop("userConfirmed", None)
+        payload.pop("planConfirmed", None)
+        payload["planConfirmed"] = True
+        return payload
+
     @router.post("/automation/runs", response_model=AutomationRun, status_code=201)
-    def create_automation_run(request: AutomationRunCreateRequest) -> AutomationRun:
+    async def create_automation_run(
+        request: AutomationRunCreateRequest, background_tasks: BackgroundTasks
+    ) -> AutomationRun:
         config = automation_config().model_dump(mode="json", by_alias=True)
         config.update(request.config)
+        should_auto_collect = "plannedJobs" not in config
         if "plannedJobs" not in config:
-            planned_jobs: list[dict[str, object]] = []
-            for job in job_repository.list_recent(limit=min(request.target_count * 3, 500)):
-                if job.has_communicated:
-                    continue
-                _, default_greeting, match = build_job_material_context(
-                    job,
-                    minimum_suitability_score=int(config["minimumSuitabilityScore"]),
-                    minimum_customization_confidence=int(
-                        config["minimumCustomizationConfidence"]
-                    ),
-                    rules=matching_rules(),
-                )
-                if not match.decision.should_deliver:
-                    continue
-                planned_jobs.append(
-                    {
-                        "jobId": job.platform_job_id,
-                        "url": job.url,
-                        "title": job.title,
-                        "companyName": job.company_name,
-                        "greeting": job.generated_greeting or default_greeting,
-                    }
-                )
-                if len(planned_jobs) >= request.target_count:
-                    break
-            config["plannedJobs"] = planned_jobs
-        return AutomationRun.model_validate(
+            config["plannedJobs"] = []
+            config["collection"] = {
+                "status": "pending",
+                "phase": "queued",
+                "source": "extension",
+                "attemptId": 1,
+                "collectedCount": 0,
+                "analyzedCount": 0,
+                "approvedCount": 0,
+                "rejectedCount": 0,
+                "ruleRejectedCount": 0,
+                "duplicateCount": 0,
+                "materialErrorCount": 0,
+                "analysisErrorCount": 0,
+                "reviewedJobs": [],
+                "skippedCount": 0,
+                "batchNumber": 0,
+                "batchLimit": 0,
+                "lastBatchCount": 0,
+                "partial": False,
+                "currentKeyword": None,
+                "error": None,
+                "queuedAt": datetime.now(UTC).isoformat(),
+            }
+        elif "collection" not in config:
+            planned_jobs = config.get("plannedJobs")
+            config["collection"] = {
+                "status": "ready",
+                "phase": "awaiting_confirmation",
+                "source": "provided",
+                "attemptId": 0,
+                "collectedCount": len(planned_jobs) if isinstance(planned_jobs, list) else 0,
+                "analyzedCount": len(planned_jobs) if isinstance(planned_jobs, list) else 0,
+                "approvedCount": len(planned_jobs) if isinstance(planned_jobs, list) else 0,
+                "rejectedCount": 0,
+                "ruleRejectedCount": 0,
+                "duplicateCount": 0,
+                "materialErrorCount": 0,
+                "analysisErrorCount": 0,
+                "reviewedJobs": [],
+                "currentKeyword": None,
+                "error": None,
+            }
+        created = AutomationRun.model_validate(
             automation_repository.create_run(config, request.target_count)
         )
+        if should_auto_collect:
+            automation_repository.append_event(
+                created.id,
+                "collection-queued",
+                "info",
+                {
+                    "attemptId": 1,
+                    "phase": "queued",
+                    "message": "任务创建后自动进入扩展采集与本地分析流水线",
+                },
+            )
+            schedule_automation_collection(created.id, background_tasks)
+        return created
 
     @router.get("/automation/runs", response_model=AutomationRunListResponse)
     def list_automation_runs() -> AutomationRunListResponse:
@@ -812,8 +1059,10 @@ def create_router(
         request: AutomationHeartbeatRequest,
     ) -> AutomationRunnerClaimResponse:
         run = automation_repository.claim_next_run(request.runner_id)
+        approval_token = run.pop("approval_token", None) if run else None
         return AutomationRunnerClaimResponse(
-            run=AutomationRun.model_validate(run) if run else None
+            run=AutomationRun.model_validate(run) if run else None,
+            approval_token=approval_token,
         )
 
     @router.post("/automation/runs/{run_id}/heartbeat", response_model=AutomationRun)
@@ -876,7 +1125,8 @@ def create_router(
                 detail="send actions require expectedTitle and expectedCompany",
             )
         try:
-            automation_repository.heartbeat(run_id, request.runner_id)
+            claimed_run = automation_repository.heartbeat(run_id, request.runner_id)
+            dispatch_payload = approved_browser_payload(claimed_run, request)
             action, execute = automation_repository.claim_action(
                 run_id, request.job_id, request.action
             )
@@ -910,7 +1160,7 @@ def create_router(
             result = await browser_hub.dispatch(
                 run_id=run_id,
                 action=request.action,
-                payload=request.payload,
+                payload=dispatch_payload,
                 deadline_ms=request.deadline_ms,
             )
             parsed = BrowserActionResponse.model_validate(result)
@@ -981,6 +1231,11 @@ def create_router(
         run_id: int, request: AutomationRunStartRequest | None = None
     ) -> AutomationRun:
         run = automation_run(run_id)
+        if collection_lock.locked() or another_collection_is_scheduled(run_id):
+            raise HTTPException(
+                status_code=409,
+                detail="职位采集或本地分析仍在进行，请等待企业确认清单生成",
+            )
         if run.status == "interrupted":
             planned_jobs = run.config_snapshot.get("plannedJobs", [])
             if not isinstance(planned_jobs, list) or not planned_jobs:
@@ -991,6 +1246,7 @@ def create_router(
                         "没有可执行的岗位计划；请先采集岗位，再新建任务",
                     )
                 )
+            validate_planned_job_salaries(run.config_snapshot, planned_jobs)
             status_result = setup_status()
             blockers = [
                 check.label
@@ -1011,28 +1267,34 @@ def create_router(
         ]
         if active:
             raise HTTPException(status_code=409, detail="another automation run is active")
-        if request is not None and request.selected_job_ids is not None:
-            requested_ids = request.selected_job_ids
-            if not requested_ids:
-                raise HTTPException(status_code=422, detail="请至少选择一个待投岗位")
-            if len(requested_ids) != len(set(requested_ids)):
-                raise HTTPException(status_code=422, detail="待投岗位不能重复选择")
-            planned_jobs = run.config_snapshot.get("plannedJobs", [])
-            if not isinstance(planned_jobs, list):
-                planned_jobs = []
-            jobs_by_id = {
-                str(job.get("jobId")): job
-                for job in planned_jobs
-                if isinstance(job, dict) and job.get("jobId")
-            }
-            missing_ids = [job_id for job_id in requested_ids if job_id not in jobs_by_id]
-            if missing_ids:
-                raise HTTPException(status_code=422, detail="所选岗位不属于当前任务计划")
-            run = AutomationRun.model_validate(
-                automation_repository.confirm_plan(
-                    run_id, [jobs_by_id[job_id] for job_id in requested_ids]
-                )
+        collection = run.config_snapshot.get("collection", {})
+        if isinstance(collection, dict) and collection.get("status") != "ready":
+            raise HTTPException(status_code=409, detail="请先通过 Chrome 扩展完成职位采集")
+        if request is None or not request.selected_job_ids:
+            raise HTTPException(status_code=422, detail="请先确认至少一个待投企业")
+        requested_ids = request.selected_job_ids
+        if len(requested_ids) != len(set(requested_ids)):
+            raise HTTPException(status_code=422, detail="待投岗位不能重复选择")
+        planned_jobs = run.config_snapshot.get("plannedJobs", [])
+        if not isinstance(planned_jobs, list):
+            planned_jobs = []
+        jobs_by_id = {
+            str(job.get("jobId")): job
+            for job in planned_jobs
+            if isinstance(job, dict) and job.get("jobId")
+        }
+        missing_ids = [job_id for job_id in requested_ids if job_id not in jobs_by_id]
+        if missing_ids:
+            raise HTTPException(status_code=422, detail="所选岗位不属于当前任务计划")
+        selected_jobs = validate_planned_job_salaries(
+            run.config_snapshot,
+            [jobs_by_id[job_id] for job_id in requested_ids],
+        )
+        run = AutomationRun.model_validate(
+            automation_repository.confirm_plan(
+                run_id, selected_jobs
             )
+        )
         automation_repository.transition(run_id, "validating")
         planned_jobs = run.config_snapshot.get("plannedJobs", [])
         if not isinstance(planned_jobs, list) or not planned_jobs:
@@ -1074,12 +1336,103 @@ def create_router(
 
     @router.post("/automation/runs/{run_id}/resume", response_model=AutomationRun)
     def resume_automation_run(run_id: int) -> AutomationRun:
+        run = automation_run(run_id)
+        planned_jobs = run.config_snapshot.get("plannedJobs", [])
+        if not isinstance(planned_jobs, list) or not planned_jobs:
+            raise HTTPException(status_code=422, detail="没有可执行的岗位计划")
+        validate_planned_job_salaries(run.config_snapshot, planned_jobs)
         try:
             return AutomationRun.model_validate(automation_repository.transition(run_id, "running"))
         except KeyError as error:
             raise HTTPException(status_code=404, detail="automation run not found") from error
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/automation/runs/{run_id}/retry", response_model=AutomationRun)
+    def retry_automation_run(run_id: int) -> AutomationRun:
+        source = automation_run(run_id)
+        if source.status not in {"blocked", "failed", "cancelled"}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"run cannot retry from {source.status}",
+            )
+        active = [
+            item
+            for item in automation_repository.list_runs()
+            if item["id"] != run_id and item["status"] in {"running", "paused", "stopping"}
+        ]
+        if active:
+            raise HTTPException(status_code=409, detail="another automation run is active")
+
+        planned_jobs = source.config_snapshot.get("plannedJobs", [])
+        if not isinstance(planned_jobs, list):
+            planned_jobs = []
+        report = automation_repository.report(run_id)
+        succeeded_job_ids = {
+            str(event["payload"].get("jobId", ""))
+            for event in report["events"]
+            if event["event_type"] == "job-finished"
+            and event["payload"].get("outcome") == "success"
+        }
+        succeeded_actions = {
+            (str(action["job_id"]), str(action["action_type"]))
+            for action in report["actions"]
+            if action["status"] == "succeeded"
+        }
+        retry_jobs: list[dict[str, Any]] = []
+        for raw_job in planned_jobs:
+            if not isinstance(raw_job, dict):
+                continue
+            job_id = str(raw_job.get("jobId", ""))
+            if not job_id or job_id in succeeded_job_ids:
+                continue
+            job = dict(raw_job)
+            if (job_id, "send_greeting") in succeeded_actions:
+                job["retrySkipGreeting"] = True
+            if (job_id, "send_resume") in succeeded_actions:
+                job["retrySkipResume"] = True
+            retry_jobs.append(job)
+        if not retry_jobs:
+            raise HTTPException(status_code=409, detail="没有失败或未完成的岗位可以重试")
+
+        validate_planned_job_salaries(source.config_snapshot, retry_jobs)
+        retry_config = dict(source.config_snapshot)
+        retry_config["plannedJobs"] = retry_jobs
+        retry_config["retryOfRunId"] = run_id
+        retry_config["retryReason"] = source.stop_reason
+        created = automation_repository.create_run(retry_config, len(retry_jobs))
+        retry_run_id = int(created["id"])
+        automation_repository.append_event(
+            retry_run_id,
+            "retry-created",
+            "warning",
+            {
+                "sourceRunId": run_id,
+                "jobCount": len(retry_jobs),
+                "message": f"用户确认重试任务 #{run_id} 的失败或未完成岗位",
+            },
+        )
+        automation_repository.confirm_plan(retry_run_id, retry_jobs)
+        automation_repository.transition(retry_run_id, "validating")
+        status_result = setup_status()
+        blockers = [
+            check.label
+            for check in status_result.checks
+            if check.blocking and check.status != "ready"
+        ]
+        if blockers:
+            return AutomationRun.model_validate(
+                automation_repository.transition(retry_run_id, "blocked", "、".join(blockers))
+            )
+        automation_repository.transition(retry_run_id, "ready")
+        running = automation_repository.transition(retry_run_id, "running")
+        automation_repository.append_event(
+            retry_run_id,
+            "runner-awaiting-host",
+            "info",
+            {"message": "重试任务已创建，等待宿主机执行器认领"},
+        )
+        return AutomationRun.model_validate(running)
 
     @router.post("/automation/runs/{run_id}/stop", response_model=AutomationRun)
     def stop_automation_run(run_id: int) -> AutomationRun:
@@ -1178,6 +1531,7 @@ def create_router(
 
     @router.get("/jobs", response_model=JobListResponse)
     def list_jobs(
+        background_tasks: BackgroundTasks,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
         query: str | None = Query(default=None, max_length=300),
@@ -1188,17 +1542,25 @@ def create_router(
         total = job_repository.count(query, communication_result)
         total_pages = max(1, (total + page_size - 1) // page_size)
         current_page = min(page, total_pages)
+        items = job_repository.list_recent(
+            page_size,
+            offset=(current_page - 1) * page_size,
+            query=query,
+            communication_result=communication_result,
+        )
+        # Automation collection writes snapshots through analyze-and-plan instead
+        # of /jobs/capture. Older runs therefore left rejected snapshots without a
+        # preview greeting. Lazily repair visible rows without delaying the list
+        # response; delivery eligibility remains a separate decision.
+        for item in items:
+            if not item.generated_greeting:
+                queue_greeting_generation(item.id, background_tasks)
         return JobListResponse(
             total=total,
             page=current_page,
             page_size=page_size,
             total_pages=total_pages,
-            items=job_repository.list_recent(
-                page_size,
-                offset=(current_page - 1) * page_size,
-                query=query,
-                communication_result=communication_result,
-            ),
+            items=items,
         )
 
     @router.post("/jobs", response_model=StoredJob, status_code=201)
@@ -1291,10 +1653,7 @@ def create_router(
         query = "\n".join(
             part for part in [request.title, " ".join(request.skills), request.job_text] if part
         )
-        try:
-            evidence = rag_service.search(query, 8)
-        except RuntimeError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
+        evidence = knowledge_search.search(query, 8)
         return build_automatic_match(request, evidence)
 
     @router.post("/jobs/analyze-and-plan", response_model=JobAnalysisPlanResponse)
@@ -1341,25 +1700,79 @@ def create_router(
                 }
             )
 
-        greeting: str | None = job.generated_greeting
-        if match.decision.should_deliver and not greeting:
-            if match.decision.material_strategy == "custom":
-                try:
-                    generated = greeting_generator.generate(
-                        {
-                            key: context[key]
-                            for key in (
-                                "job",
-                                "profile",
-                                "vectorEvidence",
-                                "defaultGreeting",
-                                "match",
-                            )
+        salary_policy = evaluate_salary_policy(
+            job.salary_text,
+            minimum_salary_k=config.minimum_salary_k,
+            rules=config.matching_rules,
+        )
+        if not salary_policy.allowed:
+            existing_rule_ids = {
+                rule_match.rule_id for rule_match in match.decision.rule_matches
+            }
+            salary_rule_matches = [
+                RuleMatch(
+                    rule_id=violation.rule_id,
+                    rule_name=violation.rule_name,
+                    action=RuleAction.BLOCK_DELIVERY,
+                    evidence=list(violation.evidence),
+                )
+                for violation in salary_policy.violations
+                if violation.rule_id not in existing_rule_ids
+            ]
+            salary_reasons = [
+                violation.reason for violation in salary_policy.violations
+            ]
+            match = match.model_copy(
+                update={
+                    "decision": match.decision.model_copy(
+                        update={
+                            "material_strategy": MaterialStrategy.BLOCKED,
+                            "should_deliver": False,
+                            "reasons": list(
+                                dict.fromkeys(
+                                    [
+                                        *(
+                                            []
+                                            if match.decision.should_deliver
+                                            else match.decision.reasons
+                                        ),
+                                        *salary_reasons,
+                                    ]
+                                )
+                            ),
+                            "rule_matches": [
+                                *match.decision.rule_matches,
+                                *salary_rule_matches,
+                            ],
                         }
                     )
-                    greeting = str(generated["greeting"]).strip()
-                except (RuntimeError, KeyError, TypeError) as error:
-                    logger.warning("planned greeting fell back for job=%s: %s", job.id, error)
+                }
+            )
+
+        greeting: str | None = job.generated_greeting
+        if not greeting:
+            try:
+                greeting_context = {
+                    key: context[key]
+                    for key in (
+                        "job",
+                        "profile",
+                        "localEvidence",
+                        "defaultGreeting",
+                        "match",
+                    )
+                }
+                greeting_context["match"] = {
+                    "suitabilityScore": match.suitability_score,
+                    "customizationConfidence": match.customization_confidence,
+                    "materialStrategy": match.decision.material_strategy,
+                    "shouldDeliver": match.decision.should_deliver,
+                    "reasons": match.decision.reasons,
+                }
+                generated = greeting_generator.generate(greeting_context)
+                greeting = str(generated["greeting"]).strip()
+            except (RuntimeError, KeyError, TypeError) as error:
+                logger.warning("planned greeting fell back for job=%s: %s", job.id, error)
             greeting = greeting or default_greeting or (
                 f"您好，我对贵司的{job.title}岗位很感兴趣，希望有机会进一步沟通，谢谢。"
             )
@@ -1371,6 +1784,932 @@ def create_router(
             generated_greeting=greeting,
             default_resume_image_available=config.default_resume_image_available,
             duplicate=job.has_communicated,
+        )
+
+    @router.post(
+        "/automation/runs/{run_id}/collect",
+        response_model=AutomationRun,
+        status_code=202,
+    )
+    async def queue_automation_collection(
+        run_id: int, background_tasks: BackgroundTasks
+    ) -> AutomationRun:
+        """Queue or recover collection and return immediately.
+
+        This endpoint is intentionally idempotent. A ``collecting`` state without an
+        in-memory task is treated as an interrupted service process and is queued
+        again from persisted configuration.
+        """
+        run = automation_run(run_id)
+        if run.status != "draft":
+            raise HTTPException(status_code=409, detail=f"run cannot collect from {run.status}")
+        collection = run.config_snapshot.get("collection", {})
+        collection_state = (
+            str(collection.get("status", "pending"))
+            if isinstance(collection, dict)
+            else "pending"
+        )
+        if collection_state == "ready":
+            return run
+        if collection_is_scheduled(run_id):
+            return run
+        previous_attempt_id = (
+            int(collection.get("attemptId", 0) or 0)
+            if isinstance(collection, dict)
+            else 0
+        )
+        attempt_id = previous_attempt_id + 1
+
+        queued = AutomationRun.model_validate(
+            automation_repository.update_collection(
+                run_id,
+                "pending",
+                planned_jobs=[],
+                details={
+                    "phase": "queued",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "collectedCount": 0,
+                    "analyzedCount": 0,
+                    "approvedCount": 0,
+                    "rejectedCount": 0,
+                    "ruleRejectedCount": 0,
+                    "duplicateCount": 0,
+                    "materialErrorCount": 0,
+                    "analysisErrorCount": 0,
+                    "reviewedJobs": [],
+                    "skippedCount": 0,
+                    "batchNumber": 0,
+                    "batchLimit": 0,
+                    "lastBatchCount": 0,
+                    "partial": False,
+                    "error": None,
+                    "queuedAt": datetime.now(UTC).isoformat(),
+                    "startedAt": None,
+                    "completedAt": None,
+                    "failedAt": None,
+                    "browserErrors": [],
+                    "analysisErrors": [],
+                },
+            )
+        )
+        schedule_automation_collection(run_id, background_tasks)
+        return queued
+
+    async def run_automation_collection_safely(run_id: int) -> None:
+        """Execute an automatically queued pipeline and persist every failure."""
+        try:
+            await collect_and_analyze_automation_jobs(run_id)
+        except HTTPException as error:
+            logger.warning(
+                "automation collection failed run=%s status=%s: %s",
+                run_id,
+                error.status_code,
+                error.detail,
+            )
+        except Exception as error:  # noqa: BLE001 - background jobs must persist failures
+            logger.exception("automation collection crashed run=%s", run_id)
+            try:
+                run = automation_run(run_id)
+                if run.status == "draft":
+                    collection = run.config_snapshot.get("collection", {})
+                    attempt_id = (
+                        int(collection.get("attemptId", 0) or 0)
+                        if isinstance(collection, dict)
+                        else 0
+                    )
+                    automation_repository.update_collection(
+                        run_id,
+                        "failed",
+                        planned_jobs=[],
+                        details={
+                            "phase": "failed",
+                            "source": "extension",
+                            "attemptId": attempt_id,
+                            "currentKeyword": None,
+                            "error": f"自动采集异常：{error}",
+                            "failedAt": datetime.now(UTC).isoformat(),
+                        },
+                    )
+            except (HTTPException, KeyError, ValueError):
+                logger.exception("failed to persist collection crash run=%s", run_id)
+        finally:
+            with collection_schedule_lock:
+                scheduled_collection_run_ids.discard(run_id)
+
+    async def collect_and_analyze_automation_jobs(run_id: int) -> AutomationRun:
+        """Collect through the extension, then analyze locally without any send action."""
+        run = automation_run(run_id)
+        if run.status != "draft":
+            raise HTTPException(status_code=409, detail=f"run cannot collect from {run.status}")
+        config = run.config_snapshot
+        collection_state = config.get("collection", {})
+        attempt_id = (
+            int(collection_state.get("attemptId", 0) or 0)
+            if isinstance(collection_state, dict)
+            else 0
+        )
+        active = [
+            item
+            for item in automation_repository.list_runs()
+            if item["id"] != run_id and item["status"] in {"running", "paused", "stopping"}
+        ]
+        if active:
+            reason = "有投递任务正在使用浏览器，请暂停或结束后再采集"
+            automation_repository.update_collection(
+                run_id,
+                "failed",
+                planned_jobs=[],
+                details={
+                    "phase": "failed",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "error": reason,
+                    "failedAt": datetime.now(UTC).isoformat(),
+                },
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=reason,
+            )
+
+        raw_keywords = config.get("searchKeywords", [])
+        keywords = [
+            str(keyword).strip()
+            for keyword in raw_keywords
+            if str(keyword).strip()
+        ] if isinstance(raw_keywords, list) else []
+        if not keywords:
+            reason = "请先在个人资料中配置搜索关键词"
+            automation_repository.update_collection(
+                run_id,
+                "failed",
+                planned_jobs=[],
+                details={
+                    "phase": "failed",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "error": reason,
+                    "failedAt": datetime.now(UTC).isoformat(),
+                },
+            )
+            raise HTTPException(status_code=422, detail=reason)
+        browser_state = browser_hub.status()
+        if not browser_state["connected"]:
+            automation_repository.update_collection(
+                run_id,
+                "failed",
+                planned_jobs=[],
+                details={
+                    "phase": "failed",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "error": "统一 Chrome 扩展未连接",
+                    "failedAt": datetime.now(UTC).isoformat(),
+                },
+            )
+            raise HTTPException(status_code=409, detail="统一 Chrome 扩展未连接")
+        if not extension_supports_collection(browser_state.get("extensionVersion")):
+            version = browser_state.get("extensionVersion") or "未知"
+            reason = (
+                f"当前扩展 v{version} 不支持当前自动投递协议，"
+                        "请重新加载 v0.4.11 或更高版本"
+            )
+            automation_repository.update_collection(
+                run_id,
+                "failed",
+                planned_jobs=[],
+                details={
+                    "phase": "failed",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "error": reason,
+                    "failedAt": datetime.now(UTC).isoformat(),
+                },
+            )
+            raise HTTPException(status_code=409, detail=reason)
+
+        target_count = run.target_count
+        # Rule rejection rates vary widely by keyword. A small target-derived
+        # multiplier (for example 3 targets -> 9 candidates) can stop while the
+        # same BOSS result page still contains many viable cards. Keep scanning
+        # across lazy-loaded results and configured keywords, with a hard safety
+        # cap to avoid an unbounded browser run.
+        try:
+            configured_candidate_limit = int(config.get("candidateLimit", 100) or 100)
+        except (TypeError, ValueError):
+            configured_candidate_limit = 100
+        candidate_limit = max(target_count, min(configured_candidate_limit, 500))
+        try:
+            configured_interval_ms = int(config.get("collectionIntervalMs", 2_000) or 0)
+        except (TypeError, ValueError):
+            configured_interval_ms = 2_000
+        collection_interval_ms = max(0, min(configured_interval_ms, 30_000))
+        raw_collection_filters = config.get("collectionFilters")
+        collection_filters = {
+            key: str(raw_collection_filters.get(key, "")).strip()
+            for key in COLLECTION_FILTER_KEYS
+            if isinstance(raw_collection_filters, dict)
+            and re.fullmatch(
+                r"\d+(?:,\d+)*",
+                str(raw_collection_filters.get(key, "")).strip(),
+            )
+        }
+        historical_job_ids = set(
+            await run_in_threadpool(job_repository.list_platform_job_ids, "boss")
+        )
+        captured: dict[str, CapturedJob] = {}
+        browser_errors: list[str] = []
+        skipped_count = 0
+        exhausted_without_new_jobs = False
+
+        async with collection_lock:
+            try:
+                session = BrowserActionResponse.model_validate(
+                    await browser_hub.dispatch(
+                        run_id=run_id,
+                        action="session_status",
+                        payload={},
+                        deadline_ms=30_000,
+                    )
+                )
+            except BrowserProtocolError as error:
+                reason = browser_protocol_error_message(error, "session_status")
+                automation_repository.update_collection(
+                    run_id,
+                    "failed",
+                    planned_jobs=[],
+                    details={
+                        "phase": "failed",
+                        "source": "extension",
+                        "attemptId": attempt_id,
+                        "currentKeyword": None,
+                        "collectedCount": 0,
+                        "approvedCount": 0,
+                        "error": reason,
+                        "failedAt": datetime.now(UTC).isoformat(),
+                    },
+                )
+                raise HTTPException(status_code=409, detail=reason) from error
+
+            logged_in = session.evidence.get("loggedIn")
+            if session.status != "success" or logged_in is not True:
+                if logged_in is False:
+                    save_extension_browser_probe(boss_logged_in=False)
+                reason = (
+                    session.error or "BOSS 登录状态无效，请先在 BOSS 页面完成登录"
+                    if logged_in is False
+                    else session.error or "扩展未能确认 BOSS 登录状态，请重新加载扩展"
+                )
+                automation_repository.update_collection(
+                    run_id,
+                    "failed",
+                    planned_jobs=[],
+                    details={
+                        "phase": "failed",
+                        "source": "extension",
+                        "attemptId": attempt_id,
+                        "currentKeyword": None,
+                        "collectedCount": 0,
+                        "approvedCount": 0,
+                        "error": reason,
+                        "failedAt": datetime.now(UTC).isoformat(),
+                    },
+                )
+                raise HTTPException(status_code=409, detail=reason)
+
+            save_extension_browser_probe(boss_logged_in=True)
+            automation_repository.update_collection(
+                run_id,
+                "collecting",
+                planned_jobs=[],
+                details={
+                    "phase": "searching",
+                    "source": "extension",
+                    "attemptId": attempt_id,
+                    "requestedTarget": target_count,
+                    "candidateLimit": candidate_limit,
+                    "collectionIntervalMs": collection_interval_ms,
+                    "collectionFilters": collection_filters,
+                    "existingExcludedCount": len(historical_job_ids),
+                    "collectedCount": 0,
+                    "analyzedCount": 0,
+                    "approvedCount": 0,
+                    "rejectedCount": 0,
+                    "ruleRejectedCount": 0,
+                    "duplicateCount": 0,
+                    "materialErrorCount": 0,
+                    "analysisErrorCount": 0,
+                    "reviewedJobs": [],
+                    "currentKeyword": None,
+                    "keywords": keywords,
+                    "startedAt": datetime.now(UTC).isoformat(),
+                    "completedAt": None,
+                    "failedAt": None,
+                    "browserErrors": [],
+                    "analysisErrors": [],
+                    "error": None,
+                },
+            )
+            automation_repository.append_event(
+                run_id,
+                "collection-stage-changed",
+                "info",
+                {
+                    "phase": "searching",
+                    "message": "扩展将按搜索关键词采集职位",
+                },
+            )
+            halt_collection = False
+            for keyword in keywords:
+                if len(captured) >= candidate_limit or halt_collection:
+                    break
+                automation_repository.update_collection(
+                    run_id,
+                    "collecting",
+                    details={
+                        "phase": "searching",
+                        "currentKeyword": keyword,
+                        "collectedCount": len(captured),
+                    },
+                    emit_event=False,
+                )
+                automation_repository.append_event(
+                    run_id,
+                    "collection-keyword",
+                    "info",
+                    {"keyword": keyword, "phase": "searching"},
+                )
+                try:
+                    navigation = BrowserActionResponse.model_validate(
+                        await browser_hub.dispatch(
+                            run_id=run_id,
+                            action="navigate_search",
+                            payload={
+                                "query": keyword,
+                                "cityCode": config.get("cityCode", ""),
+                                "filters": collection_filters,
+                            },
+                            deadline_ms=30_000,
+                        )
+                    )
+                except BrowserProtocolError as error:
+                    reason = browser_protocol_error_message(error, "navigate_search")
+                    browser_errors.append(f"{keyword}：{reason}")
+                    automation_repository.append_event(
+                        run_id,
+                        "collection-keyword",
+                        "warning",
+                        {"keyword": keyword, "phase": "failed", "error": reason},
+                    )
+                    continue
+                if navigation.status != "success":
+                    browser_errors.append(
+                        f"{keyword}：{navigation.error or '打开搜索页失败'}"
+                    )
+                    automation_repository.append_event(
+                        run_id,
+                        "collection-keyword",
+                        "warning",
+                        {
+                            "currentKeyword": keyword,
+                            "phase": "failed",
+                            "error": navigation.error,
+                        },
+                    )
+                    continue
+
+                batch_number = 0
+                while len(captured) < candidate_limit:
+                    batch_number += 1
+                    remaining = candidate_limit - len(captured)
+                    batch_limit = min(COLLECTION_BATCH_SIZE, remaining)
+                    batch_deadline_ms = min(
+                        MAX_COLLECTION_BATCH_DEADLINE_MS,
+                        COLLECTION_BATCH_DEADLINE_MS
+                        + collection_interval_ms * batch_limit,
+                    )
+                    excluded_job_ids = sorted(historical_job_ids | set(captured))
+                    automation_repository.update_collection(
+                        run_id,
+                        "collecting",
+                        details={
+                            "phase": "collecting",
+                            "currentKeyword": keyword,
+                            "collectedCount": len(captured),
+                            "batchNumber": batch_number,
+                            "batchLimit": batch_limit,
+                            "batchDeadlineMs": batch_deadline_ms,
+                        },
+                        emit_event=False,
+                    )
+                    if batch_number == 1:
+                        automation_repository.append_event(
+                            run_id,
+                            "collection-stage-changed",
+                            "info",
+                            {
+                                "phase": "collecting",
+                                "keyword": keyword,
+                                "message": "扩展正在分批读取搜索结果的完整职位信息",
+                            },
+                        )
+                    try:
+                        collection = BrowserActionResponse.model_validate(
+                            await browser_hub.dispatch(
+                                run_id=run_id,
+                                action="collect_jobs",
+                                payload={
+                                    "limit": batch_limit,
+                                    "excludeJobIds": excluded_job_ids,
+                                    "itemIntervalMs": collection_interval_ms,
+                                },
+                                deadline_ms=batch_deadline_ms,
+                            )
+                        )
+                    except BrowserProtocolError as error:
+                        reason = browser_protocol_error_message(error, "collect_jobs")
+                        browser_errors.append(f"{keyword}：{reason}")
+                        automation_repository.update_collection(
+                            run_id,
+                            "collecting",
+                            details={
+                                "phase": "collecting",
+                                "currentKeyword": keyword,
+                                "collectedCount": len(captured),
+                                "browserErrors": browser_errors[-10:],
+                                "partial": bool(captured),
+                            },
+                            emit_event=False,
+                        )
+                        automation_repository.append_event(
+                            run_id,
+                            "collection-batch-failed",
+                            "warning",
+                            {
+                                "phase": "collecting",
+                                "keyword": keyword,
+                                "batchNumber": batch_number,
+                                "collectedCount": len(captured),
+                                "retainedCount": len(captured),
+                                "error": reason,
+                            },
+                        )
+                        halt_collection = True
+                        break
+
+                    raw_jobs = collection.evidence.get("jobs", [])
+                    if collection.status != "success" or not isinstance(raw_jobs, list):
+                        reason = collection.error or "没有读取到完整职位"
+                        browser_errors.append(f"{keyword}：{reason}")
+                        automation_repository.update_collection(
+                            run_id,
+                            "collecting",
+                            details={
+                                "phase": "collecting",
+                                "currentKeyword": keyword,
+                                "collectedCount": len(captured),
+                                "browserErrors": browser_errors[-10:],
+                            },
+                            emit_event=False,
+                        )
+                        automation_repository.append_event(
+                            run_id,
+                            "collection-batch-finished",
+                            "warning",
+                            {
+                                "phase": "collecting",
+                                "keyword": keyword,
+                                "batchNumber": batch_number,
+                                "newCount": 0,
+                                "collectedCount": len(captured),
+                                "error": reason,
+                            },
+                        )
+                        break
+
+                    raw_skipped = collection.evidence.get("skipped", [])
+                    if isinstance(raw_skipped, list):
+                        skipped_count += len(raw_skipped)
+                    new_jobs: list[CapturedJob] = []
+                    for raw_job in raw_jobs:
+                        try:
+                            job = CapturedJob.model_validate(raw_job)
+                        except ValueError as error:
+                            browser_errors.append(
+                                f"{keyword}：忽略无效职位数据（{error}）"
+                            )
+                            continue
+                        if job.platform_job_id in captured:
+                            continue
+                        captured[job.platform_job_id] = job
+                        new_jobs.append(job)
+                        if len(captured) >= candidate_limit:
+                            break
+                    if new_jobs:
+                        await run_in_threadpool(job_repository.save_many, new_jobs)
+
+                    exhausted = collection.evidence.get("exhausted") is True
+                    if exhausted and not new_jobs:
+                        exhausted_without_new_jobs = True
+                    automation_repository.update_collection(
+                        run_id,
+                        "collecting",
+                        details={
+                            "phase": "collecting",
+                            "currentKeyword": keyword,
+                            "collectedCount": len(captured),
+                            "skippedCount": skipped_count,
+                            "batchNumber": batch_number,
+                            "lastBatchCount": len(new_jobs),
+                            "browserErrors": browser_errors[-10:],
+                        },
+                        emit_event=False,
+                    )
+                    automation_repository.append_event(
+                        run_id,
+                        "collection-batch-finished",
+                        "info",
+                        {
+                            "phase": "collecting",
+                            "keyword": keyword,
+                            "batchNumber": batch_number,
+                            "requestedCount": batch_limit,
+                            "newCount": len(new_jobs),
+                            "collectedCount": len(captured),
+                            "skippedCount": skipped_count,
+                            "exhausted": exhausted,
+                        },
+                    )
+                    if exhausted or not new_jobs:
+                        break
+
+                if captured:
+                    automation_repository.append_event(
+                        run_id,
+                        "collection-keyword",
+                        "info",
+                        {
+                            "keyword": keyword,
+                            "phase": "collected",
+                            "collectedCount": len(captured),
+                        },
+                    )
+
+            if not captured:
+                if exhausted_without_new_jobs and not browser_errors:
+                    completed_at = datetime.now(UTC).isoformat()
+                    no_matches_run = automation_repository.update_collection(
+                        run_id,
+                        "no_matches",
+                        planned_jobs=[],
+                        details={
+                            "phase": "analysis_completed",
+                            "source": "extension",
+                            "attemptId": attempt_id,
+                            "currentKeyword": None,
+                            "candidateLimit": candidate_limit,
+                            "existingExcludedCount": len(historical_job_ids),
+                            "collectedCount": 0,
+                            "analyzedCount": 0,
+                            "approvedCount": 0,
+                            "rejectedCount": 0,
+                            "ruleRejectedCount": 0,
+                            "duplicateCount": 0,
+                            "materialErrorCount": 0,
+                            "analysisErrorCount": 0,
+                            "reviewedJobs": [],
+                            "skippedCount": skipped_count,
+                            "browserErrors": [],
+                            "analysisErrors": [],
+                            "outcome": "no_matches",
+                            "message": (
+                                "没有发现新的可采集岗位"
+                                f"；已跳过本地已有 {len(historical_job_ids)} 个岗位"
+                                if historical_job_ids
+                                else "搜索结果中没有新的可采集岗位"
+                            ),
+                            "error": None,
+                            "completedAt": completed_at,
+                            "failedAt": None,
+                        },
+                    )
+                    return AutomationRun.model_validate(no_matches_run)
+                reason = browser_errors[-1] if browser_errors else "扩展没有采集到完整职位"
+                automation_repository.update_collection(
+                    run_id,
+                    "failed",
+                    planned_jobs=[],
+                    details={
+                        "phase": "failed",
+                        "source": "extension",
+                        "attemptId": attempt_id,
+                        "currentKeyword": None,
+                        "collectedCount": 0,
+                        "approvedCount": 0,
+                        "skippedCount": skipped_count,
+                        "error": reason,
+                        "failedAt": datetime.now(UTC).isoformat(),
+                    },
+                )
+                raise HTTPException(status_code=409, detail=reason)
+
+            planned_jobs: list[dict[str, object]] = []
+            reviewed_jobs: list[dict[str, object]] = []
+            rejected_count = 0
+            rule_rejected_count = 0
+            duplicate_count = 0
+            material_error_count = 0
+            analysis_error_count = 0
+            analyzed_count = 0
+            analysis_errors: list[str] = []
+
+            def persist_analysis_progress() -> None:
+                automation_repository.update_collection(
+                    run_id,
+                    "collecting",
+                    details={
+                        "phase": "analyzing",
+                        "attemptId": attempt_id,
+                        "analyzedCount": analyzed_count,
+                        "approvedCount": len(planned_jobs),
+                        "rejectedCount": rejected_count,
+                        "ruleRejectedCount": rule_rejected_count,
+                        "duplicateCount": duplicate_count,
+                        "materialErrorCount": material_error_count,
+                        "analysisErrorCount": analysis_error_count,
+                        "reviewedJobs": reviewed_jobs,
+                    },
+                    emit_event=False,
+                )
+
+            def review_identity(
+                job: CapturedJob, snapshot: StoredJob | None = None
+            ) -> dict[str, object]:
+                if snapshot is None:
+                    try:
+                        snapshot = job_repository.get_by_platform_job_id(
+                            job.platform, job.platform_job_id
+                        )
+                    except KeyError:
+                        snapshot = None
+                return {
+                    "snapshotId": snapshot.id if snapshot is not None else None,
+                    "jobId": job.platform_job_id,
+                    "title": snapshot.title if snapshot is not None else job.title,
+                    "companyName": (
+                        snapshot.company_name if snapshot is not None else job.company_name
+                    ),
+                    "salaryText": (
+                        snapshot.salary_text if snapshot is not None else job.salary_text
+                    ),
+                    "location": snapshot.location if snapshot is not None else job.location,
+                }
+
+            automation_repository.update_collection(
+                run_id,
+                "collecting",
+                details={
+                    "phase": "analyzing",
+                    "attemptId": attempt_id,
+                    "currentKeyword": None,
+                    "collectedCount": len(captured),
+                    "analyzedCount": 0,
+                    "approvedCount": 0,
+                    "rejectedCount": 0,
+                    "ruleRejectedCount": 0,
+                    "duplicateCount": 0,
+                    "materialErrorCount": 0,
+                    "analysisErrorCount": 0,
+                    "reviewedJobs": [],
+                },
+                emit_event=False,
+            )
+            automation_repository.append_event(
+                run_id,
+                "collection-stage-changed",
+                "info",
+                {
+                    "phase": "analyzing",
+                    "attemptId": attempt_id,
+                    "collectedCount": len(captured),
+                    "message": "本地服务正在逐个执行 analyze-and-plan",
+                },
+            )
+            automation_repository.append_event(
+                run_id,
+                "analysis-started",
+                "info",
+                {
+                    "phase": "analyzing",
+                    "attemptId": attempt_id,
+                    "collectedCount": len(captured),
+                    "operation": "analyze-and-plan",
+                },
+            )
+            for job in captured.values():
+                analyzed_count += 1
+                try:
+                    result = await run_in_threadpool(
+                        analyze_and_plan_job,
+                        JobAnalysisPlanRequest(
+                            job=job,
+                            minimum_suitability_score=int(
+                                config.get("minimumSuitabilityScore", 60)
+                            ),
+                            minimum_customization_confidence=int(
+                                config.get("minimumCustomizationConfidence", 80)
+                            ),
+                        ),
+                    )
+                except (HTTPException, KeyError, RuntimeError, TypeError, ValueError) as error:
+                    error_text = (
+                        str(error.detail)
+                        if isinstance(error, HTTPException)
+                        else str(error) or error.__class__.__name__
+                    )
+                    analysis_errors.append(f"{job.title}：{error_text}")
+                    rejected_count += 1
+                    analysis_error_count += 1
+                    reviewed_jobs.append(
+                        {
+                            **review_identity(job),
+                            "outcome": "analysis_error",
+                            "suitabilityScore": None,
+                            "reasons": [error_text],
+                            "ruleMatches": [],
+                        }
+                    )
+                    persist_analysis_progress()
+                    continue
+
+                snapshot = result.snapshot
+                decision = result.match.decision
+                reasons = list(decision.reasons)
+                rule_matches = [
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in decision.rule_matches
+                ]
+                if result.duplicate:
+                    outcome = "duplicate"
+                    duplicate_count += 1
+                elif not decision.should_deliver:
+                    outcome = "rule_rejected"
+                    rule_rejected_count += 1
+                elif not result.generated_greeting:
+                    outcome = "material_error"
+                    material_error_count += 1
+                    reasons = list(dict.fromkeys([*reasons, "未生成可用问候语"]))
+                else:
+                    outcome = "approved"
+
+                reviewed_jobs.append(
+                    {
+                        **review_identity(job, snapshot),
+                        "outcome": outcome,
+                        "suitabilityScore": result.match.suitability_score,
+                        "reasons": reasons,
+                        "ruleMatches": rule_matches,
+                    }
+                )
+                if outcome != "approved":
+                    rejected_count += 1
+                    persist_analysis_progress()
+                    continue
+
+                planned_jobs.append(
+                    {
+                        "snapshotId": snapshot.id,
+                        "jobId": snapshot.platform_job_id,
+                        "url": snapshot.url,
+                        "title": snapshot.title,
+                        "companyName": snapshot.company_name,
+                        "salaryText": snapshot.salary_text,
+                        "location": snapshot.location,
+                        "greeting": result.generated_greeting,
+                        "suitabilityScore": result.match.suitability_score,
+                        "materialStrategy": result.match.decision.material_strategy.value,
+                    }
+                )
+                persist_analysis_progress()
+                if len(planned_jobs) >= target_count:
+                    break
+
+            details = {
+                "source": "extension",
+                "attemptId": attempt_id,
+                "collectedCount": len(captured),
+                "analyzedCount": analyzed_count,
+                "approvedCount": len(planned_jobs),
+                "rejectedCount": rejected_count,
+                "ruleRejectedCount": rule_rejected_count,
+                "duplicateCount": duplicate_count,
+                "materialErrorCount": material_error_count,
+                "analysisErrorCount": analysis_error_count,
+                "reviewedJobs": reviewed_jobs,
+                "skippedCount": skipped_count,
+                "browserErrors": browser_errors[-10:],
+                "analysisErrors": analysis_errors[-10:],
+                "currentKeyword": None,
+                "completedAt": datetime.now(UTC).isoformat(),
+            }
+            if not planned_jobs:
+                no_matches_run = automation_repository.update_collection(
+                    run_id,
+                    "no_matches",
+                    planned_jobs=[],
+                    details={
+                        **details,
+                        "phase": "analysis_completed",
+                        "outcome": "no_matches",
+                        "message": "采集与分析完成，但没有岗位通过投递规则",
+                        "error": None,
+                        "failedAt": None,
+                    },
+                )
+                return AutomationRun.model_validate(no_matches_run)
+
+            collected_run = automation_repository.update_collection(
+                run_id,
+                "ready",
+                planned_jobs=planned_jobs,
+                details={
+                    **details,
+                    "phase": "awaiting_confirmation",
+                    "outcome": "ready",
+                    "error": None,
+                    "failedAt": None,
+                },
+            )
+            automation_repository.append_event(
+                run_id,
+                "collection-stage-changed",
+                "info",
+                {
+                    "phase": "awaiting_confirmation",
+                    "attemptId": attempt_id,
+                    "approvedCount": len(planned_jobs),
+                    "message": "本地分析完成，等待页面确认企业",
+                },
+            )
+            return AutomationRun.model_validate(collected_run)
+
+    @router.post(
+        "/jobs/{snapshot_id}/analysis",
+        response_model=JobInsightResponse,
+    )
+    def analyze_job_snapshot(
+        snapshot_id: int, request: JobInsightRequest
+    ) -> JobInsightResponse:
+        try:
+            job = job_repository.get(snapshot_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="job snapshot not found") from error
+
+        config = automation_config()
+        context, _, match = build_job_material_context(
+            job,
+            minimum_suitability_score=config.minimum_suitability_score,
+            minimum_customization_confidence=config.minimum_customization_confidence,
+            rules=config.matching_rules,
+            duplicate=job.has_communicated,
+        )
+        if request.use_ai:
+            try:
+                generated = job_analysis_generator.generate(
+                    context, request.model_record_id
+                )
+            except RuntimeError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            return JobInsightResponse(
+                job_id=job.id,
+                mode="ai",
+                summary=str(generated["summary"]),
+                strengths=generated.get("strengths", []),
+                gaps=generated.get("gaps", []),
+                recommendations=generated.get("recommendations", []),
+                interview_questions=generated.get("interviewQuestions", []),
+                match=match,
+                model_record_id=int(generated["modelRecordId"]),
+                model_name=str(generated["modelName"]),
+                model_id=str(generated["modelId"]),
+            )
+
+        local = build_local_job_insight(job, match)
+        return JobInsightResponse(
+            job_id=job.id,
+            mode="local",
+            summary=str(local["summary"]),
+            strengths=local["strengths"],
+            gaps=local["gaps"],
+            recommendations=local["recommendations"],
+            interview_questions=local["interviewQuestions"],
+            match=match,
         )
 
     @router.post(
@@ -1410,7 +2749,6 @@ def create_router(
     @router.put("/profile", response_model=ProfilePayload)
     def save_profile(request: ProfilePayload) -> ProfilePayload:
         profile = library_repository.save_profile(request.data)
-        sync_knowledge_index()
         return ProfilePayload(data=profile)
 
     @router.post("/resumes/import", response_model=ResumeImportResponse, status_code=201)
@@ -1500,9 +2838,6 @@ def create_router(
             resume_id=imported["resumeId"],
             project_ids=imported["projectIds"],
             extracted_characters=len(parsed.resume["rawText"]),
-            index_rebuilt=False,
-            indexed_chunks=None,
-            index_error=None,
             ai_extraction_used=ai_extraction_used,
             ai_project_count=len(projects) if ai_extraction_used else 0,
             ai_extraction_error=ai_extraction_error,
@@ -1524,22 +2859,10 @@ def create_router(
             confirmed = library_repository.confirm_resume(resume_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="resume not found") from error
-        rebuilt = False
-        indexed_chunks = None
-        index_error = None
-        try:
-            index_result = rag_service.rebuild()
-            rebuilt = True
-            indexed_chunks = index_result["rebuilt"]
-        except RuntimeError as error:
-            index_error = str(error)
         return ResumeConfirmationResponse(
             resume=LibraryRecord.model_validate(confirmed["resume"]),
             profile_fields=sorted(confirmed["profile"]),
             project_ids=confirmed["projectIds"],
-            index_rebuilt=rebuilt,
-            indexed_chunks=indexed_chunks,
-            index_error=index_error,
         )
 
     def resume_image_response(record: dict[str, object]) -> FileResponse:
@@ -1623,20 +2946,12 @@ def create_router(
                 "sourceKey": source_key,
             }
         project_ids = library_repository.upsert_projects(projects)
-        try:
-            index_result = rag_service.rebuild()
-        except RuntimeError as error:
-            raise HTTPException(
-                status_code=503,
-                detail=f"项目已入库，但向量索引失败: {error}",
-            ) from error
         return {
             "resumeId": resume_id,
             "projectIds": project_ids,
             "projectCount": len(project_ids),
             "extractionMethod": extraction_method,
             "extractionError": extraction_error,
-            "indexedChunks": index_result["rebuilt"],
         }
 
     def valid_kind(kind: str) -> LibraryKind:
@@ -1661,8 +2976,6 @@ def create_router(
         record = LibraryRecord.model_validate(
             library_repository.create(valid, request.name, request.data)
         )
-        if valid == "projects":
-            sync_knowledge_index()
         return record
 
     @router.put("/library/{kind}/{record_id}", response_model=LibraryRecord)
@@ -1693,8 +3006,6 @@ def create_router(
         if valid == "models":
             return public_model_record(result)
         record = LibraryRecord.model_validate(result)
-        if valid == "projects":
-            sync_knowledge_index()
         return record
 
     @router.delete("/library/{kind}/{record_id}", status_code=204)
@@ -1702,8 +3013,6 @@ def create_router(
         valid = valid_kind(kind)
         if not library_repository.delete(valid, record_id):
             raise HTTPException(status_code=404, detail="record not found")
-        if valid == "projects":
-            sync_knowledge_index()
         return Response(status_code=204)
 
     @router.post("/library/models/{record_id}/test")
@@ -1724,35 +3033,6 @@ def create_router(
         }
         library_repository.update("models", record_id, record["name"], data)
         return result
-
-    @router.get("/rag/status", response_model=RagStatus)
-    def rag_status() -> RagStatus:
-        return RagStatus.model_validate(rag_service.status())
-
-    @router.get("/rag/chunks", response_model=RagChunkListResponse)
-    def list_rag_chunks() -> RagChunkListResponse:
-        items = rag_service.list_chunks()
-        return RagChunkListResponse(total=len(items), items=items)
-
-    @router.delete("/rag/chunks/{chunk_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def delete_rag_chunk(chunk_id: int) -> Response:
-        if not rag_service.delete_chunk(chunk_id):
-            raise HTTPException(status_code=404, detail="knowledge entity not found")
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    @router.post("/rag/rebuild", response_model=RagRebuildResponse)
-    def rebuild_rag_index() -> RagRebuildResponse:
-        try:
-            return RagRebuildResponse.model_validate(rag_service.rebuild())
-        except RuntimeError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-
-    @router.post("/rag/search", response_model=RagSearchResponse)
-    def search_rag(request: RagSearchRequest) -> RagSearchResponse:
-        try:
-            return RagSearchResponse(items=rag_service.search(request.query, request.limit))
-        except RuntimeError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @router.get("/resume-templates")
     def list_resume_templates() -> dict[str, object]:

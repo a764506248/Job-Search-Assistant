@@ -16,14 +16,13 @@
 
 ## 2. 当前基线
 
-当前稳定链路由四部分组成：
+当前默认链路由三部分组成：
 
-1. Docker Compose：运行 Web、Local Service 和 Embedding 三个容器；
-2. Kimi Browser Extension / WebBridge：操作已登录的 BOSS 页面；
-3. 项目 Chrome 扩展：预览并确认发送默认简历图片；
-4. BOSS Skill：编排搜索、采集、分析、投递、断点续传和报告。
+1. Docker Compose：运行 Web、Local Service 和同镜像启动的 automation-runner；
+2. 统一 Chrome 扩展：操作已登录的 BOSS 页面，完成搜索、职位收集和确认后的投递动作；
+3. Local Service + SQLite：负责简历、规则、本地资料匹配、模型分析、投递计划、状态、审计和报告。
 
-当前首次使用需要用户理解端口、容器、扩展、Skill 目录和配置文件，适合开发阶段，不适合作为最终产品入口。
+首次使用只需要启动 Docker、加载并配对一个扩展、导入确认简历。BOSS Skill 与 Kimi WebBridge 仅是旧版可选回退，不影响默认流程就绪状态。
 
 ## 3. 设计原则
 
@@ -49,7 +48,7 @@ flowchart LR
 
 ---
 
-## 5. 阶段一：一键安装现有架构
+## 5. 阶段一：一键安装
 
 > 实施状态（2026-10-02）：`GET /v1/setup/status`、Web 首次使用向导、模型验证记录、简历导入后确认、浏览器探针、无副作用安全测试、版本清单，以及 macOS/Linux 和 Windows 安装器已完成首版。后台任务入口在阶段二实现。
 
@@ -59,13 +58,14 @@ flowchart LR
 运行安装器
 → 自动启动 Docker 服务
 → 浏览器打开首次使用向导
-→ 按向导安装两个现有扩展
+→ 按向导安装并配对统一扩展
 → 导入并确认简历
 → 环境检查全部通过
-→ 按现有方式调用 Skill
+→ 在后台启动自动流程，系统自动采集与分析
+→ 页面确认企业后自动进入投递
 ```
 
-阶段一不改变自动投递执行者，只降低安装和排障成本。
+阶段一负责降低安装和排障成本；默认执行者是统一扩展，安装器不再把 Skill 或 Kimi 当作前置条件。
 
 ### 5.2 交付内容
 
@@ -82,12 +82,11 @@ flowchart LR
 
 1. 检查 Docker、Compose、Chrome 和端口；
 2. 下载固定版本的 Release Compose；
-3. 拉取并启动三个镜像；
-4. 等待 Local Service 与 Embedding 健康；
-5. 安装或升级 BOSS Skill，保留 `user_profile.json`；
-6. 下载项目扩展 ZIP，不自动绕过浏览器确认；
-7. 检测 Kimi WebBridge 并给出官方下载入口；
-8. 打开 `http://127.0.0.1:8765/setup`。
+3. 拉取并启动两个镜像；
+4. 等待 Local Service 健康；
+5. 下载统一扩展 ZIP，不自动绕过浏览器确认；
+6. 打开 `http://127.0.0.1:8765/setup`；
+7. 引导用户生成一次性配对码并确认 BOSS 登录。
 
 #### 首次使用向导
 
@@ -110,15 +109,13 @@ flowchart LR
 | 检查项 | 数据来源 | 阻塞真实投递 |
 | --- | --- | --- |
 | Local Service | `/v1/health` | 是 |
-| Embedding | Local Service 转发健康状态 | 是 |
 | 模型配置 | 模型验证记录 | 是 |
 | 已确认简历 | 简历库 | 是 |
 | 默认简历图片 | 简历库 | 仅图片开关开启时 |
 | 自动化规则 | `/v1/automation/config` | 是 |
-| Kimi WebBridge | 本机探针 | 是 |
-| 项目扩展 | 页面握手 | 仅图片开关开启时 |
-| BOSS 登录 | WebBridge 页面检查 | 是 |
-| Skill 版本 | 本机安装清单 | 是 |
+| 统一 Chrome 扩展 | 本机 WebSocket 握手 | 是 |
+| BOSS 登录 | 扩展页面状态 + 用户现场确认 | 是 |
+| 旧版 Kimi/Skill | 可选兼容检查 | 否 |
 
 ### 5.3 建议 API
 
@@ -138,10 +135,9 @@ POST /v1/setup/test-run
   "overall": "blocked",
   "checks": [
     {
-      "key": "embedding",
-      "status": "pending",
-      "message": "首次模型下载中",
-      "action": "查看日志"
+      "key": "local-service",
+      "status": "ready",
+      "message": "本地 API 已运行"
     }
   ]
 }
@@ -149,7 +145,7 @@ POST /v1/setup/test-run
 
 ### 5.4 阶段一验收标准
 
-- 全新机器按文档完成安装不需要手动复制 Skill；
+- 全新机器按文档完成安装不需要安装或复制 Skill，也不需要 Kimi daemon；
 - 安装失败能定位到具体检查项，不只显示“启动失败”；
 - 重复运行安装器不会覆盖用户配置和 SQLite；
 - 简历导入后必须经过用户确认才进入知识库；
@@ -173,7 +169,7 @@ POST /v1/setup/test-run
 → 查看最终汇总
 ```
 
-用户不再需要在 Codex 中手工调用 Skill，但阶段二仍可复用 Kimi WebBridge 和项目图片扩展。
+用户不需要在 Codex 中手工调用 Skill；任务控制与浏览器动作统一从管理后台进入。
 
 ### 6.2 目标架构
 
@@ -181,10 +177,8 @@ POST /v1/setup/test-run
 flowchart LR
     UI["Vue 自动投递控制台"] --> API["Automation API"]
     API --> DB["SQLite 任务与事件"]
-    API --> RUNNER["本地任务执行器"]
-    RUNNER --> KIMI["Kimi WebBridge"]
-    RUNNER --> EXT["项目图片扩展"]
-    KIMI --> BOSS["BOSS 页面"]
+    API --> RUNNER["Docker automation-runner"]
+    API --> EXT["统一 Chrome 扩展"]
     EXT --> BOSS
     RUNNER --> EVENTS["SSE 事件流"]
     EVENTS --> UI
@@ -281,7 +275,7 @@ automation/
 └── report.py
 ```
 
-Skill 在过渡期变成一个薄客户端：读取配置、创建任务并观察状态。等后台控制台稳定后再停止推荐 Skill 入口。
+旧版 Skill 仅保留为兼容回退客户端，不参与默认任务的创建、采集、分析或执行。
 
 ### 6.7 阶段二验收标准
 
@@ -297,7 +291,7 @@ Skill 在过渡期变成一个薄客户端：读取配置、创建任务并观�
 
 ## 7. 阶段三：统一浏览器扩展
 
-> 实施状态（2026-10-02）：扩展 v0.3.0 已实现一次性配对、短期令牌、WebSocket v1.0 信封、动作白名单、连接测试、搜索导航、岗位读取、目标身份校验，以及问候语/简历的页面内确认发送。送达证据不完整时标记为 `uncertain` 并禁止自动重试；完成受控真实账号回归前，不移除 Kimi/Skill 回退入口。
+> 实施状态：统一扩展已实现一次性配对、短期令牌、WebSocket v1.0 信封、动作白名单、连接测试、搜索导航、批量职位收集、目标身份校验、清单确认后的问候语自动发送，以及简历图片预览确认发送。默认安装与运行已经移除 Kimi/Skill 必选依赖；旧版回退代码暂时保留用于对照测试。
 
 ### 7.1 用户体验
 
@@ -326,7 +320,7 @@ Local Service 继续负责：
 
 - 任务状态机；
 - 业务配置和规则；
-- JD 快照、RAG 和模型调用；
+- JD 快照、本地资料匹配和模型调用；
 - 投递计划；
 - 幂等与审计；
 - 报告和本地数据。
@@ -377,9 +371,9 @@ Local Service 继续负责：
 - 默认简历图片只来自本地服务的已确认默认项；
 - 扩展升级后重新执行协议兼容检查。
 
-### 7.5 Kimi 与 Skill 退出条件
+### 7.5 旧版 Kimi 与 Skill 代码删除条件
 
-只有满足以下条件才移除旧入口：
+旧入口不是默认流程；只有满足以下条件才彻底删除其代码和回退文档：
 
 - 统一扩展连续通过受控真实投递测试；
 - 搜索、懒加载、聊天校验和发送验证均有自动化测试；
@@ -410,9 +404,8 @@ Local Service 继续负责：
   "compose": "vX.Y.Z",
   "web": "vX.Y.Z",
   "localService": "vX.Y.Z",
-  "embedding": "vX.Y.Z",
   "extension": "vX.Y.Z",
-  "skill": "vX.Y.Z"
+  "legacySkill": "optional"
 }
 ```
 
@@ -435,7 +428,7 @@ Local Service 继续负责：
 | 扩展测试 | DOM 提取、目标校验、按钮状态、气泡验证、图片发送 |
 | 契约测试 | Local Service 与扩展的动作协议 |
 | 冒烟测试 | 全新环境安装、测试模式、受控真实投递一条 |
-| 回归测试 | 旧 Skill 与新任务执行器结果一致性 |
+| 回归测试 | 默认扩展链路结果一致性；可选执行旧 Skill 对照 |
 
 真实投递测试必须使用小目标、明确账号和城市，并保留人工停止入口。
 
@@ -457,7 +450,7 @@ Local Service 继续负责：
 2. 状态机与事件仓库；
 3. 创建、启动、暂停和停止 API；
 4. SSE 事件流；
-5. 拆分 Skill 核心模块；
+5. 将浏览器编排迁入 Local Service 与 runner；
 6. 管理后台任务控制台；
 7. 崩溃恢复和报告。
 
@@ -469,7 +462,7 @@ Local Service 继续负责：
 4. 聊天校验和问候语发送；
 5. 合并简历图片发送；
 6. 新旧链路影子验证；
-7. 移除 Kimi/Skill 必选依赖。
+7. 将 Kimi/Skill 降级为非阻塞的可选回退。
 
 ## 11. 开发前需要确认的决策
 
@@ -478,7 +471,7 @@ Local Service 继续负责：
 3. 第一阶段扩展是否继续使用开发者模式加载，还是立即建立 GitHub Release ZIP 分发？
 4. 测试模式是否只读，还是允许进入聊天页但禁止点击发送？
 5. 第二阶段任务执行器运行在 Local Service 容器内，还是作为宿主机伴随进程？
-6. 第三阶段是否确认以“移除 Kimi 和 Skill 运行时依赖”为最终目标？
+6. 第三阶段是否确认以“移除 Kimi 和 Skill 运行时依赖”为最终目标？（已确认）
 
 ## 12. 推荐默认决策
 
@@ -487,4 +480,4 @@ Local Service 继续负责：
 - 扩展通过 GitHub Release ZIP 分发，Chrome 仍需用户确认加载；
 - 测试模式只读，不进入发送链路；
 - 第二阶段执行器使用宿主机伴随进程，Local Service 保持容器化业务服务；
-- 第三阶段以统一扩展替代 Kimi 和 Skill 为目标，但旧链路保留一个稳定版本作为回退。
+- 第三阶段默认由统一扩展替代 Kimi 和 Skill；旧链路只保留一个稳定版本作为可选回退。

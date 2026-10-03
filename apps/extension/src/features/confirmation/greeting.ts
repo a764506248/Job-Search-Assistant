@@ -1,5 +1,32 @@
 export type ConfirmationDecision = 'confirmed' | 'cancelled' | 'expired'
 
+export interface GreetingSendApproval {
+  approved: boolean
+  planApproved: boolean
+  decision: ConfirmationDecision | 'confirmed_plan'
+}
+
+/**
+ * The local service sets this boolean only after validating the runner's
+ * private approval token and the frozen job plan. The token itself is never
+ * forwarded to the extension. Calls without this server-issued proof remain
+ * interactive (manual/test entry points included).
+ */
+export function hasConfirmedPlanApproval(payload: Record<string, unknown>): boolean {
+  return payload.planConfirmed === true
+}
+
+export async function resolveGreetingSendApproval(
+  payload: Record<string, unknown>,
+  requestInteractiveConfirmation: () => Promise<ConfirmationDecision>,
+): Promise<GreetingSendApproval> {
+  if (hasConfirmedPlanApproval(payload)) {
+    return { approved: true, planApproved: true, decision: 'confirmed_plan' }
+  }
+  const decision = await requestInteractiveConfirmation()
+  return { approved: decision === 'confirmed', planApproved: false, decision }
+}
+
 export function confirmGreetingSend(
   title: string,
   company: string,

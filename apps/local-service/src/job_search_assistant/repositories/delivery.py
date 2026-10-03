@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..domain.models import DeliveryRecord, DeliveryRecordInput
+from ..domain.salary import normalize_salary_text, prefer_salary_text
 
 
 class DeliveryRepository:
@@ -42,6 +43,15 @@ class DeliveryRepository:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
+            existing = connection.execute(
+                """SELECT salary_text FROM delivery_records
+                WHERE platform = ? AND platform_job_id = ?""",
+                (delivery.platform, delivery.platform_job_id),
+            ).fetchone()
+            salary_text = prefer_salary_text(
+                existing[0] if existing is not None else None,
+                delivery.salary_text,
+            )
             connection.execute(
                 """
                 INSERT INTO delivery_records (
@@ -70,7 +80,7 @@ class DeliveryRepository:
                     delivery.platform_job_id,
                     delivery.title,
                     delivery.company_name,
-                    delivery.salary_text,
+                    salary_text,
                     delivery.location,
                     delivery.recruiter_name,
                     delivery.status,
@@ -127,7 +137,7 @@ class DeliveryRepository:
             platform_job_id=row["platform_job_id"],
             title=row["title"],
             company_name=row["company_name"],
-            salary_text=row["salary_text"],
+            salary_text=normalize_salary_text(row["salary_text"]),
             location=row["location"],
             recruiter_name=row["recruiter_name"],
             status=row["status"],

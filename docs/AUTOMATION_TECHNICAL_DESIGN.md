@@ -7,9 +7,10 @@
 → 一键启动三个 Docker 服务
 → 安装并配对一个浏览器扩展
 → 导入、识别并确认简历
-→ 在后台创建投递计划
-→ 核对并勾选企业、岗位和问候语
-→ 确认后启动任务
+→ 在后台点击一次“启动自动流程”
+→ 后台自动串行扩展搜索/采集与本地分析
+→ 流程只在企业清单处暂停，供用户核对和勾选
+→ 确认后自动启动 runner 投递
 → 查看实时事件，必要时暂停、恢复或停止
 ```
 
@@ -19,11 +20,11 @@
 
 | 阶段 | 已交付 | 仍需发布前验证 |
 | --- | --- | --- |
-| 一：安装与向导 | macOS/Linux 安装器、Windows PowerShell 安装器、11 项状态检查、简历确认、安全测试 | 全新物理机安装矩阵 |
-| 二：后台入口 | 任务状态机、任务/事件/动作表、SSE、控制台、任务认领、心跳、报告、幂等动作、宿主 runner | 旧 Skill 与新 runner 同批岗位影子对比 |
-| 三：统一扩展 | v1.0 WebSocket 协议、一次性配对码、短期本地令牌、动作白名单、扩展弹窗、连接探针、岗位读取、身份校验、问候语和简历确认发送 | 受控真实账号回归通过前不取消人工确认门禁 |
+| 一：安装与向导 | macOS/Linux 安装器、Windows PowerShell 安装器、服务/资料/统一扩展状态检查、简历确认、安全测试 | 全新物理机安装矩阵 |
+| 二：后台入口 | 任务状态机、任务/事件/动作表、SSE、控制台、任务认领、心跳、报告、幂等动作、Docker runner | 暂停/恢复与失败恢复的真实环境回归 |
+| 三：统一扩展 | v1.0 WebSocket 协议、一次性配对码、短期本地令牌、动作白名单、搜索导航、批量职位收集、身份校验、问候语自动发送和统一悬浮控制台 | 问候语与简历图片自动发送需继续真实账号回归 |
 
-“代码完成”不等于“真实投递已开放”。发送类动作只有在目标岗位和公司身份一致、用户完成明确确认、扩展返回送达证据后，才允许记为成功。
+“代码完成”不等于“真实投递已开放”。问候语和简历图片只有在企业清单已经确认、目标岗位和公司身份一致且扩展返回送达证据后，才允许记为成功。简历图片还必须同时满足后台总开关，并遵循扩展的自动、确认或关闭策略。
 
 ## 3. 运行时结构
 
@@ -39,7 +40,7 @@ flowchart LR
     EXT --> BOSS[BOSS 页面]
 ```
 
-- Web、Local Service、Embedding 由一个 Compose 文件统一启动，但仍是三个职责独立的镜像。
+- Web 与 Local Service 由一个 Compose 文件统一启动，automation-runner 复用 Local Service 镜像。
 - runner 与 Local Service 使用同一镜像，由 Compose 自动启动；runner 不直接访问 DOM，只能调用 Local Service 的动作接口。
 - 扩展连接地址固定为 `ws://127.0.0.1:8765/v1/browser/ws`。
 - Nginx 只在本机端口转发 `/v1`，包括 WebSocket Upgrade。
@@ -66,7 +67,9 @@ draft → validating → ready → running ↔ paused
 
 ### 4.1 投递清单确认
 
-`POST /v1/automation/runs` 只创建 `draft` 草稿，不会触发 runner 或浏览器动作。控制台必须展示快照中的 `plannedJobs`，至少包含企业、岗位和问候语，并允许用户取消勾选。用户点击“确认并启动”时，`POST /v1/automation/runs/{runId}/start` 携带 `selectedJobIds`；服务端校验这些岗位属于原始计划，将所选子集重新冻结到 `configSnapshot.plannedJobs`，同步修正 `targetCount`，写入 `plan-confirmed` 审计事件，然后才进入校验和运行状态。空清单、重复 ID 或计划外岗位均拒绝启动。
+`POST /v1/automation/runs` 创建 `draft` 草稿后会立即把采集流水线排入后台，HTTP 响应不需要等待整批职位完成。流水线通过扩展依次执行 `navigate_search` 和 `collect_jobs`，再由 Local Service 保存 JD、执行规则、本地资料匹配、模型分析与问候语生成，并把通过决策的企业写入 `plannedJobs`。采集期间的 `collection.status` 与 `collection.phase` 持久化到 SQLite，页面刷新后可以继续显示或重新排队未完成任务。`POST /v1/automation/runs/{runId}/collect` 作为幂等的失败重试/中断恢复入口。
+
+控制台必须展示该次新采集生成的 `plannedJobs`，至少包含企业、岗位和问候语，并允许用户取消勾选。历史职位快照不能被静默当成本次任务计划。用户点击“确认企业并开始投递”时，`POST /v1/automation/runs/{runId}/start` 携带 `selectedJobIds`；服务端校验这些岗位属于原始计划，将所选子集重新冻结到 `configSnapshot.plannedJobs`，同步修正 `targetCount`，写入 `plan-confirmed` 审计事件，然后才进入校验和运行状态。这是 runner 启动前的人工安全门；采集未完成、空清单、重复 ID 或计划外岗位均拒绝启动。真实发送阶段仍执行扩展的目标身份复核；问候语不再逐条确认，简历图片保留可见预览确认。
 
 ## 5. 浏览器动作协议
 
@@ -95,9 +98,9 @@ draft → validating → ready → running ↔ paused
 }
 ```
 
-扩展只接受固定白名单：`ping`、`session_status`、`navigate_search`、`capture_job`、`open_job`、`open_chat`、`validate_identity`、`send_greeting`、`preview_resume`、`send_resume`。未知动作（尤其任意 JavaScript）会在服务端与扩展端双重拒绝。
+扩展只接受固定白名单：`ping`、`session_status`、`navigate_search`、`capture_job`、`collect_jobs`、`open_job`、`open_chat`、`validate_identity`、`send_greeting`、`preview_resume`、`send_resume`。其中 `collect_jobs` 只在 BOSS 搜索页遍历岗位卡片、等待详情区域更新并返回去重后的结构化职位，不执行沟通或发送。未知动作（尤其任意 JavaScript）会在服务端与扩展端双重拒绝。
 
-发送动作还必须包含 `expectedTitle` 与 `expectedCompany`。问候语使用浏览器确认框，简历使用包含真实图片的扩展预览层；用户取消时返回 `confirmation_required`，不会静默点击发送。点击后只有同时观察到目标身份与送达证据才返回成功；证据不足返回 `uncertain`，幂等账本禁止自动重试。
+发送动作还必须包含 `expectedTitle` 与 `expectedCompany`。问候语在企业清单确认后自动填入并发送；简历使用包含真实图片的扩展预览层，用户取消图片发送时返回 `confirmation_required`。点击后只有同时观察到目标身份与送达证据才返回成功；证据不足返回 `uncertain`，幂等账本禁止自动重试。
 
 ## 6. Docker 内置 runner
 
@@ -113,12 +116,13 @@ runner 通过 `/v1/automation/runner/claim` 原子认领任务，并持续写入
 
 ## 7. 发布门禁
 
-统一扩展可以替代 Kimi 与 Skill 的代码通路已经建立，但默认安装说明仍保留旧链路作为回退，直到以下项目全部通过：
+默认安装与运行不依赖 Kimi 或 Skill。旧版 Kimi + Skill 只作为开发者可选回退保留，直到以下项目全部通过后再考虑删除其代码与文档：
 
 - BOSS DOM 搜索、懒加载和聊天区选择器的固定样本测试；
 - 受控账号上的一条问候语与一张简历图片真实发送；
 - 发送后气泡出现、编辑器清空、目标身份一致三项证据；
-- 新旧链路同批岗位结果差异报告；
+- 职位批量收集、去重、懒加载和本地分析的固定样本测试；
+- 可选的新旧链路同批岗位结果差异报告；
 - 扩展回滚包和数据库备份恢复演练。
 
-未达到门禁时，界面应显示“预览/等待确认”，不能宣称无人值守自动投递已经完成。
+启用简历图片发送时，界面必须显示“预览/等待确认”，不能把尚未确认的图片记录为已发送；未启用图片时，问候语可在清单确认后自动连续发送。

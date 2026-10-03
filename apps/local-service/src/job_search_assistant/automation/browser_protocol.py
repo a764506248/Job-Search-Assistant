@@ -15,6 +15,7 @@ ALLOWED_ACTIONS = frozenset(
         "session_status",
         "navigate_search",
         "capture_job",
+        "collect_jobs",
         "open_job",
         "open_chat",
         "validate_identity",

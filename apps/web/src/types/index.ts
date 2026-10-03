@@ -77,6 +77,84 @@ export interface AutomationRun {
   updatedAt: string
 }
 
+export type AutomationCollectionStatus = 'pending' | 'collecting' | 'ready' | 'no_matches' | 'failed'
+
+export type AutomationCollectionPhase =
+  | 'queued'
+  | 'searching'
+  | 'collecting'
+  | 'analyzing'
+  | 'analysis_completed'
+  | 'awaiting_confirmation'
+  | 'failed'
+
+export type AutomationReviewOutcome = 'approved' | 'rule_rejected' | 'duplicate' | 'material_error' | 'analysis_error'
+
+export interface AutomationReviewedJob {
+  snapshotId: number | null
+  jobId: string
+  title: string
+  companyName: string
+  salaryText: string | null
+  location: string | null
+  outcome: AutomationReviewOutcome
+  suitabilityScore: number | null
+  reasons: string[]
+  ruleMatches?: JsonData[]
+}
+
+export interface AutomationCollectionState {
+  status: AutomationCollectionStatus
+  source?: 'extension' | 'provided'
+  phase?: AutomationCollectionPhase
+  queuedAt?: string
+  startedAt?: string
+  completedAt?: string
+  failedAt?: string
+  updatedAt?: string
+  currentKeyword?: string
+  requestedTarget?: number
+  candidateLimit?: number
+  collectionIntervalMs?: number
+  collectionFilters?: AutomationCollectionFilters
+  existingExcludedCount?: number
+  collectedCount?: number
+  analyzedCount?: number
+  approvedCount?: number
+  rejectedCount?: number
+  skippedCount?: number
+  ruleRejectedCount?: number
+  duplicateCount?: number
+  materialErrorCount?: number
+  analysisErrorCount?: number
+  attemptId?: number
+  batchNumber?: number
+  batchLimit?: number
+  lastBatchCount?: number
+  partial?: boolean
+  reviewedJobs?: AutomationReviewedJob[]
+  message?: string
+  reason?: string
+  error?: string
+}
+
+export interface AutomationCollectionFilters {
+  jobType?: string
+  salary?: string
+  experience?: string
+  degree?: string
+  industry?: string
+  scale?: string
+}
+
+export interface AutomationCollectionConfig {
+  candidateLimit: number
+  collectionIntervalMs: number
+  collectionFilters: AutomationCollectionFilters
+  searchKeywords?: string[]
+  cityCode?: string
+}
+
 export interface PlannedAutomationJob {
   jobId: string
   url: string
@@ -85,6 +163,8 @@ export interface PlannedAutomationJob {
   greeting?: string
   salaryText?: string
   location?: string
+  retrySkipGreeting?: boolean
+  retrySkipResume?: boolean
 }
 
 export interface AutomationEvent {
@@ -180,7 +260,7 @@ export interface LibraryRecord {
   updatedAt: string
 }
 
-export interface RagSearchResult {
+export interface KnowledgeEvidence {
   sourceType: string
   sourceId: string
   sourceName: string
@@ -190,41 +270,14 @@ export interface RagSearchResult {
   chunkIndex: number
   content: string
   score: number
-  vectorScore: number
   keywordScore: number
-}
-
-export interface RagStatus {
-  chunks: number
-  sources: number
-  indexedAt?: string
-  model?: string
-  embeddingAvailable: boolean
-  embeddingService: JsonData
-}
-
-export interface RagChunk {
-  id: number
-  sourceType: string
-  sourceId: string
-  sourceName: string
-  knowledgeType: string
-  entityId: string
-  tags: string[]
-  chunkIndex: number
-  content: string
-  contentHash: string
-  embedding: number[]
-  dimensions: number
-  model: string
-  indexedAt: string
 }
 
 export interface JobMatch {
   suitabilityScore: number
   customizationConfidence: number
   decision: { materialStrategy: 'custom' | 'default' | 'blocked' }
-  evidence: RagSearchResult[]
+  evidence: KnowledgeEvidence[]
 }
 
 export interface MaterialPreview {
@@ -246,6 +299,20 @@ export interface MaterialPreview {
   match: JobMatch
 }
 
+export interface JobInsight {
+  jobId: number
+  mode: 'local' | 'ai'
+  summary: string
+  strengths: string[]
+  gaps: string[]
+  recommendations: string[]
+  interviewQuestions: string[]
+  match: JobMatch
+  modelRecordId?: number
+  modelName?: string
+  modelId?: string
+}
+
 export interface ResumeTemplate {
   id: string
   name: string
@@ -259,9 +326,6 @@ export interface ResumeImportResult {
   resumeId: number
   projectIds: number[]
   extractedCharacters: number
-  indexRebuilt: boolean
-  indexedChunks?: number
-  indexError?: string
   aiExtractionUsed: boolean
   aiProjectCount: number
   aiExtractionError?: string
@@ -278,7 +342,4 @@ export interface ResumeConfirmationResult {
   resume: LibraryRecord
   profileFields: string[]
   projectIds: number[]
-  indexRebuilt: boolean
-  indexedChunks?: number
-  indexError?: string
 }

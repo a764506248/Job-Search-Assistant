@@ -1,6 +1,5 @@
 const status = document.querySelector<HTMLElement>('#status')!
-const code = document.querySelector<HTMLInputElement>('#pairing-code')!
-const pair = document.querySelector<HTMLButtonElement>('#pair')!
+const openConsole = document.querySelector<HTMLButtonElement>('#open-console')!
 
 async function refreshStatus() {
   const result = await browser.runtime.sendMessage({
@@ -12,24 +11,21 @@ async function refreshStatus() {
   status.classList.toggle('ready', result.connected)
 }
 
-pair.addEventListener('click', async () => {
-  const value = code.value.trim()
-  if (!/^\d{6}$/.test(value)) {
-    status.textContent = '请输入后台生成的 6 位配对码'
-    return
-  }
-  pair.disabled = true
-  status.textContent = '正在连接…'
+openConsole.addEventListener('click', async () => {
+  openConsole.disabled = true
   try {
-    await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value })
-    await new Promise(resolve => setTimeout(resolve, 500))
-    await refreshStatus()
+    const tabs = await browser.tabs.query({ url: ['https://zhipin.com/*', 'https://*.zhipin.com/*'] })
+    const tab = tabs.find(item => item.active) ?? tabs[0]
+    if (!tab?.id) throw new Error('请先打开 BOSS 直聘页面')
+    await browser.tabs.update(tab.id, { active: true })
+    await browser.tabs.sendMessage(tab.id, { type: 'job-search-assistant:toggle-control-panel' })
+    window.close()
   }
   catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error)
   }
   finally {
-    pair.disabled = false
+    openConsole.disabled = false
   }
 })
 

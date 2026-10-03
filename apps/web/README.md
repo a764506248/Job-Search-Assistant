@@ -4,7 +4,7 @@
 
 - `src/app/`：应用壳、导航、服务状态和路由出口；
 - `src/router/`：Vue Router 路由表；
-- `src/views/`：按 `dashboard/jobs/profile/library/resume/knowledge` 业务域分类的页面；
+- `src/views/`：按 `dashboard/jobs/profile/library/resume/analysis` 业务域分类的页面；
 - `src/components/`：按业务域分类的可复用组件；
 - `src/services/`：统一的后端 API 客户端；
 - `src/composables/`：可复用的 Composition API 状态逻辑；

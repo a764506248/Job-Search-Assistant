@@ -131,6 +131,34 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
             "没有可执行的岗位计划；未执行浏览器操作",
         )
         return
+    confirmation = config.get("planConfirmation", {})
+    confirmed_job_ids = (
+        confirmation.get("selectedJobIds", [])
+        if isinstance(confirmation, dict)
+        else []
+    )
+    approval_token = run.get("approvalToken", "")
+    planned_job_ids = [
+        str(job.get("jobId", ""))
+        for job in planned_jobs
+        if isinstance(job, dict)
+    ]
+    if (
+        not isinstance(confirmation, dict)
+        or confirmation.get("status") != "confirmed"
+        or not isinstance(confirmed_job_ids, list)
+        or not isinstance(approval_token, str)
+        or not approval_token
+        or set(str(job_id) for job_id in confirmed_job_ids) != set(planned_job_ids)
+    ):
+        finish_run(
+            api,
+            run_id,
+            runner_id,
+            "blocked",
+            "任务缺少有效的用户确认凭据；未执行浏览器发送操作",
+        )
+        return
 
     success_count = 0
     failure_count = 0
@@ -209,30 +237,33 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                 record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
                 continue
 
-            sent = browser_action(
-                api,
-                run_id,
-                runner_id,
-                job_id=job_id,
-                action="send_greeting",
-                payload={
-                    "expectedTitle": expected_title,
-                    "expectedCompany": expected_company,
-                    "text": greeting,
-                },
-                deadline_ms=60_000,
-            )
-            greeting_status = sent.get("result", {}).get("status")
-            if greeting_status != "success":
-                failure_count += 1
-                reason = sent.get("result", {}).get("error") or (
-                    f"问候语发送失败：{greeting_status or 'unknown'}"
+            if not job.get("retrySkipGreeting"):
+                sent = browser_action(
+                    api,
+                    run_id,
+                    runner_id,
+                    job_id=job_id,
+                    action="send_greeting",
+                    payload={
+                        "expectedJobId": job_id,
+                        "expectedTitle": expected_title,
+                        "expectedCompany": expected_company,
+                        "text": greeting,
+                        "approvalToken": approval_token,
+                    },
+                    deadline_ms=60_000,
                 )
-                record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
-                finish_run(api, run_id, runner_id, "blocked", str(reason))
-                return
+                greeting_status = sent.get("result", {}).get("status")
+                if greeting_status != "success":
+                    failure_count += 1
+                    reason = sent.get("result", {}).get("error") or (
+                        f"问候语发送失败：{greeting_status or 'unknown'}"
+                    )
+                    record_progress(api, run_id, runner_id, job_id, "failure", str(reason))
+                    finish_run(api, run_id, runner_id, "blocked", str(reason))
+                    return
 
-            if config.get("sendResumeImage"):
+            if config.get("sendResumeImage") and not job.get("retrySkipResume"):
                 resume = browser_action(
                     api,
                     run_id,
@@ -240,8 +271,10 @@ def execute_run(api: LocalApi, run: dict[str, Any], runner_id: str, dry_run: boo
                     job_id=job_id,
                     action="send_resume",
                     payload={
+                        "expectedJobId": job_id,
                         "expectedTitle": expected_title,
                         "expectedCompany": expected_company,
+                        "approvalToken": approval_token,
                     },
                     deadline_ms=60_000,
                 )
@@ -285,6 +318,7 @@ def run_loop(
             claimed = api.post("/v1/automation/runner/claim", {"runnerId": runner_id})
             run = claimed.get("run")
             if run:
+                run["approvalToken"] = claimed.get("approvalToken")
                 execute_run(api, run, runner_id, dry_run)
             elif once:
                 return

@@ -26,12 +26,12 @@
     <a-modal v-model:open="detailOpen" width="980px" wrap-class-name="snapshot-detail-modal" :footer="null" centered destroy-on-close @after-close="closeDetail">
       <template #title><div v-if="detailJob" class="snapshot-modal-title"><strong>{{ detailJob.title }}</strong><span>{{ detailJob.companyName }} · {{ detailJob.companySize || '公司规模未识别' }}</span></div></template>
       <div v-if="detailJob" class="job-detail-modal-body">
-        <div class="snapshot-test-actions"><div><strong>材料生成测试</strong><span>读取当前 JD、个人档案、向量证据、默认问候语和默认简历；仅生成预览，不会发送或覆盖数据。</span></div><a-button class="material-test-button" type="primary" :loading="previewing" @click="generateMaterialPreview">{{ previewing ? '正在生成材料…' : '生成材料示例' }}</a-button></div>
-        <div class="snapshot-detail-grid"><div><span>薪资</span><strong>{{ detailJob.salaryText || '未识别' }}</strong></div><div><span>城市 / 区域</span><strong>{{ detailJob.location || '未识别' }}</strong></div><div><span>详细工作地址</span><strong>{{ detailJob.workAddress || '未识别' }}</strong></div><div><span>经验</span><strong>{{ detailJob.experience || '未识别' }}</strong></div><div><span>学历</span><strong>{{ detailJob.education || '未识别' }}</strong></div><div><span>招聘者</span><strong>{{ [detailJob.recruiterName, detailJob.recruiterTitle].filter(Boolean).join(' · ') || '未识别' }}</strong></div><div><span>采集时间</span><strong>{{ formatTime(detailJob.capturedAt) }}</strong></div></div>
+        <div class="snapshot-test-actions"><div><strong>材料生成测试</strong><span>读取当前 JD、个人档案、本地资料证据、默认问候语和默认简历；仅生成预览，不会发送或覆盖数据。</span></div><a-button class="material-test-button" type="primary" :loading="previewing" @click="generateMaterialPreview">{{ previewing ? '正在生成材料…' : '生成材料示例' }}</a-button></div>
+        <div class="snapshot-detail-grid"><div><span>薪资</span><strong>{{ formatSalary(detailJob.salaryText, '未识别') }}</strong></div><div><span>城市 / 区域</span><strong>{{ detailJob.location || '未识别' }}</strong></div><div><span>详细工作地址</span><strong>{{ detailJob.workAddress || '未识别' }}</strong></div><div><span>经验</span><strong>{{ detailJob.experience || '未识别' }}</strong></div><div><span>学历</span><strong>{{ detailJob.education || '未识别' }}</strong></div><div><span>招聘者</span><strong>{{ [detailJob.recruiterName, detailJob.recruiterTitle].filter(Boolean).join(' · ') || '未识别' }}</strong></div><div><span>采集时间</span><strong>{{ formatTime(detailJob.capturedAt) }}</strong></div></div>
         <div v-if="detailJob.skills?.length" class="snapshot-detail-tags"><span v-for="tag in detailJob.skills" :key="tag" class="tag">{{ tag }}</span></div>
         <section class="snapshot-jd"><h3>完整 JD</h3><pre>{{ detailJob.description }}</pre></section>
         <section class="snapshot-material"><h3>投递材料与结果</h3><dl><div><dt>沟通</dt><dd>{{ detailJob.hasCommunicated ? '已沟通' : '未沟通' }}</dd></div><div><dt>面试</dt><dd>{{ detailJob.hasInterview ? '已获得面试' : '暂无面试' }}</dd></div><div><dt>简历</dt><dd>{{ detailJob.resumeVariant === 'optimized' ? '针对 JD 优化简历' : '默认简历' }}{{ detailJob.generatedResumeId ? ` · ID ${detailJob.generatedResumeId}` : '' }}</dd></div><div><dt>问候语</dt><dd>{{ detailJob.generatedGreeting || '尚未生成或记录' }}</dd></div><div><dt>优化说明</dt><dd>{{ detailJob.resumeOptimization || '暂无' }}</dd></div></dl></section>
-        <section v-if="materialPreview" class="material-preview"><div class="material-preview-heading"><div><h3>生成示例</h3><p>{{ materialPreview.modelName }} · {{ materialPreview.modelId }}</p></div><div><span>适合度 {{ materialPreview.match.suitabilityScore }}</span><span>可信度 {{ materialPreview.match.customizationConfidence }}</span></div></div><article><h4>新问候语</h4><p>{{ materialPreview.greeting }}</p><details><summary>查看默认问候语</summary><p>{{ materialPreview.defaultGreeting || '未配置默认问候语' }}</p></details></article><article><h4>{{ materialPreview.resume.headline }}</h4><div v-for="section in resumePreviewSections" :key="section.title" class="resume-preview-section"><strong>{{ section.title }}</strong><ul><li v-for="item in section.items" :key="item">{{ item }}</li></ul></div></article><article><h4>采用的向量证据</h4><ul><li v-for="item in materialPreview.match.evidence.slice(0, 5)" :key="`${item.sourceId}-${item.chunkIndex}`"><strong>{{ item.sourceName }}</strong> · {{ item.content }}</li></ul></article></section>
+        <section v-if="materialPreview" class="material-preview"><div class="material-preview-heading"><div><h3>生成示例</h3><p>{{ materialPreview.modelName }} · {{ materialPreview.modelId }}</p></div><div><span>适合度 {{ materialPreview.match.suitabilityScore }}</span><span>可信度 {{ materialPreview.match.customizationConfidence }}</span></div></div><article><h4>新问候语</h4><p>{{ materialPreview.greeting }}</p><details><summary>查看默认问候语</summary><p>{{ materialPreview.defaultGreeting || '未配置默认问候语' }}</p></details></article><article><h4>{{ materialPreview.resume.headline }}</h4><div v-for="section in resumePreviewSections" :key="section.title" class="resume-preview-section"><strong>{{ section.title }}</strong><ul><li v-for="item in section.items" :key="item">{{ item }}</li></ul></div></article><article><h4>采用的本地资料</h4><ul><li v-for="item in materialPreview.match.evidence.slice(0, 5)" :key="`${item.sourceId}-${item.chunkIndex}`"><strong>{{ item.sourceName }}</strong> · {{ item.content }}</li></ul></article></section>
       </div>
     </a-modal>
 
@@ -44,7 +44,7 @@
       </div>
       <div class="match-evidence"><h3>检索证据</h3>
         <article v-for="item in match.result.evidence.slice(0, 5)" :key="`${item.sourceId}-${item.chunkIndex}`">
-          <div><strong>{{ item.sourceName }}</strong><span>综合 {{ percent(item.score) }} · 向量 {{ percent(item.vectorScore) }} · 关键词 {{ percent(item.keywordScore) }}</span></div><p>{{ item.content }}</p>
+          <div><strong>{{ item.sourceName }}</strong><span>关键词匹配 {{ percent(item.keywordScore) }}</span></div><p>{{ item.content }}</p>
         </article>
         <p v-if="!match.result.evidence.length">暂无知识库证据，将使用默认材料。</p>
       </div>
@@ -67,12 +67,12 @@
       <div v-else class="table-wrap"><table><thead><tr><th>职位与公司</th><th>薪资 / 地点</th><th>要求</th><th><span class="field-heading">生成问候语<small>generatedGreeting</small></span></th><th>沟通结果</th><th>采集时间</th><th>操作</th></tr></thead>
         <tbody><tr v-for="job in jobs" :key="job.id">
           <td><strong>{{ job.title }}</strong><small>{{ job.companyName }}</small><small>{{ job.companySize || '规模未识别' }}</small></td>
-          <td><strong>{{ job.salaryText || '—' }}</strong><small>{{ job.location || '地点未识别' }}</small><small v-if="job.workAddress" class="job-address-preview">{{ job.workAddress }}</small></td>
+          <td><strong>{{ formatSalary(job.salaryText, '—') }}</strong><small>{{ job.location || '地点未识别' }}</small><small v-if="job.workAddress" class="job-address-preview">{{ job.workAddress }}</small></td>
           <td><div class="tags"><span v-for="tag in jobTags(job)" :key="tag" class="tag">{{ tag }}</span></div></td>
           <td><div class="job-greeting-cell"><span :class="['greeting-status', { ready: Boolean(job.generatedGreeting) }]">{{ job.generatedGreeting ? '已生成' : '未生成' }}</span><p class="job-greeting-preview" :title="job.generatedGreeting || '当前快照尚未生成问候语'">{{ job.generatedGreeting || '当前快照尚未生成问候语' }}</p></div></td>
           <td><div class="snapshot-outcomes"><span :class="job.hasCommunicated ? 'outcome-positive' : ''">{{ job.hasCommunicated ? '已沟通' : '未沟通' }}</span><span :class="job.hasInterview ? 'outcome-positive' : ''">{{ job.hasInterview ? '有面试' : '无面试' }}</span><small>{{ job.resumeVariant === 'optimized' ? '优化简历' : '默认简历' }}</small></div></td>
           <td><time>{{ formatTime(job.capturedAt) }}</time><br><small>{{ sourceLabel(job.source) }}</small></td>
-          <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
+          <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="router.push({ name: 'analysis', query: { jobId: job.id } })">分析</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
         </tr></tbody>
       </table></div>
       <div v-if="total" class="snapshot-pagination"><a-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-size-changer="true" :page-size-options="['10', '20', '50', '100']" show-quick-jumper :show-total="(value: number) => `共 ${value} 条职位快照`" @change="changePage" @show-size-change="changePageSize" /></div>
@@ -83,12 +83,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Modal, message } from 'ant-design-vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
-import { formatTime } from '../../utils/format'
+import { formatSalary, formatTime } from '../../utils/format'
 import type { JobMatch, JobTrackingUpdate, MaterialPreview, StoredJob } from '../../types'
 
 const jobs = ref<StoredJob[]>([])
+const router = useRouter()
 const filter = ref('')
 const communicationResult = ref('')
 const total = ref(0)
@@ -165,16 +167,41 @@ async function generateMaterialPreview() {
   finally { previewing.value = false }
 }
 
-async function load() {
-  loading.value = true
+let greetingRefreshTimer: ReturnType<typeof setTimeout> | undefined
+let greetingRefreshAttempts = 0
+
+async function load(refreshingGreetings = false) {
+  if (!refreshingGreetings) greetingRefreshAttempts = 0
+  if (!refreshingGreetings) loading.value = true
   try {
     const result = await api.jobs({ page: page.value, pageSize: pageSize.value, query: filter.value, communicationResult: communicationResult.value })
-    jobs.value = result.items
+    if (refreshingGreetings) {
+      const currentJobs = new Map(jobs.value.map(item => [item.id, item]))
+      jobs.value = result.items.map((next) => {
+        const current = currentJobs.get(next.id)
+        if (!current) return next
+        return current.generatedGreeting === next.generatedGreeting
+          ? current
+          : { ...current, generatedGreeting: next.generatedGreeting }
+      })
+    }
+    else {
+      jobs.value = result.items
+    }
     total.value = result.total
     page.value = result.page
+    if (greetingRefreshTimer) clearTimeout(greetingRefreshTimer)
+    if (result.items.some(item => !item.generatedGreeting) && greetingRefreshAttempts < 60) {
+      greetingRefreshAttempts += 1
+      greetingRefreshTimer = setTimeout(() => void load(true), 2_000)
+    }
   }
-  catch (error) { message.error((error as Error).message) }
-  finally { loading.value = false }
+  catch (error) {
+    if (!refreshingGreetings) message.error((error as Error).message)
+  }
+  finally {
+    if (!refreshingGreetings) loading.value = false
+  }
 }
 
 function changePage(nextPage: number) { page.value = nextPage; void load() }
@@ -186,7 +213,10 @@ watch(filter, () => {
   searchTimer = setTimeout(() => { page.value = 1; void load() }, 300)
 })
 watch(communicationResult, () => { page.value = 1; void load() })
-onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (greetingRefreshTimer) clearTimeout(greetingRefreshTimer)
+})
 
 async function runMatch(job: StoredJob) {
   matchingId.value = job.id

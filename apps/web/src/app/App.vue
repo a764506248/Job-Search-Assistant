@@ -51,13 +51,13 @@ const navigation = [
   { name: 'setup', path: '/setup', label: '安装向导', icon: '✓' },
   { name: 'automation', path: '/automation', label: '自动投递', icon: '▶' },
   { name: 'jobs', path: '/jobs', label: '职位快照', icon: '▤' },
+  { name: 'analysis', path: '/analysis', label: '职位分析', icon: '◈' },
   { name: 'profile', path: '/profile', label: '个人档案', icon: '◎' },
   { name: 'projects', path: '/projects', label: '项目库', icon: '◇' },
   { name: 'resumes', path: '/resumes', label: '简历库', icon: '▧' },
   { name: 'templates', path: '/templates', label: '简历模板', icon: '▥' },
   { name: 'rules', path: '/rules', label: '匹配规则', icon: '⌁' },
   { name: 'models', path: '/models', label: '模型配置', icon: '✦' },
-  { name: 'knowledge', path: '/knowledge', label: '向量知识库', icon: '◉' },
 ]
 
 const pageTitle = computed(() => String(route.meta.title || '工作台'))

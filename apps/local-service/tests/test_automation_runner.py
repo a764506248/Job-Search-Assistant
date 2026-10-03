@@ -66,7 +66,12 @@ class ExecutingApi(FakeApi):
 def planned_run() -> dict[str, Any]:
     return {
         "id": 8,
+        "approvalToken": "runner-only-approval",
         "configSnapshot": {
+            "planConfirmation": {
+                "status": "confirmed",
+                "selectedJobIds": ["job-1"],
+            },
             "plannedJobs": [{
                 "jobId": "job-1",
                 "url": "https://www.zhipin.com/job_detail/job-1.html",
@@ -105,7 +110,7 @@ def test_runner_sends_job_id_for_browser_identity_checks() -> None:
     assert validate_call["payload"]["requireChat"] is True
 
 
-def test_runner_allows_time_for_visible_send_confirmation() -> None:
+def test_runner_allows_time_for_automatic_greeting_delivery_verification() -> None:
     api = ExecutingApi(action_status="success")
 
     execute_run(api, planned_run(), "compose-runner", dry_run=False)
@@ -116,6 +121,21 @@ def test_runner_allows_time_for_visible_send_confirmation() -> None:
         if path.endswith("/browser-action") and body["action"] == "send_greeting"
     )
     assert send_call["deadlineMs"] == 60_000
+    assert send_call["payload"]["expectedJobId"] == "job-1"
+    assert send_call["payload"]["approvalToken"] == "runner-only-approval"
+
+
+def test_runner_blocks_unconfirmed_plan_before_any_browser_action() -> None:
+    api = ExecutingApi(action_status="success")
+    run = planned_run()
+    del run["configSnapshot"]["planConfirmation"]
+
+    execute_run(api, run, "compose-runner", dry_run=False)
+
+    assert not any(path.endswith("/browser-action") for path, _ in api.calls)
+    finish = next(body for path, body in api.calls if path.endswith("/runner-finish"))
+    assert finish["status"] == "blocked"
+    assert "用户确认凭据" in finish["reason"]
 
 
 def test_runner_stops_before_next_browser_action_when_cancelled() -> None:

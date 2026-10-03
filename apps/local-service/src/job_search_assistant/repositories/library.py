@@ -54,6 +54,11 @@ class LibraryRepository:
                 )
                 """
             )
+            # v0.1 no longer uses a vector index. These tables only contained
+            # derived embeddings and can be safely removed without touching
+            # user profiles, projects, resumes, or delivery history.
+            connection.execute("DROP TABLE IF EXISTS vector_chunks_fts")
+            connection.execute("DROP TABLE IF EXISTS vector_chunks")
             connection.execute("PRAGMA optimize")
 
     def list(self, kind: LibraryKind) -> list[dict[str, Any]]:
@@ -398,7 +403,7 @@ class LibraryRepository:
 
     @staticmethod
     def _structure_profile(data: dict[str, Any]) -> dict[str, Any]:
-        """Keep editable text fields while materializing stable entities for RAG."""
+        """Keep editable text fields while materializing stable local knowledge entities."""
         structured = dict(data)
         summary = str(structured.get("summary", "")).strip()
         if summary and not structured.get("strengths"):

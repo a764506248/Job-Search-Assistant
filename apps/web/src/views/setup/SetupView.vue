@@ -4,7 +4,7 @@
       <div>
         <span class="pill">首次使用</span>
         <h2>从安装到开始投递，只检查必要步骤</h2>
-        <p>本页读取本地服务的真实状态。完成简历、模型和投递偏好配置后，再确认浏览器环境。</p>
+        <p>启动 Docker 本地服务、配对统一 Chrome 扩展并导入简历后，即可在后台完成职位收集、企业确认和投递。</p>
       </div>
       <div class="setup-score" :class="`is-${status?.overall || 'pending'}`">
         <strong>{{ status?.completed || 0 }}/{{ status?.total || 0 }}</strong>
@@ -42,18 +42,18 @@
 
       <section id="browser" class="setup-section setup-browser-panel">
         <div class="setup-section-heading">
-          <div><p class="eyebrow">BROWSER CHECK</p><h2>浏览器投递环境</h2></div>
-          <span class="setup-phase">阶段 1</span>
+          <div><p class="eyebrow">BROWSER CHECK</p><h2>统一 Chrome 扩展</h2></div>
+          <span class="setup-phase">默认链路</span>
         </div>
         <div class="setup-browser-content">
           <div class="browser-pairing-card">
-            <span class="setup-phase">阶段 3 预览</span>
-            <h3>统一浏览器扩展</h3>
+            <span class="setup-phase">搜索 · 收集 · 投递</span>
+            <h3>连接浏览器扩展</h3>
             <p v-if="browserProtocol?.connected" class="browser-pairing-ready">
               已连接扩展 {{ browserProtocol.extensionVersion || '' }} · 协议 {{ browserProtocol.protocolVersion }}
             </p>
             <template v-else>
-              <p>点击生成一次性配对码，在扩展弹窗中输入。配对码 10 分钟后失效。</p>
+              <p>扩展负责在已登录的 BOSS 页面搜索、收集职位和执行确认后的投递。点击生成一次性配对码，并在扩展弹窗中输入；配对码 10 分钟后失效。</p>
               <strong v-if="pairing" class="browser-pairing-code">{{ pairing.code }}</strong>
             </template>
             <div class="browser-pairing-actions">
@@ -69,12 +69,9 @@
             </div>
           </div>
           <form class="browser-probe-form" @submit.prevent="saveBrowserProbe">
-            <p>请在本机和 BOSS 页面核对后确认。状态保存 12 小时，过期后需要重新检查。</p>
-            <label><input v-model="probe.webbridgeRunning" type="checkbox" /> WebBridge 正在运行</label>
-            <label><input v-model="probe.kimiExtensionConnected" type="checkbox" /> Kimi 浏览器扩展已连接</label>
-            <label><input v-model="probe.projectExtensionReady" type="checkbox" /> BOSS 页面已显示简历图片面板</label>
+            <p>扩展连接状态会自动检测；请在 BOSS 页面核对以下两项。手工确认保存 12 小时，过期后需要重新检查。</p>
+            <label><input v-model="probe.projectExtensionReady" type="checkbox" /> BOSS 页面已加载统一扩展</label>
             <label><input v-model="probe.bossLoggedIn" type="checkbox" /> 已登录 BOSS 直聘</label>
-            <label class="browser-probe-version">Skill 版本<input v-model.trim="probe.skillVersion" placeholder="例如 5.10.0" /></label>
             <a-button type="primary" html-type="submit" :loading="savingProbe">保存检查结果</a-button>
           </form>
         </div>
@@ -84,7 +81,7 @@
         <div>
           <p class="eyebrow">READY TO RUN</p>
           <h2>{{ canContinue ? '本地准备已完成' : '完成阻塞项后即可开始投递' }}</h2>
-          <p>{{ canContinue ? '可以先运行无副作用测试；当前版本仍通过 Skill 启动真实投递。' : '优先处理标记为“需处理”的项目；安全测试不会打开 BOSS 页面或执行点击。' }}</p>
+          <p>{{ canContinue ? '可以先运行无副作用测试，再到“自动投递”由扩展收集职位、确认企业并启动任务。' : '优先处理标记为“需处理”的项目；安全测试不会打开 BOSS 页面或执行点击。' }}</p>
         </div>
         <a-button type="primary" :loading="testingSetup" @click="runSafeTest">运行安全测试</a-button>
       </section>
@@ -122,7 +119,7 @@ const probe = ref<BrowserProbe>({
   kimiExtensionConnected: false,
   projectExtensionReady: false,
   bossLoggedIn: false,
-  skillVersion: '5.10.0',
+  skillVersion: '',
   source: 'manual',
 })
 

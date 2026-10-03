@@ -5,6 +5,16 @@ export function formatTime(value?: string) {
   }).format(new Date(value))
 }
 
+const UNREADABLE_SALARY_PATTERN = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}\uFFFD]/u
+
+export function formatSalary(value?: string | null, emptyText = '薪资未识别') {
+  const normalized = value?.trim()
+  if (!normalized) return emptyText
+  return UNREADABLE_SALARY_PATTERN.test(normalized)
+    ? '薪资暂无法识别（历史采集编码）'
+    : normalized
+}
+
 export function actionLabel(action?: string) {
   return ({
     notify: '仅提醒',

@@ -4,7 +4,7 @@ from .models import (
     AutomaticJobMatchRequest,
     AutomaticJobMatchResponse,
     DecisionRequest,
-    RagSearchResult,
+    KnowledgeEvidence,
     RiskRuleInput,
 )
 
@@ -13,7 +13,7 @@ def build_automatic_match(
     request: AutomaticJobMatchRequest, evidence: list[dict[str, object]]
 ) -> AutomaticJobMatchResponse:
     analysis = analyze_jd(request.job_text)
-    ranked = [RagSearchResult.model_validate(item) for item in evidence]
+    ranked = [KnowledgeEvidence.model_validate(item) for item in evidence]
     scores = [max(0.0, min(1.0, item.score)) for item in ranked[:5]]
     best = scores[0] if scores else 0.0
     average = sum(scores) / len(scores) if scores else 0.0

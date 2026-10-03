@@ -1,8 +1,32 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { findBossChatImageInput, makePanelDraggable, mountResumeImageTestPanel } from './panel'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  findBossChatImageInput,
+  makePanelDraggable,
+  mountBrowserControlPanel,
+  readAutomationSettings,
+} from './panel'
 
-describe('resume image test panel', () => {
-  afterEach(() => { document.documentElement.innerHTML = '<head></head><body></body>' })
+describe('browser control panel', () => {
+  const storage: Record<string, unknown> = {}
+  beforeEach(() => {
+    for (const key of Object.keys(storage)) delete storage[key]
+    vi.stubGlobal('browser', {
+      runtime: {
+        sendMessage: vi.fn().mockResolvedValue({ connected: true, protocolVersion: '1.0' }),
+        onMessage: { addListener: vi.fn() },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => ({ [key]: storage[key] })),
+          set: vi.fn(async (value: Record<string, unknown>) => { Object.assign(storage, value) }),
+        },
+      },
+    })
+  })
+  afterEach(() => {
+    document.documentElement.innerHTML = '<head></head><body></body>'
+    vi.unstubAllGlobals()
+  })
 
   it('selects the chat image input instead of resume-library inputs', () => {
     document.body.innerHTML = `
@@ -12,30 +36,42 @@ describe('resume image test panel', () => {
     expect(findBossChatImageInput(document)?.id).toBe('chat-image')
   })
 
-  it('mounts the paused test-only interface once', () => {
-    mountResumeImageTestPanel(document)
-    mountResumeImageTestPanel(document)
-    const hosts = document.querySelectorAll('#job-search-assistant-image-test-host')
+  it('mounts one unified connection and automation settings panel', () => {
+    mountBrowserControlPanel(document)
+    mountBrowserControlPanel(document)
+    const hosts = document.querySelectorAll('#job-search-assistant-control-host')
     expect(hosts).toHaveLength(1)
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('自动发送仍需用户确认')
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.3.5')
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('仅加载图片预览')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('自动投递控制台')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.4.11')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('自动发送')
+    expect(hosts[0]?.shadowRoot?.textContent).not.toContain('仅加载图片预览')
   })
 
-  it('can collapse and expand the compact panel', () => {
-    mountResumeImageTestPanel(document)
-    const shadow = document.querySelector('#job-search-assistant-image-test-host')?.shadowRoot
+  it('can collapse and expand the unified panel', () => {
+    mountBrowserControlPanel(document)
+    const shadow = document.querySelector('#job-search-assistant-control-host')?.shadowRoot
     const panel = shadow?.querySelector('.panel')
     const toggle = shadow?.querySelector<HTMLButtonElement>('.toggle')
     toggle?.click()
     expect(panel?.classList.contains('collapsed')).toBe(true)
     expect(toggle?.getAttribute('aria-label')).toBe('展开')
-    expect(shadow?.querySelector('.compact-load')?.textContent).toBe('加载')
-    expect(shadow?.querySelector('.compact-send')?.textContent).toBe('发送')
-    expect(shadow?.querySelector('.load')).toBeTruthy()
-    expect(shadow?.querySelector('.send')).toBeTruthy()
     toggle?.click()
     expect(panel?.classList.contains('collapsed')).toBe(false)
+  })
+
+  it('defaults resume delivery to automatic and persists the selected mode', async () => {
+    expect(await readAutomationSettings()).toMatchObject({ resumeSendMode: 'automatic' })
+    mountBrowserControlPanel(document)
+    await Promise.resolve()
+    const select = document.querySelector('#job-search-assistant-control-host')?.shadowRoot
+      ?.querySelector<HTMLSelectElement>('.resume-mode')
+    expect(select?.value).toBe('automatic')
+    if (select) {
+      select.value = 'off'
+      select.dispatchEvent(new Event('change'))
+    }
+    await Promise.resolve()
+    expect(await readAutomationSettings()).toMatchObject({ resumeSendMode: 'off' })
   })
 
   it('drags the panel from its header but ignores header buttons', () => {

@@ -69,7 +69,7 @@ async function importResume() {
     const model = result.aiModelName ? `${result.aiModelName}（${result.aiModelId || '未知模型 ID'}）` : '已配置模型'
     const switched = result.aiAttemptErrors?.length ? `主模型失败后已自动切换兜底模型（${result.aiAttemptErrors.join('；')}）。` : ''
     const ai = result.aiExtractionUsed ? `${model} 已完成${result.aiProfileExtracted ? '完整简历结构化识别并' : ''}拆分 ${result.aiProjectCount} 个项目写入项目库。${switched}` : `AI 结构化提取未执行，已回退本地解析：${result.aiExtractionError || '模型不可用'}。`
-    importMessage.value = { title: `${result.filename} 识别完成，等待确认`, detail: `识别出 ${result.profileFields.length} 个档案字段和 ${result.aiProjectCount} 个候选项目，提取 ${result.extractedCharacters} 个字符。${ai}请在下方核对内容并点击“确认并写入知识库”；确认前不会改变个人档案、项目库和向量索引。` }
+    importMessage.value = { title: `${result.filename} 识别完成，等待确认`, detail: `识别出 ${result.profileFields.length} 个档案字段和 ${result.aiProjectCount} 个候选项目，提取 ${result.extractedCharacters} 个字符。${ai}请在下方核对内容并点击“确认并写入知识库”；确认前不会改变个人档案和项目库。` }
     selectedFile.value = null
     if (fileInput.value) fileInput.value.value = ''
     await manager.value?.reload()

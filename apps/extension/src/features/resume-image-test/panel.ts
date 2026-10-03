@@ -1,11 +1,39 @@
-const HOST_ID = 'job-search-assistant-image-test-host'
+const HOST_ID = 'job-search-assistant-control-host'
 const GET_IMAGE_MESSAGE = 'job-search-assistant:get-default-resume-image'
+const SETTINGS_KEY = 'jobSearchAssistantAutomationSettings'
 
 interface ImageResponse {
   ok: true
   base64: string
   contentType: string
   filename: string
+}
+
+export type ResumeSendMode = 'automatic' | 'confirm' | 'off'
+
+export interface AutomationSettings {
+  resumeSendMode: ResumeSendMode
+  collapsed: boolean
+}
+
+const DEFAULT_SETTINGS: AutomationSettings = {
+  resumeSendMode: 'automatic',
+  collapsed: false,
+}
+
+export async function readAutomationSettings(): Promise<AutomationSettings> {
+  const stored = await browser.storage.local.get(SETTINGS_KEY)
+  const value = stored[SETTINGS_KEY] as Partial<AutomationSettings> | undefined
+  return {
+    resumeSendMode: ['automatic', 'confirm', 'off'].includes(value?.resumeSendMode ?? '')
+      ? value!.resumeSendMode as ResumeSendMode
+      : DEFAULT_SETTINGS.resumeSendMode,
+    collapsed: value?.collapsed === true,
+  }
+}
+
+export async function saveAutomationSettings(settings: AutomationSettings): Promise<void> {
+  await browser.storage.local.set({ [SETTINGS_KEY]: settings })
 }
 
 export function findBossChatImageInput(doc: Document): HTMLInputElement | null {
@@ -29,7 +57,6 @@ export function makePanelDraggable(doc: Document, panel: HTMLElement, handle: HT
   let dragging = false
   let offsetX = 0
   let offsetY = 0
-
   handle.addEventListener('mousedown', (event) => {
     const target = event.target
     if (target instanceof Element && target.closest('button')) return
@@ -52,118 +79,134 @@ export function makePanelDraggable(doc: Document, panel: HTMLElement, handle: HT
   doc.addEventListener('mouseup', () => { dragging = false })
 }
 
-export function mountResumeImageTestPanel(doc: Document): void {
+export function mountBrowserControlPanel(doc: Document): void {
   if (doc.getElementById(HOST_ID)) return
   const host = doc.createElement('div')
   host.id = HOST_ID
-  host.dataset.version = '0.3.5'
+  host.dataset.version = '0.4.11'
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
     <style>
       :host { all: initial; }
-      .panel { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; width: 246px;
-        box-sizing: border-box; padding: 11px; border: 1px solid #d9e2ec; border-radius: 11px;
-        background: #fff; box-shadow: 0 10px 32px rgba(15,23,42,.2); color: #172033;
-        font: 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-      .top { display: flex; align-items: center; gap: 6px; cursor: move; user-select: none; }
-      h3 { flex: 1; margin: 0; font-size: 14px; white-space: nowrap; }
-      .toggle { width: 28px; height: 26px; margin: 0; padding: 0; background: #eef2f6; color: #344054; font-size: 15px; }
-      .compact-actions { display: none; gap: 4px; }
-      .compact-actions button { width: auto; margin: 0; padding: 5px 7px; font-size: 11px; white-space: nowrap; }
-      .version { margin-top: 2px; color: #667085; font-size: 11px; }
-      .paused { margin: 8px 0; padding: 6px 8px; border-radius: 6px; background: #fff7e6; color: #ad6800; }
-      .status { margin: 8px 0; min-height: 34px; white-space: pre-wrap; }
-      img { display: none; width: 100%; max-height: 150px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 7px; }
-      button { width: 100%; margin-top: 7px; padding: 7px 9px; border: 0; border-radius: 7px;
-        background: #00b9b0; color: white; cursor: pointer; font-weight: 600; }
-      button.secondary { background: #1677ff; } button:disabled { opacity: .45; cursor: not-allowed; }
-      .hint { margin-top: 7px; color: #667085; font-size: 11px; }
-      .panel.collapsed { width: 250px; } .panel.collapsed .body { display: none; }
-      .panel.collapsed .compact-actions { display: flex; }
+      .panel { position: fixed; right: 18px; bottom: 18px; z-index: 2147483647; width: 310px;
+        box-sizing: border-box; border: 1px solid #cfe0d8; border-radius: 14px; overflow: hidden;
+        background: #f8fcfa; box-shadow: 0 16px 46px rgba(15,45,34,.22); color: #17251f;
+        font: 13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      .top { display:flex;align-items:center;gap:8px;padding:12px 14px;background:#0d684f;color:white;cursor:move;user-select:none }
+      .brand { flex:1 }.brand strong { display:block;font-size:14px }.brand span { opacity:.78;font-size:10px;letter-spacing:.08em }
+      button { border:0;border-radius:8px;cursor:pointer;font:600 13px/1.2 inherit }
+      .toggle { width:28px;height:28px;padding:0;background:rgba(255,255,255,.16);color:white;font-size:16px }
+      .body { padding:13px }.panel.collapsed { width:218px }.panel.collapsed .body { display:none }
+      .status { display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:#fff0df;color:#8b5719 }
+      .status.ready { background:#def5e9;color:#0a6a4e }.dot { width:8px;height:8px;border-radius:50%;background:currentColor }
+      .pairing { margin-top:11px }.pairing.hidden { display:none }
+      label { display:block;margin:0 0 5px;color:#52645c;font-size:11px }
+      .pair-row { display:flex;gap:7px }.pair-row input { min-width:0;flex:1;padding:9px 10px;border:1px solid #bcd2c8;border-radius:8px;font:700 16px/1 monospace;letter-spacing:.18em }
+      .primary { padding:9px 12px;background:#087f5f;color:white }.primary:disabled { opacity:.5;cursor:wait }
+      .section { margin-top:12px;padding-top:12px;border-top:1px solid #dce8e2 }
+      .section-title { margin:0 0 8px;font-size:12px;font-weight:700;color:#31483e }
+      .setting { display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-top:8px }
+      .setting-text strong { display:block;font-size:12px }.setting-text span { display:block;margin-top:2px;color:#718078;font-size:10px }
+      .pill { flex:none;padding:4px 7px;border-radius:999px;background:#def5e9;color:#087356;font-size:10px;font-weight:700 }
+      select { max-width:116px;padding:7px 6px;border:1px solid #bcd2c8;border-radius:8px;background:white;color:#17251f;font-size:11px }
+      .hint { margin:11px 0 0;color:#6d7d75;font-size:10px;line-height:1.55 }
     </style>
     <section class="panel">
-      <div class="top">
-        <h3>简历图片</h3>
-        <div class="compact-actions"><button class="compact-load">加载</button><button class="compact-send secondary" disabled>发送</button></div>
+      <header class="top">
+        <div class="brand"><strong>自动投递控制台</strong><span>JOB SEARCH ASSISTANT · v0.4.11</span></div>
         <button class="toggle" title="折叠" aria-label="折叠">−</button>
-      </div>
+      </header>
       <div class="body">
-        <div class="version">v0.3.5 · visible-send-confirmation · 标题栏可拖拽</div>
-        <div class="paused">自动发送仍需用户确认</div>
-        <div class="status">请先进入 BOSS 聊天并选中目标联系人。</div>
-        <img alt="默认简历图片预览">
-        <button class="load">1. 仅加载图片预览</button>
-        <button class="send secondary" disabled>2. 确认并发送给当前联系人</button>
-        <div class="hint">第二步注入后 BOSS 会立即发送。</div>
+        <div class="status"><span class="dot"></span><span class="status-text">正在检查本地连接…</span></div>
+        <div class="pairing">
+          <label for="pair-code">本地后台显示的 6 位配对码</label>
+          <div class="pair-row"><input id="pair-code" inputmode="numeric" maxlength="6" placeholder="000000"><button class="primary pair">连接</button></div>
+        </div>
+        <div class="section">
+          <p class="section-title">发送策略</p>
+          <div class="setting"><div class="setting-text"><strong>问候语</strong><span>页面确认投递清单后执行</span></div><span class="pill">自动发送</span></div>
+          <div class="setting"><div class="setting-text"><strong>简历图片</strong><span>仅在任务要求发送简历时生效</span></div>
+            <select class="resume-mode" aria-label="简历图片发送策略"><option value="automatic">自动发送</option><option value="confirm">发送前确认</option><option value="off">不发送</option></select>
+          </div>
+        </div>
+        <p class="hint">配置保存在本机扩展中。自动发送仍只处理你在本地页面确认过的企业与岗位。</p>
       </div>
     </section>`
   doc.documentElement.append(host)
 
-  const status = shadow.querySelector<HTMLElement>('.status')!
   const panel = shadow.querySelector<HTMLElement>('.panel')!
-  const dragHandle = shadow.querySelector<HTMLElement>('.top')!
-  const toggleButton = shadow.querySelector<HTMLButtonElement>('.toggle')!
-  const preview = shadow.querySelector<HTMLImageElement>('img')!
-  const loadButton = shadow.querySelector<HTMLButtonElement>('.load')!
-  const sendButton = shadow.querySelector<HTMLButtonElement>('.send')!
-  const compactLoadButton = shadow.querySelector<HTMLButtonElement>('.compact-load')!
-  const compactSendButton = shadow.querySelector<HTMLButtonElement>('.compact-send')!
-  let previewUrl: string | undefined
-  let pendingFile: File | undefined
+  const handle = shadow.querySelector<HTMLElement>('.top')!
+  const toggle = shadow.querySelector<HTMLButtonElement>('.toggle')!
+  const status = shadow.querySelector<HTMLElement>('.status')!
+  const statusText = shadow.querySelector<HTMLElement>('.status-text')!
+  const pairing = shadow.querySelector<HTMLElement>('.pairing')!
+  const code = shadow.querySelector<HTMLInputElement>('#pair-code')!
+  const pair = shadow.querySelector<HTMLButtonElement>('.pair')!
+  const resumeMode = shadow.querySelector<HTMLSelectElement>('.resume-mode')!
+  let settings = { ...DEFAULT_SETTINGS }
 
-  makePanelDraggable(doc, panel, dragHandle)
-
-  toggleButton.addEventListener('click', () => {
-    const collapsed = panel.classList.toggle('collapsed')
-    toggleButton.textContent = collapsed ? '+' : '−'
-    toggleButton.title = collapsed ? '展开' : '折叠'
-    toggleButton.setAttribute('aria-label', collapsed ? '展开' : '折叠')
+  makePanelDraggable(doc, panel, handle)
+  const applyCollapsed = (collapsed: boolean) => {
+    panel.classList.toggle('collapsed', collapsed)
+    toggle.textContent = collapsed ? '+' : '−'
+    toggle.title = collapsed ? '展开' : '折叠'
+    toggle.setAttribute('aria-label', collapsed ? '展开' : '折叠')
+  }
+  toggle.addEventListener('click', () => {
+    settings.collapsed = !panel.classList.contains('collapsed')
+    applyCollapsed(settings.collapsed)
+    void saveAutomationSettings(settings)
+  })
+  resumeMode.addEventListener('change', () => {
+    settings.resumeSendMode = resumeMode.value as ResumeSendMode
+    void saveAutomationSettings(settings)
   })
 
-  const loadImage = () => {
-    loadButton.disabled = true
-    compactLoadButton.disabled = true
-    sendButton.disabled = true
-    compactSendButton.disabled = true
-    status.textContent = '正在从本地服务读取默认简历图片…'
-    void loadDefaultImage().then(({ file, url }) => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
-      previewUrl = url
-      pendingFile = file
-      preview.src = url
-      preview.style.display = 'block'
-      status.textContent = `已在扩展内加载 ${file.name}（${formatBytes(file.size)}），尚未发送。\n请核对图片和当前联系人。`
-      sendButton.disabled = false
-      compactSendButton.disabled = false
-    }).catch((error: unknown) => {
-      status.textContent = error instanceof Error ? error.message : String(error)
-    }).finally(() => {
-      loadButton.disabled = false
-      compactLoadButton.disabled = false
-    })
+  const refreshStatus = async () => {
+    try {
+      const result = await browser.runtime.sendMessage({ type: 'job-search-assistant:connection-status' }) as { connected: boolean, protocolVersion: string }
+      status.classList.toggle('ready', result.connected)
+      statusText.textContent = result.connected ? `本地服务已连接 · 协议 ${result.protocolVersion}` : '尚未连接本地服务'
+      pairing.classList.toggle('hidden', result.connected)
+    }
+    catch {
+      status.classList.remove('ready')
+      statusText.textContent = '扩展后台暂时不可用，请重新加载扩展'
+      pairing.classList.remove('hidden')
+    }
   }
-
-  const sendImage = () => {
-    if (!pendingFile) {
-      status.textContent = '请先加载默认简历图片预览。'
+  pair.addEventListener('click', async () => {
+    const value = code.value.trim()
+    if (!/^\d{6}$/.test(value)) {
+      statusText.textContent = '请输入 6 位配对码'
       return
     }
-    const input = findBossChatImageInput(doc)
-    if (!input) {
-      status.textContent = '未找到 BOSS 聊天图片上传控件，请进入“消息”页面并选中联系人；当前没有执行发送。'
-      return
+    pair.disabled = true
+    statusText.textContent = '正在连接…'
+    try {
+      await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value })
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await refreshStatus()
     }
-    putFileIntoInput(input, pendingFile)
-    sendButton.disabled = true
-    compactSendButton.disabled = true
-    status.textContent = '已将图片交给 BOSS 发送，请在聊天记录中确认图片消息已出现。'
-  }
-
-  loadButton.addEventListener('click', loadImage)
-  compactLoadButton.addEventListener('click', loadImage)
-  sendButton.addEventListener('click', sendImage)
-  compactSendButton.addEventListener('click', sendImage)
+    catch (error) { statusText.textContent = error instanceof Error ? error.message : String(error) }
+    finally { pair.disabled = false }
+  })
+  void readAutomationSettings().then((value) => {
+    settings = value
+    resumeMode.value = settings.resumeSendMode
+    applyCollapsed(settings.collapsed)
+  })
+  void refreshStatus()
+  browser.runtime.onMessage.addListener((message: unknown) => {
+    if (!message || typeof message !== 'object' || (message as { type?: unknown }).type !== 'job-search-assistant:toggle-control-panel') return
+    settings.collapsed = false
+    applyCollapsed(false)
+    void saveAutomationSettings(settings)
+    return Promise.resolve({ ok: true })
+  })
 }
+
+export const mountResumeImageTestPanel = mountBrowserControlPanel
 
 export async function loadDefaultImage(): Promise<{ file: File; url: string }> {
   const response = await browser.runtime.sendMessage({ type: GET_IMAGE_MESSAGE }) as ImageResponse
@@ -173,8 +216,4 @@ export async function loadDefaultImage(): Promise<{ file: File; url: string }> {
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   const file = new File([bytes], response.filename, { type: response.contentType })
   return { file, url: URL.createObjectURL(file) }
-}
-
-function formatBytes(bytes: number): string {
-  return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }

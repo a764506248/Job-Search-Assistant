@@ -190,10 +190,7 @@ async function confirmResume(record: LibraryRecord) {
   try {
     const result = await api.confirmResume(record.id)
     await reload()
-    const indexMessage = result.indexRebuilt
-      ? `并重建 ${result.indexedChunks || 0} 个向量片段`
-      : `；向量索引暂未更新：${result.indexError || '服务不可用'}`
-    message.success(`识别结果已确认，写入 ${result.projectIds.length} 个项目${indexMessage}`)
+    message.success(`识别结果已确认，写入 ${result.projectIds.length} 个项目`)
   } catch (error) {
     message.error(`确认失败：${(error as Error).message}`)
   } finally {

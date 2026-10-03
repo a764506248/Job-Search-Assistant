@@ -4,7 +4,12 @@ import {
   type BrowserActionEnvelope,
   type BrowserActionResult,
 } from '../src/automation/protocol'
-import { isClosedMessageChannel } from '../src/automation/message-channel'
+import { buildBossSearchUrl, normalizeBossSearchFilters } from '../src/platform/boss/search'
+import {
+  canReloadAndRetryAction,
+  reloadContentScriptAndRetryOnce,
+} from '../src/automation/content-script-recovery'
+import { isClosedMessageChannel, isMissingMessageReceiver } from '../src/automation/message-channel'
 
 const WS_URL = 'ws://127.0.0.1:8765/v1/browser/ws'
 const TOKEN_KEY = 'browserProtocolToken'
@@ -95,13 +100,15 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       const query = String(envelope.payload.query ?? '').trim()
       const city = String(envelope.payload.cityCode ?? '').trim()
       if (!query) return failure(envelope, '搜索关键词不能为空')
-      const url = new URL('https://www.zhipin.com/web/geek/jobs')
-      url.searchParams.set('query', query)
-      if (city) url.searchParams.set('city', city)
-      const ready = waitForTabReady(tab.id, url.toString())
-      await browser.tabs.update(tab.id, { url: url.toString() })
+      const url = buildBossSearchUrl(
+        query,
+        city,
+        normalizeBossSearchFilters(envelope.payload.filters),
+      )
+      const ready = waitForTabReady(tab.id, url)
+      await browser.tabs.update(tab.id, { url })
       await ready
-      return success(envelope, { navigationCompleted: true, url: url.toString() })
+      return success(envelope, { navigationCompleted: true, url })
     }
     if (envelope.action === 'open_job') {
       const url = new URL(String(envelope.payload.url ?? ''))
@@ -118,6 +125,30 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       return { requestId: envelope.requestId, ...result }
     }
     catch (error) {
+      if (isMissingMessageReceiver(error) && canReloadAndRetryAction(envelope.action) && tab.url) {
+        const recoveryDeadlineAt = Date.now() + Math.max(500, envelope.deadlineMs - 500)
+        const result = await reloadContentScriptAndRetryOnce(envelope.action, {
+          reloadAndWaitForComplete: () => reloadTabAndWaitForReady(
+            tab.id!,
+            tab.url!,
+            remainingTime(recoveryDeadlineAt, 20_000),
+          ),
+          waitForReceiver: () => waitForContentScriptReceiver(
+            tab.id!,
+            envelope,
+            recoveryDeadlineAt,
+          ),
+          retryOnce: () => sendBrowserActionToTab(tab.id!, {
+            ...envelope,
+            deadlineMs: remainingTime(recoveryDeadlineAt, envelope.deadlineMs),
+          }),
+        })
+        return {
+          requestId: envelope.requestId,
+          ...result,
+          evidence: { ...result.evidence, contentScriptReloaded: true },
+        }
+      }
       if (envelope.action === 'open_chat' && isClosedMessageChannel(error)) {
         return await recoverOpenChatAfterNavigation(tab.id, envelope)
       }
@@ -136,6 +167,73 @@ async function sendBrowserActionToTab(
   return browser.tabs.sendMessage(tabId, {
     type: 'job-search-assistant:browser-action', envelope,
   }) as Promise<Omit<BrowserActionResult, 'requestId'>>
+}
+
+async function reloadTabAndWaitForReady(
+  tabId: number,
+  expectedUrl: string,
+  timeoutMs: number,
+): Promise<void> {
+  const expected = new URL(expectedUrl)
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      browser.tabs.onUpdated.removeListener(listener)
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('重新加载 BOSS 页面超时，内容脚本未就绪'))
+    }, timeoutMs)
+    const listener: Parameters<typeof browser.tabs.onUpdated.addListener>[0] = (
+      updatedTabId,
+      _changeInfo,
+      updatedTab,
+    ) => {
+      if (updatedTabId !== tabId || updatedTab.status !== 'complete' || !updatedTab.url) return
+      const actual = new URL(updatedTab.url)
+      if (actual.hostname !== expected.hostname || actual.pathname !== expected.pathname) return
+      cleanup()
+      resolve()
+    }
+    browser.tabs.onUpdated.addListener(listener)
+    void browser.tabs.reload(tabId).catch((error) => {
+      cleanup()
+      reject(error)
+    })
+  })
+}
+
+async function waitForContentScriptReceiver(
+  tabId: number,
+  envelope: BrowserActionEnvelope,
+  deadlineAt: number,
+): Promise<void> {
+  const probe: BrowserActionEnvelope = {
+    ...envelope,
+    requestId: `${envelope.requestId}:content-script-probe`,
+    action: 'session_status',
+    deadlineMs: remainingTime(deadlineAt, 5_000),
+    payload: {},
+  }
+  let lastError: unknown
+  while (Date.now() < deadlineAt) {
+    try {
+      await sendBrowserActionToTab(tabId, probe)
+      return
+    }
+    catch (error) {
+      if (!isMissingMessageReceiver(error)) throw error
+      lastError = error
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('BOSS 页面已重新加载，但内容脚本仍未就绪')
+}
+
+function remainingTime(deadlineAt: number, maximumMs: number): number {
+  return Math.max(1, Math.min(maximumMs, deadlineAt - Date.now()))
 }
 
 async function recoverOpenChatAfterNavigation(

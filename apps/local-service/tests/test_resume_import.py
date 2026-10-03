@@ -7,7 +7,7 @@ from job_search_assistant.main import create_app
 
 
 class FakeEmbedder:
-    model = "test/resume-embedding"
+    model = "test/local-matcher"
 
     def health(self) -> dict[str, object]:
         return {"status": "ok", "model": self.model}
@@ -198,18 +198,7 @@ def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path
     assert {item["name"] for item in projects} == {"项目一", "项目二"}
     assert all(item["data"]["source"] == "resume-import" for item in projects)
 
-    chunks = client.get("/v1/rag/chunks").json()["items"]
-    strength_chunks = [item for item in chunks if item["knowledgeType"] == "strengths"]
-    assert len(strength_chunks) == 1
-    assert strength_chunks[0]["entityId"] == "strengths"
-    assert strength_chunks[0]["content"] == "完整的个人优势"
-    project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
-    assert {item["entityId"] for item in project_chunks} == {
-        str(item["id"]) for item in projects
-    }
-
-
-def test_import_resume_writes_profile_projects_resume_and_vectors(tmp_path) -> None:
+def test_import_resume_writes_profile_projects_and_resume(tmp_path) -> None:
     client = TestClient(
         create_app(
             tmp_path / "jobs.sqlite3",
@@ -241,11 +230,8 @@ xiaolin@example.com
 
     assert response.status_code == 201
     result = response.json()
-    assert result["indexRebuilt"] is False
-    assert result["indexedChunks"] is None
     assert result["projectIds"] == []
     assert client.get("/v1/profile").json()["data"] == {}
-    assert client.get("/v1/rag/chunks").json()["total"] == 0
     pending_setup = client.get("/v1/setup/status").json()
     pending_resume = next(
         item for item in pending_setup["checks"] if item["key"] == "resume"
@@ -253,8 +239,6 @@ xiaolin@example.com
     assert pending_resume["status"] == "blocked"
     assert "等待确认" in pending_resume["message"]
     confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
-    assert confirmed["indexRebuilt"] is True
-    assert confirmed["indexedChunks"] >= 3
     assert len(confirmed["projectIds"]) == 1
     ready_setup = client.get("/v1/setup/status").json()
     ready_resume = next(item for item in ready_setup["checks"] if item["key"] == "resume")
@@ -281,10 +265,6 @@ xiaolin@example.com
     assert len(resumes) == 1
     assert resumes[0]["data"]["fileName"] == "张小林简历.txt"
     assert "rawText" in resumes[0]["data"]
-
-    chunks = client.get("/v1/rag/chunks").json()
-    assert chunks["total"] >= 3
-    assert {item["dimensions"] for item in chunks["items"]} == {3}
 
     repeated = client.post(
         "/v1/resumes/import",
@@ -399,7 +379,7 @@ class EmptyProjectExtractor:
         return []
 
 
-def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_empty(
+def test_import_resume_splits_projects_when_ai_returns_empty(
     tmp_path,
 ) -> None:
     client = TestClient(
@@ -438,12 +418,6 @@ def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_e
         "实时语音导购 Agent",
         "内容运营系统",
     }
-    chunks = client.get("/v1/rag/chunks").json()["items"]
-    project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
-    assert {item["entityId"] for item in project_chunks} == {
-        str(project_id) for project_id in confirmed["projectIds"]
-    }
-
     reprocess = client.post(f"/v1/resumes/{result['resumeId']}/extract-projects")
     assert reprocess.status_code == 200
     assert reprocess.json()["projectIds"] == confirmed["projectIds"]

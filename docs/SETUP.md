@@ -1,8 +1,8 @@
 # 安装、前置依赖与首次启动
 
-本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。基础后台、AI 能力、浏览器采集和自动投递不是同一组依赖，请按实际使用范围准备。
+本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。默认自动化链路只需要 Docker 本地服务、统一 Chrome 扩展和经用户确认的简历；不需要安装 BOSS Skill 或 Kimi WebBridge。
 
-> 一键安装、首次使用向导和后台任务控制已有首版；统一扩展处于协议预览阶段。真实发送仍要求页面内人工确认，并保留 Kimi + Skill 旧链路作为回退。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
+> 统一扩展负责搜索、职位收集和投递页面 I/O，本地服务负责保存、规则、本地资料匹配、模型分析和任务状态；用户确认企业清单后才允许投递。启动后问候语由扩展自动发送，简历图片按统一悬浮控制台中的策略执行。Kimi + Skill 旧链路仅作为可选回退。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
 
 ## 0. 一键安装器
 
@@ -20,7 +20,7 @@ Windows PowerShell：
 .\scripts\install.ps1 -Mode install
 ```
 
-安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，安装或升级 BOSS Skill（保留已有 `user_profile.json`），拉取三个容器镜像并打开 <http://127.0.0.1:8765/setup>。Compose 会从 Local Service 镜像自动启动独立 runner 容器，不需要主机安装 Python 或手工运行脚本。如果本地已有构建后的 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。首次完整拉取包含 Python/ONNX 运行依赖，启动后还可能下载向量模型，网络较慢时需要等待数分钟；安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
+安装器会检查 Docker Compose、Chrome 和端口，把 Release Compose 安装到 `~/.job-search-assistant`，拉取 Web 与 Local Service 镜像并打开 <http://127.0.0.1:8765/setup>。Compose 会从 Local Service 镜像自动启动独立 runner 容器，不需要主机安装 Python 或手工运行脚本。如果本地已有构建后的统一 Chrome 扩展，安装器会同时生成扩展 ZIP；否则会提示从 GitHub Actions 下载。安装器会持续显示 Docker 进度，不应在下载过程中反复重启。
 
 升级、预演和卸载：
 
@@ -30,27 +30,27 @@ Windows PowerShell：
 ./scripts/install.sh --uninstall
 ```
 
-卸载只停止容器并移除安装器托管的 Compose/扩展包，保留 `~/.job-search-assistant/data` 和 Skill 内的用户配置。版本组合由 [`scripts/release-manifest.env`](../scripts/release-manifest.env) 统一声明。当前是开发清单，镜像仍使用 `latest`；正式 Release 发布后应改为不可变版本标签。
+卸载只停止容器并移除安装器托管的 Compose/扩展包，保留 `~/.job-search-assistant/data`。版本组合由 [`scripts/release-manifest.env`](../scripts/release-manifest.env) 统一声明。当前是开发清单，镜像仍使用 `latest`；正式 Release 发布后应改为不可变版本标签。
 
-安装器启动服务后会自动读取 Kimi WebBridge 状态，并把可检测结果写入本地管理后台。进入“安装向导”后还需现场确认项目扩展面板和 BOSS 登录状态。探针结果有效期为 12 小时，避免长期沿用已经退出的浏览器会话。
+安装器启动服务后，进入“安装向导”生成一次性配对码，在统一扩展弹窗中完成连接；向导会自动读取扩展在线状态。还需现场确认 BOSS 页面已加载扩展并处于登录状态，手工确认结果有效期为 12 小时，避免长期沿用已经退出的浏览器会话。
 
 ### 0.1 简历识别确认
 
-导入简历后，系统只保存待确认的候选档案和候选项目，不会立即覆盖个人档案、写入项目库或重建向量索引。请在“简历库”展开摘要核对姓名、目标岗位、项目和原文，再点击“确认并写入知识库”。旧版本已经存在且没有确认字段的简历按已确认处理。
+导入简历后，系统只保存待确认的候选档案和候选项目，不会立即覆盖个人档案或写入项目库。请在“简历库”展开摘要核对姓名、目标岗位、项目和原文，再点击“确认并写入知识库”。旧版本已经存在且没有确认字段的简历按已确认处理。
 
 ### 0.2 无副作用安全测试
 
-安装向导底部的“运行安全测试”只汇总阻塞项、关键词和每日目标。它不会打开 BOSS 页面，不执行浏览器点击，也不会发送消息或投递。安全测试通过只代表环境和配置齐备；阶段一的真实投递仍通过 BOSS Skill 启动。
+安装向导底部的“运行安全测试”只汇总阻塞项、关键词和每日目标。它不会打开 BOSS 页面，不执行浏览器点击，也不会发送消息或投递。安全测试通过只代表环境和配置齐备；之后应到“自动投递”创建任务，由统一扩展先收集职位，确认企业清单后再启动投递。
 
 ## 1. 功能与依赖关系
 
 | 功能 | 必要依赖 |
 | --- | --- |
 | 管理后台与本地数据库 | Docker Desktop、Docker Compose v2、端口 8765 可用 |
-| 向量知识库 | Embedding 容器、端口 8766 可用、首次下载模型所需网络 |
 | 简历 AI 识别、项目提取、问候语和定制材料 | 管理后台中配置并验证可用的大模型 |
-| 项目自带 Chrome 简历图片扩展 | Node.js 22+、npm、Chrome 开发者模式、本地服务、已登录 BOSS |
-| Skill 自动投递 | 已安装 BOSS Skill、Kimi Browser Extension/WebBridge、项目自带图片扩展、已登录 BOSS |
+| 统一 Chrome 扩展自动化 | 本地服务、Chrome、已登录 BOSS；本地构建扩展时才需要 Node.js 22+ 与 npm |
+| 职位收集与分析 | 统一扩展在线、搜索关键词、已确认简历、可用模型与匹配规则 |
+| 旧版 Skill/Kimi 回退（可选） | BOSS Skill、Kimi Browser Extension/WebBridge；不影响默认链路就绪状态 |
 | 网页样式一致的 PDF 导出 | FastAPI 运行环境内可执行的 Chromium；否则自动降级 ReportLab |
 
 ## 2. 基础环境
@@ -62,8 +62,8 @@ Windows PowerShell：
 - Docker Desktop；
 - Docker Compose v2，即 `docker compose`；
 - 建议为 Docker 分配至少 4 GB 内存，推荐 6 GB 或更多；
-- 宿主机端口 `8765`、`8766` 未被其他程序占用；
-- 首次启动可以访问 Docker Hub、Python 包源和 Hugging Face 模型资源。
+- 宿主机端口 `8765` 未被其他程序占用；
+- 首次启动可以访问 Docker 镜像仓库。
 
 启动：
 
@@ -75,13 +75,10 @@ docker compose up -d --build
 
 ```bash
 curl http://127.0.0.1:8765/v1/health
-curl http://127.0.0.1:8766/health
 docker compose ps
 ```
 
 管理后台：<http://127.0.0.1:8765>
-
-首次启动时，Embedding 容器会下载 `jinaai/jina-embeddings-v2-base-zh`。下载完成前服务可能长时间处于 `starting`；模型保存在 Docker Volume `job-search-assistant_embedding-models`，后续启动会复用。
 
 ### 2.2 本地开发环境
 
@@ -102,7 +99,7 @@ uv run pytest -q
 
 ### 2.3 从 Docker Hub 搜索并安装
 
-三个公开镜像位于 Docker Hub 的 `jinxinss` 命名空间，可通过 `docker search jinxinss/job-search-assistant` 搜索。推荐下载专用 Compose 文件一次性启动全部服务：
+两个公开镜像位于 Docker Hub 的 `jinxinss` 命名空间，可通过 `docker search jinxinss/job-search-assistant` 搜索。推荐下载专用 Compose 文件一次性启动全部服务：
 
 ```bash
 curl -O https://raw.githubusercontent.com/a764506248/Job-Search-Assistant/main/docker-compose.dockerhub.yml
@@ -110,7 +107,7 @@ docker compose -f docker-compose.dockerhub.yml pull
 docker compose -f docker-compose.dockerhub.yml up -d
 ```
 
-该配置会拉取 `jinxinss/job-search-assistant-{web,local-service,embedding}:latest`。也可以在各镜像的 Docker Hub 页面查看标签和拉取命令。当前 Docker Hub 的 Web 与 Local Service 镜像支持 `linux/amd64` 和 `linux/arm64`，Embedding 镜像暂时仅支持 `linux/arm64`；Intel/AMD 机器请使用下一节的 GHCR Compose，三个 GHCR 镜像均为双架构。
+该配置会拉取 `jinxinss/job-search-assistant-{web,local-service}:latest`。也可以在各镜像的 Docker Hub 页面查看标签和拉取命令。Web 与 Local Service 镜像支持 `linux/amd64` 和 `linux/arm64`。
 
 ### 2.4 直接拉取 GHCR 镜像
 
@@ -122,11 +119,11 @@ docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 ```
 
-该配置拉取 `ghcr.io/a764506248/job-search-assistant-{web,local-service,embedding}:latest`，同时只将 8765/8766 绑定到本机回环地址。业务数据写入 Compose 文件同级的 `data/`，模型写入命名 Volume。生产或可重复部署建议设置 `JSA_IMAGE_TAG` 使用明确版本标签，而不是长期跟随 `latest`。
+该配置拉取 `ghcr.io/a764506248/job-search-assistant-{web,local-service}:latest`，同时只将 8765 绑定到本机回环地址。业务数据写入 Compose 文件同级的 `data/`。生产或可重复部署建议设置 `JSA_IMAGE_TAG` 使用明确版本标签，而不是长期跟随 `latest`。
 
 ## 3. 大模型配置
 
-Embedding 服务只负责向量化，不负责 AI 简历解析、项目拆分或文案生成。以下功能要求在“模型配置”页面至少保存一个验证成功的模型：
+以下生成式 AI 功能要求在“模型配置”页面至少保存一个验证成功的模型：
 
 - 简历 AI 结构化识别；
 - 项目经历提取；
@@ -159,7 +156,7 @@ http://host.docker.internal:端口
 
 同时需要保证该模型服务允许来自 Docker 的连接。互联网模型 API 可以直接使用其 HTTPS 地址。
 
-## 4. 项目自带浏览器扩展（v0.3.0 统一协议预览版）
+## 4. 统一 Chrome 扩展
 
 ### 4.1 从 GitHub Actions 下载
 
@@ -185,21 +182,30 @@ npm run build:extension
 5. 登录 BOSS 直聘并打开“消息”页；
 6. 重新构建后必须在扩展卡片上点击“重新加载”，再刷新 BOSS 页面。
 
-加载扩展后，先打开后台“安装向导”，生成 6 位一次性配对码；再点击 Chrome 工具栏中的扩展图标输入配对码。扩展通过 `ws://127.0.0.1:8765/v1/browser/ws` 连接，只接受固定白名单动作。服务重启后需要重新配对。
+macOS Finder 默认隐藏以 `.` 开头的目录。如果选择目录时看不到 `.output`，按
+`Command + Shift + .` 显示隐藏文件，或按 `Command + Shift + G` 后输入仓库内的
+`apps/extension/.output/chrome-mv3` 完整路径。扩展卡片版本必须显示 `0.4.10` 或更高；
+旧版 `0.3.x` 不包含职位批量收集动作，后台会阻止开始采集并给出升级提示。
 
-当前版本启用默认简历图片面板、岗位读取和身份校验。面板支持拖拽和折叠；折叠后仍显示“加载”和“发送”按钮。完整手工图片流程为：
+加载扩展后，先打开后台“安装向导”生成 6 位一次性配对码，再在 BOSS 页面右下角“自动投递控制台”中输入配对码。Chrome 工具栏中的扩展图标只用于定位并展开该控制台。扩展通过 `ws://127.0.0.1:8765/v1/browser/ws` 连接，只接受固定白名单动作。服务重启后需要重新配对。
 
-1. 在 BOSS 消息页选中目标联系人；
-2. 点击“仅加载图片预览”，确认扩展状态包含“尚未发送”；
-3. 核对图片及联系人后点击“确认并发送给当前联系人”；
-4. 图片写入 BOSS 上传控件后会立即发送，不要再寻找或点击页面上的第二个发送按钮；
-5. 在聊天记录或联系人摘要中确认图片消息出现。
+统一扩展承担默认自动化链路的全部浏览器 I/O：按关键词打开 BOSS 搜索页、遍历和懒加载岗位卡片、读取完整 JD、打开目标沟通、校验当前会话身份，以及执行企业清单确认后的问候语和简历图片发送。匹配决策始终由本地服务完成，扩展不会自行决定投递企业。
+
+统一悬浮控制台支持拖拽和折叠，并提供三种简历图片策略：
+
+1. `自动发送`：已确认的自动任务请求发送简历时，扩展直接注入图片并验证聊天中出现新图片消息；
+2. `发送前确认`：每次显示图片与目标岗位/企业，确认后再注入；
+3. `不发送`：图片动作被明确阻止，问候语任务不受影响。
+
+后台的“随投递发送简历图片”仍是第一层总开关；扩展策略只在该总开关开启且默认图片可用时生效。
 
 扩展依赖 `https://www.zhipin.com/*` 和 `http://127.0.0.1/*` 权限，通过后台脚本读取 `GET /v1/resumes/default-image`，不需要开启 Chrome 的“允许访问文件网址”。若页面中未出现面板、找不到聊天图片控件或图片未发送，应停止自动投递并检查扩展是否已重新加载、本地服务是否在线以及 BOSS 页面结构是否变化。
 
-## 5. Skill 与 Kimi 回退链路
+## 5. 旧版 Skill 与 Kimi 回退（可选）
 
-统一扩展完成受控真实账号验收前，BOSS Skill + Kimi WebBridge 仍是稳定回退链路：Kimi 负责页面读取、联系人/岗位点击和问候语发送；项目扩展负责默认简历图片的读取、预览和注入；本地 API 负责档案、规则、RAG、职位快照、材料决策和投递记录。
+本节只适用于需要复现旧版流程或执行新旧链路对照测试的开发者。默认安装、职位收集、企业确认和投递均不调用 Skill，也不连接 Kimi WebBridge；未安装或未连接它们不会阻塞向导和任务启动。
+
+旧版回退中，Kimi 负责页面读取、联系人/岗位点击和问候语发送，BOSS Skill 负责流程编排，项目扩展负责默认简历图片注入，本地 API 仍负责档案、规则、本地资料匹配、职位快照、材料决策和投递记录。
 
 ### 5.1 安装 Kimi 浏览器扩展
 
@@ -241,7 +247,7 @@ python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
   ~/.codex/skills/@user_f5c8032a/boss-zhipin-assistant
 ```
 
-### 5.3 运行前条件
+### 5.3 旧版回退运行条件
 
 前置条件：
 
@@ -255,7 +261,7 @@ python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
 - 发送简历图片前，已重新导入 PDF、生成第一页图片并选为默认投递图片；
 - `GET /v1/automation/config` 返回 `defaultResumeImageAvailable=true`；需要随投递发送时，还必须由用户明确设置 `sendResumeImage=true`。
 
-Kimi 与项目扩展可以同时存在，但职责必须固定：Kimi 不再调用 WebBridge `upload` 上传本地图片，项目扩展不执行职位选择或问候语发送。Skill 只通过扩展稳定的 `.load` / `.send` 入口触发图片流程，面板是否折叠、是否被拖动不影响调用。
+这些条件只影响旧版回退。Kimi 与项目扩展同时存在时，Kimi 不再调用 WebBridge `upload` 上传本地图片；Skill 只通过扩展稳定的 `.load` / `.send` 入口触发图片流程，面板是否折叠、是否被拖动不影响调用。
 
 默认简历图片包含个人信息，自动发送默认关闭，必须由用户明确启用。真实投递前还需要完成一次受控的 BOSS 页面冒烟测试。
 
@@ -286,7 +292,7 @@ apps/local-service/data/jobs.sqlite3
 apps/local-service/data/resume-images/
 ```
 
-其中包含个人档案、项目、简历、职位快照、向量、模型配置、投递记录和简历图片。删除项目目录、清空该目录或用空目录覆盖会导致数据丢失。
+其中包含个人档案、项目、简历、职位快照、模型配置、投递记录和简历图片。删除项目目录、清空该目录或用空目录覆盖会导致数据丢失。
 
 建议停止写入后再备份：
 
@@ -317,12 +323,11 @@ docker compose start local-service web
 | 现象 | 优先检查 |
 | --- | --- |
 | `8765` 打不开 | `docker compose ps`、Web 与 local-service 健康状态、端口占用 |
-| Embedding 长时间 starting | 首次模型下载网络、Docker 内存、`docker compose logs embedding` |
 | 模型验证超时 | Base URL、Key、模型 ID、本地模型是否使用 `host.docker.internal` |
 | Chrome 提示清单文件缺失 | 加载了源码目录；应重新构建并加载 `.output/chrome-mv3` |
-| BOSS 页面没有图片面板 | 扩展是否为 v0.2.3+、是否点击“重新加载”、BOSS 页面是否已刷新 |
+| BOSS 页面没有扩展功能 | 是否加载 `.output/chrome-mv3`、是否点击“重新加载”、BOSS 页面是否已刷新 |
 | 图片一直加载失败 | `/v1/resumes/default-image`、默认图片配置、本地服务、扩展后台控制台 |
 | 找不到聊天图片控件 | 是否已进入“消息”并选中联系人、BOSS 页面结构是否变化 |
 | 简历 AI 识别回退本地解析 | 选中模型不可用、超时或未配置兜底模型 |
 | PDF 与网页预览不一致 | Docker 中没有 Chromium，当前使用 ReportLab 降级 |
-| Kimi 无法控制浏览器 | WebBridge 10086、扩展连接状态、BOSS 登录状态 |
+| 旧版 Kimi 回退无法控制浏览器 | WebBridge 10086、Kimi 扩展连接状态、BOSS 登录状态；默认链路无需 Kimi |

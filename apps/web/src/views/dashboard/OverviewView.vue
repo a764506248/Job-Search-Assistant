@@ -8,7 +8,7 @@
       <article class="metric-card"><span>职位快照</span><strong>{{ jobs.length }}</strong><small>已保存的 JD 版本</small></article>
       <article class="metric-card"><span>公司数量</span><strong>{{ companies }}</strong><small>当前资料涉及的公司</small></article>
       <article class="metric-card"><span>今日采集</span><strong>{{ todayCount }}</strong><small>今天新增的职位快照</small></article>
-      <article class="metric-card accent-card"><span>知识库状态</span><strong>本地运行</strong><small>资料与向量保存在本机</small></article>
+      <article class="metric-card accent-card"><span>资料库状态</span><strong>本地运行</strong><small>档案、项目和简历保存在本机</small></article>
     </div>
     <section class="panel">
       <div class="panel-heading"><div><p class="eyebrow">RECENT CAPTURES</p><h2>最近采集的职位</h2></div><a-button type="link" @click="router.push('/jobs')">查看全部 →</a-button></div>
@@ -17,7 +17,7 @@
       <div v-else class="job-list">
         <article v-for="job in jobs.slice(0, 5)" :key="job.id" class="job-row">
           <div><h3>{{ job.title }}</h3><p>{{ job.companyName }}</p></div>
-          <span class="job-meta">{{ job.salaryText || '薪资未识别' }} · {{ job.location || '地点未识别' }}</span>
+          <span class="job-meta">{{ formatSalary(job.salaryText) }} · {{ job.location || '地点未识别' }}</span>
           <time class="job-time">{{ formatTime(job.capturedAt) }}</time>
         </article>
       </div>
@@ -31,7 +31,7 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
-import { formatTime } from '../../utils/format'
+import { formatSalary, formatTime } from '../../utils/format'
 import type { StoredJob } from '../../types'
 
 const router = useRouter()

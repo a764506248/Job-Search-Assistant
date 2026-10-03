@@ -1,10 +1,12 @@
 import json
+import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from ..automation import AutomationRunStatus, ensure_transition
+from ..domain.salary import normalize_salary_text
 
 
 class AutomationRepository:
@@ -64,6 +66,7 @@ class AutomationRepository:
             )
             self._ensure_column(connection, "automation_runs", "runner_id", "TEXT")
             self._ensure_column(connection, "automation_runs", "heartbeat_at", "TEXT")
+            self._ensure_column(connection, "automation_runs", "approval_token", "TEXT")
             now = datetime.now(UTC).isoformat()
             legacy_failures = connection.execute(
                 """SELECT id FROM automation_runs
@@ -95,6 +98,10 @@ class AutomationRepository:
 
     def create_run(self, config: dict[str, Any], target_count: int) -> dict[str, Any]:
         self.initialize()
+        config = self._normalize_config(config)
+        # Confirmation evidence is server-owned.  A client may provide a draft
+        # plan, but it cannot mark that plan as approved while creating it.
+        config.pop("planConfirmation", None)
         now = datetime.now(UTC).isoformat()
         with sqlite3.connect(self.database_path) as connection:
             cursor = connection.execute(
@@ -117,7 +124,12 @@ class AutomationRepository:
         if row is None:
             raise KeyError(run_id)
         result = dict(row)
-        result["config_snapshot"] = json.loads(result.pop("config_snapshot_json"))
+        # The capability is intentionally excluded from ordinary run reads.  It
+        # is exposed only by claim_next_run to the host runner.
+        result.pop("approval_token", None)
+        result["config_snapshot"] = self._normalize_config(
+            json.loads(result.pop("config_snapshot_json"))
+        )
         return result
 
     def confirm_plan(
@@ -128,15 +140,29 @@ class AutomationRepository:
         if run["status"] != "draft":
             raise ValueError(f"run plan cannot be confirmed from {run['status']}")
         config = dict(run["config_snapshot"])
-        config["plannedJobs"] = planned_jobs
+        normalized_jobs = self._normalize_planned_jobs(planned_jobs)
+        selected_job_ids = [str(job.get("jobId", "")) for job in normalized_jobs]
+        if not selected_job_ids or any(not job_id for job_id in selected_job_ids):
+            raise ValueError("confirmed plan requires job ids")
+        if len(selected_job_ids) != len(set(selected_job_ids)):
+            raise ValueError("confirmed plan contains duplicate job ids")
         now = datetime.now(UTC).isoformat()
+        config["plannedJobs"] = normalized_jobs
+        config["planConfirmation"] = {
+            "status": "confirmed",
+            "source": "selected-job-list",
+            "confirmedAt": now,
+            "selectedJobIds": selected_job_ids,
+        }
+        approval_token = secrets.token_urlsafe(32)
         with sqlite3.connect(self.database_path) as connection:
             connection.execute(
                 """UPDATE automation_runs SET config_snapshot_json = ?, target_count = ?,
-                updated_at = ? WHERE id = ?""",
+                approval_token = ?, updated_at = ? WHERE id = ?""",
                 (
                     json.dumps(config, ensure_ascii=False),
-                    len(planned_jobs),
+                    len(normalized_jobs),
+                    approval_token,
                     now,
                     run_id,
                 ),
@@ -147,11 +173,78 @@ class AutomationRepository:
                 "plan-confirmed",
                 "info",
                 {
-                    "selectedCount": len(planned_jobs),
-                    "companies": [job.get("companyName", "") for job in planned_jobs],
+                    "selectedCount": len(normalized_jobs),
+                    "companies": [job.get("companyName", "") for job in normalized_jobs],
                 },
             )
         return self.get_run(run_id)
+
+    def update_collection(
+        self,
+        run_id: int,
+        state: str,
+        *,
+        planned_jobs: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+        emit_event: bool = True,
+    ) -> dict[str, Any]:
+        """Persist extension collection progress while the run is still a draft."""
+        run = self.get_run(run_id)
+        if run["status"] != "draft":
+            raise ValueError(f"run collection cannot be updated from {run['status']}")
+        config = dict(run["config_snapshot"])
+        collection = dict(config.get("collection") or {})
+        collection.update(details or {})
+        collection["status"] = state
+        collection["updatedAt"] = datetime.now(UTC).isoformat()
+        config["collection"] = collection
+        if planned_jobs is not None:
+            config["plannedJobs"] = self._normalize_planned_jobs(planned_jobs)
+
+        event_type = {
+            "pending": "collection-queued",
+            "collecting": "collection-started",
+            "ready": "collection-finished",
+            "no_matches": "analysis-finished",
+            "failed": "collection-failed",
+        }.get(state, "collection-updated")
+        level = "error" if state == "failed" else "info"
+        now = datetime.now(UTC).isoformat()
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                """UPDATE automation_runs SET config_snapshot_json = ?, updated_at = ?
+                WHERE id = ?""",
+                (json.dumps(config, ensure_ascii=False), now, run_id),
+            )
+            if emit_event:
+                self._append_event(
+                    connection,
+                    run_id,
+                    event_type,
+                    level,
+                    {"state": state, **(details or {})},
+                )
+        return self.get_run(run_id)
+
+    def approval_token_matches(self, run_id: int, supplied_token: str) -> bool:
+        """Validate the runner capability without exposing its stored value."""
+        if not supplied_token:
+            return False
+        stored_token = self._approval_token(run_id)
+        return bool(
+            stored_token
+            and secrets.compare_digest(stored_token, supplied_token)
+        )
+
+    def _approval_token(self, run_id: int) -> str | None:
+        self.initialize()
+        with sqlite3.connect(self.database_path) as connection:
+            row = connection.execute(
+                "SELECT approval_token FROM automation_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return str(row[0]) if row[0] else None
 
     def claim_next_run(self, runner_id: str) -> dict[str, Any] | None:
         """Atomically claim the oldest runnable task for one host runner."""
@@ -181,7 +274,9 @@ class AutomationRepository:
                 "info",
                 {"runnerId": runner_id},
             )
-        return self.get_run(run_id)
+        claimed = self.get_run(run_id)
+        claimed["approval_token"] = self._approval_token(run_id)
+        return claimed
 
     def runner_heartbeat(self, runner_id: str) -> dict[str, Any]:
         self.initialize()
@@ -464,6 +559,30 @@ class AutomationRepository:
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @classmethod
+    def _normalize_config(cls, config: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(config)
+        planned_jobs = normalized.get("plannedJobs")
+        if isinstance(planned_jobs, list):
+            normalized["plannedJobs"] = cls._normalize_planned_jobs(planned_jobs)
+        return normalized
+
+    @staticmethod
+    def _normalize_planned_jobs(
+        planned_jobs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        normalized_jobs: list[dict[str, Any]] = []
+        for item in planned_jobs:
+            if not isinstance(item, dict):
+                continue
+            job = dict(item)
+            if "salaryText" in job:
+                job["salaryText"] = normalize_salary_text(
+                    str(job["salaryText"]) if job["salaryText"] is not None else None
+                )
+            normalized_jobs.append(job)
+        return normalized_jobs
 
     @staticmethod
     def _upsert_runner(

@@ -14,8 +14,6 @@ class Settings(BaseSettings):
     port: int = 8765
     local_token: str | None = None
     data_dir: Path = Path("data")
-    embedding_url: str = "http://127.0.0.1:8766"
-    embedding_model: str = "jinaai/jina-embeddings-v2-base-zh"
 
 
 settings = Settings()

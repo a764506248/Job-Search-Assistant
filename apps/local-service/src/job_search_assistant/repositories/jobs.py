@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from ..domain.models import CapturedJob, StoredJob
+from ..domain.salary import normalize_salary_text, prefer_salary_text
 
 
 class JobRepository:
@@ -74,11 +75,15 @@ class JobRepository:
         with self._connect() as connection:
             for job in jobs:
                 content_hash = self._content_hash(job)
-                existed = connection.execute(
-                    """SELECT 1 FROM job_postings
+                existing = connection.execute(
+                    """SELECT salary_text FROM job_postings
                     WHERE platform = ? AND platform_job_id = ?""",
                     (job.platform, job.platform_job_id),
-                ).fetchone() is not None
+                ).fetchone()
+                salary_text = prefer_salary_text(
+                    existing[0] if existing is not None else None,
+                    job.salary_text,
+                )
                 cursor = connection.execute(
                     """
                     INSERT INTO job_postings (
@@ -136,7 +141,7 @@ class JobRepository:
                         job.company_size,
                         job.location,
                         job.work_address,
-                        job.salary_text,
+                        salary_text,
                         job.experience,
                         job.education,
                         job.description,
@@ -154,7 +159,7 @@ class JobRepository:
                         content_hash,
                     ),
                 )
-                if cursor.rowcount > 0 and not existed:
+                if cursor.rowcount > 0 and existing is None:
                     accepted.append(job.platform_job_id)
         return accepted
 
@@ -170,6 +175,17 @@ class JobRepository:
         if row is None:
             raise KeyError(platform_job_id)
         return self._from_row(row)
+
+    def list_platform_job_ids(self, platform: str) -> list[str]:
+        """Return stable ids so browser collection can skip locally known jobs."""
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT platform_job_id FROM job_postings
+                WHERE platform = ? ORDER BY id""",
+                (platform,),
+            ).fetchall()
+        return [str(row[0]) for row in rows if row[0]]
 
     def count(
         self, query: str | None = None, communication_result: str | None = None
@@ -216,7 +232,7 @@ class JobRepository:
                     job.company_size,
                     job.location,
                     job.work_address,
-                    job.salary_text,
+                    normalize_salary_text(job.salary_text),
                     job.experience,
                     job.education,
                     job.description,
@@ -384,7 +400,7 @@ class JobRepository:
             company_size=row["company_size"],
             location=row["location"],
             work_address=row["work_address"],
-            salary_text=row["salary_text"],
+            salary_text=normalize_salary_text(row["salary_text"]),
             experience=row["experience"],
             education=row["education"],
             description=row["description"],

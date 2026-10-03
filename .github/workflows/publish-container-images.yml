@@ -8,7 +8,6 @@ on:
       - '.github/workflows/publish-container-images.yml'
       - 'apps/web/**'
       - 'apps/local-service/**'
-      - 'services/embedding/**'
       - 'packages/contracts/**'
       - 'package.json'
       - 'package-lock.json'
@@ -39,10 +38,6 @@ jobs:
             image: ghcr.io/a764506248/job-search-assistant-local-service
             context: apps/local-service
             dockerfile: apps/local-service/Dockerfile
-          - name: embedding
-            image: ghcr.io/a764506248/job-search-assistant-embedding
-            context: services/embedding
-            dockerfile: services/embedding/Dockerfile
 
     steps:
       - name: Checkout repository

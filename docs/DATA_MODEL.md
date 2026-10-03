@@ -2,7 +2,7 @@
 
 ## 1. 设计原则
 
-- 结构化数据与向量索引分离。
+- 结构化数据是本地资料匹配的唯一事实源。
 - 生成内容必须可追溯到事实来源。
 - 原始文件、解析结果和用户确认结果分开保存。
 - 所有会影响投递的判断都保存版本和证据。
@@ -161,26 +161,9 @@ erDiagram
 
 项目标签关联需要保存来源：用户添加、仓库检测或模型推荐。
 
-## 7. 知识切片
+## 7. 本地资料匹配
 
-```json
-{
-  "id": "chunk_101",
-  "profile_id": "profile_01",
-  "entity_type": "project_fact",
-  "entity_id": "fact_031",
-  "text": "实现关键词与向量混合检索链路",
-  "tags": ["RAG", "向量检索", "后端"],
-  "usage_scopes": ["resume", "greeting", "matching"],
-  "verification_status": "user_confirmed",
-  "embedding_model": "configured-model",
-  "embedding_version": 1,
-  "content_hash": "sha256",
-  "created_at": "2026-09-28T00:00:00Z"
-}
-```
-
-数据库只保存向量引用或向量本身；索引必须可以根据结构化数据重新生成。
+岗位匹配直接读取已确认的个人档案、项目、技能标签和简历事实，执行关键词与中文词组匹配。匹配结果返回来源实体、内容和关键词分数；不保存文本分片、Embedding 或向量索引。
 
 ## 8. 简历
 
@@ -424,7 +407,7 @@ PUT  /v1/library/{kind}/{id}
 DELETE /v1/library/{kind}/{id}
 ```
 
-`GET /v1/resumes/default-image` 只返回数据库中已选默认简历的派生首页图片。不存在时返回 404；扩展和 Skill 不得回退为读取任意本地路径。
+`GET /v1/resumes/default-image` 只返回数据库中已选默认简历的派生首页图片。不存在时返回 404；统一扩展不得回退为读取任意本地路径。
 
 ### 16.5 职位分析
 
@@ -437,7 +420,7 @@ POST /v1/jobs/analyze-and-plan
 POST /v1/jobs/{id}/material-preview
 ```
 
-`/v1/jobs/analyze-and-plan` 是自动投递的原子入口，一次完成职位快照幂等落库、JD 解析、规则判断、RAG 匹配、双阈值决策、问候语计划和默认图片可用性返回。`/v1/jd/analyze`、`/v1/jobs/evaluate` 与 `/v1/jobs/match` 保留为单能力接口。
+`/v1/jobs/analyze-and-plan` 是自动投递的原子入口，一次完成职位快照幂等落库、JD 解析、规则判断、本地资料匹配、双阈值决策、问候语计划和默认图片可用性返回。`/v1/jd/analyze`、`/v1/jobs/evaluate` 与 `/v1/jobs/match` 保留为单能力接口。
 
 ### 16.6 材料生成
 
@@ -449,14 +432,24 @@ GET  /v1/artifacts/{id}
 POST /v1/artifacts/{id}/regenerate
 ```
 
-### 16.7 当前投递记录
+### 16.7 当前自动化任务与投递记录
 
 ```text
+POST /v1/automation/runs
+POST /v1/automation/runs/{id}/collect
+POST /v1/automation/runs/{id}/start
+POST /v1/automation/runs/{id}/pause
+POST /v1/automation/runs/{id}/resume
+POST /v1/automation/runs/{id}/stop
+GET  /v1/automation/runs/{id}/events
+GET  /v1/automation/runs/{id}/report
 POST /v1/deliveries
 GET  /v1/deliveries
 ```
 
-本地服务只分析、计划单条材料并记录结果，不能持有 Boss 登录凭据。当前批次与断点由 Skill 工作目录中的状态文件管理；实际投递由 Kimi 在 BOSS 页面执行，默认简历图片由项目 Chrome 扩展注入。完整 `delivery-plans` 状态机仍是目标设计，尚未实现为 API。
+本地服务不能持有 Boss 登录凭据。任务创建后，统一扩展通过白名单动作收集职位，本地服务逐条分析并把候选企业冻结到任务 `configSnapshot.plannedJobs`；只有用户提交所选 `selectedJobIds` 后，Docker runner 才能执行。任务、事件、幂等动作和中断恢复状态保存在 SQLite，实际页面 I/O 与默认简历图片注入均由统一扩展完成。BOSS Skill/Kimi 只属于旧版可选回退，不是该数据模型的运行时依赖。
+
+`POST /v1/automation/runs` 默认创建 `collection.status=pending` 并自动排队；`collection.phase` 按 `queued → searching → collecting → analyzing → awaiting_confirmation` 持久化阶段。`POST /v1/automation/runs/{id}/collect` 为幂等恢复/重试入口，只排队后台任务；它不直接触发 runner 或任何发送动作。
 
 ### 16.8 职位快照与诊断
 
@@ -490,7 +483,7 @@ GET    /v1/client-logs
 - 本地服务和配对错误；
 - 文件解析错误；
 - GitHub 同步错误；
-- RAG 和 Embedding 错误；
+- 本地资料匹配错误；
 - 模型超时、限流和结构化输出错误；
 - Boss 页面适配错误；
 - 投递限额和风控错误。
@@ -498,7 +491,6 @@ GET    /v1/client-logs
 ## 18. 数据保留与删除
 
 - 用户可单独删除项目、简历、职位和投递记录。
-- 删除项目时同步删除其向量切片。
 - 删除原始文件后，不得保留可还原敏感内容的缓存。
 - 审计日志只保留脱敏摘要。
 - 提供“删除全部本地数据”功能。
@@ -592,7 +584,7 @@ GET    /v1/client-logs
 - 薪资区间；
 - JD 技能、职责和风险标签；
 - 使用的简历 ID、版本和模板；
-- 使用的项目、个人优势与向量证据实体 ID；
+- 使用的项目、个人优势与本地资料证据实体 ID；
 - 默认/定制问候语和材料策略。
 
 ## 21. 申请跟进与反馈分析接口

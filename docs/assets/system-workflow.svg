@@ -32,14 +32,14 @@
     <rect x="655" y="145" width="230" height="190" rx="18" fill="#fff"/>
     <rect x="655" y="145" width="230" height="48" rx="18" fill="#dcfce7"/><rect x="655" y="175" width="230" height="18" fill="#dcfce7"/>
     <text x="678" y="177" class="h">③ 原子分析决策</text>
-    <text x="678" y="222" class="t">• 职位快照幂等入库</text><text x="678" y="250" class="t">• RAG 检索真实经历证据</text><text x="678" y="278" class="t">• 规则、适合度与可信度</text><text x="678" y="306" class="t">• APPROVE / REJECT 计划</text>
+    <text x="678" y="222" class="t">• 职位快照幂等入库</text><text x="678" y="250" class="t">• 本地资料匹配真实经历证据</text><text x="678" y="278" class="t">• 规则、适合度与可信度</text><text x="678" y="306" class="t">• APPROVE / REJECT 计划</text>
   </g>
 
   <g filter="url(#shadow)">
     <rect x="955" y="145" width="190" height="190" rx="18" fill="#fff"/>
     <rect x="955" y="145" width="190" height="48" rx="18" fill="#ffedd5"/><rect x="955" y="175" width="190" height="18" fill="#ffedd5"/>
     <text x="978" y="177" class="h">④ 安全投递</text>
-    <text x="978" y="222" class="t">• 校验岗位与公司</text><text x="978" y="250" class="t">• 去重后发送问候语</text><text x="978" y="278" class="t">• 可选简历图片确认</text><text x="978" y="306" class="t">• 验证气泡实际送达</text>
+    <text x="978" y="222" class="t">• 校验岗位与公司</text><text x="978" y="250" class="t">• 去重后发送问候语</text><text x="978" y="278" class="t">• 按策略发送简历图片</text><text x="978" y="306" class="t">• 验证气泡实际送达</text>
   </g>
 
   <path d="M285 240 H345" class="line"/><path d="M585 240 H645" class="line"/><path d="M885 240 H945" class="line"/>

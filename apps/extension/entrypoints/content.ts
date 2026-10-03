@@ -1,28 +1,32 @@
 import {
   findBossChatImageInput,
   loadDefaultImage,
-  mountResumeImageTestPanel,
+  mountBrowserControlPanel,
   putFileIntoInput,
+  readAutomationSettings,
 } from '../src/features/resume-image-test/panel'
-import { confirmGreetingSend } from '../src/features/confirmation/greeting'
+import {
+  confirmGreetingSend,
+  resolveGreetingSendApproval,
+} from '../src/features/confirmation/greeting'
 import type { BrowserActionEnvelope, BrowserActionResult } from '../src/automation/protocol'
 import { captureBossJob } from '../src/platform/boss/capture'
+import { collectBossSearchJobs } from '../src/platform/boss/collection'
+import { readBossSessionStatus } from '../src/platform/boss/session'
 import {
-  chatJobTitleMatches,
   fillChatEditor,
   findChatEditor,
   findSendButton,
+  matchChatContext,
   outgoingTextObserved,
-  readChatIdentity,
+  type ChatContextMatch,
 } from '../src/platform/boss/chat'
 
 export default defineContentScript({
   matches: ['*://zhipin.com/*', '*://*.zhipin.com/*'],
   runAt: 'document_idle',
   async main() {
-    // 0.2.0 image-test mode: deliberately do not inject boss.js and do not start
-    // the original capture/analyse/sync pipeline.
-    mountResumeImageTestPanel(document)
+    mountBrowserControlPanel(document)
     browser.runtime.onMessage.addListener((message: unknown) => {
       if (!isBrowserActionMessage(message)) return
       return handleBrowserAction(message.envelope)
@@ -44,11 +48,7 @@ async function handleBrowserAction(
   if (envelope.action === 'session_status') {
     return {
       status: 'success',
-      evidence: {
-        url: location.href,
-        bossDomain: /(^|\.)zhipin\.com$/.test(location.hostname),
-        documentReady: document.readyState === 'complete',
-      },
+      evidence: { ...readBossSessionStatus(document, location) },
     }
   }
   if (envelope.action === 'capture_job') {
@@ -57,14 +57,62 @@ async function handleBrowserAction(
       ? { status: 'success', evidence: { job } }
       : { status: 'blocked', evidence: {}, error: '当前页面没有可完整识别的岗位' }
   }
+  if (envelope.action === 'collect_jobs') {
+    if (!location.pathname.startsWith('/web/geek/jobs')) {
+      return { status: 'blocked', evidence: {}, error: '当前页面不是 BOSS 职位搜索结果页' }
+    }
+    const limit = Number(envelope.payload.limit ?? 30)
+    const itemIntervalMs = Number(envelope.payload.itemIntervalMs ?? 0)
+    const excludeJobIds = Array.isArray(envelope.payload.excludeJobIds)
+      ? envelope.payload.excludeJobIds.map(value => String(value).trim()).filter(Boolean)
+      : []
+    const deadlineReserveMs = Math.min(2_000, Math.max(100, envelope.deadlineMs * 0.1))
+    const timeBudgetMs = Math.max(
+      1,
+      Math.min(300_000, envelope.deadlineMs - deadlineReserveMs),
+    )
+    const result = await collectBossSearchJobs(document, location, {
+      limit,
+      itemIntervalMs,
+      excludeJobIds,
+      timeBudgetMs,
+    })
+    const evidence = {
+      jobs: result.jobs,
+      collectedCount: result.jobs.length,
+      skipped: result.skipped,
+      exhausted: result.exhausted,
+      attemptedJobIds: result.attemptedJobIds,
+      timeBudgetReached: result.timeBudgetReached,
+      detectedCardCount: result.detectedCardCount,
+      pageState: result.pageState,
+      partial: result.timeBudgetReached || result.jobs.length >= limit,
+    }
+    const collectionError = {
+      empty: '当前关键词的搜索结果为空',
+      login_required: 'BOSS 登录状态已失效，请重新登录',
+      verification_required: 'BOSS 页面需要完成安全验证',
+      loading: '搜索结果页加载超时，未检测到职位卡片',
+      ready: '搜索结果页已加载，但没有读取到完整职位详情',
+    }[result.pageState]
+    return result.jobs.length
+      ? {
+          status: 'success',
+          evidence,
+        }
+      : {
+          status: 'blocked',
+          evidence,
+          error: collectionError,
+        }
+  }
   if (envelope.action === 'validate_identity') {
-    const chatIdentity = readChatIdentity(document)
     const job = captureBossJob(document, location)
     const expectedJobId = String(envelope.payload.expectedJobId ?? '')
     const expectedTitle = String(envelope.payload.expectedTitle ?? '')
     const requireChat = envelope.payload.requireChat === true
-    const chatMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
-    const identityMatched = chatMatched
+    const conversation = matchExpectedConversation(expectedJobId, expectedTitle)
+    const identityMatched = conversation.matched
       || (!requireChat && !!job
         && (!expectedJobId || job.platformJobId === expectedJobId)
         && sameJobTitle(job.title, expectedTitle))
@@ -72,8 +120,9 @@ async function handleBrowserAction(
       status: identityMatched ? 'success' : 'blocked',
       evidence: {
         identityMatched,
-        actualTitle: chatIdentity?.title ?? job?.title,
-        actualCompany: chatIdentity?.companyName ?? job?.companyName,
+        chatMode: conversation.mode,
+        actualTitle: conversation.actualTitle ?? job?.title,
+        actualCompany: conversation.actualCompany ?? job?.companyName,
       },
       error: identityMatched
         ? undefined
@@ -110,14 +159,27 @@ async function handleBrowserAction(
       }
     }
     button.click()
-    await new Promise(resolve => setTimeout(resolve, 1200))
-    const chatIdentity = readChatIdentity(document)
-    const chatMatched = chatJobTitleMatches(chatIdentity, expectedTitle)
-    return chatMatched
-      ? { status: 'success', evidence: { identityMatched: true, chatOpened: true } }
+    const conversation = await waitForExpectedConversation(expectedJobId, expectedTitle)
+    return conversation.matched
+      ? {
+          status: 'success',
+          evidence: {
+            identityMatched: true,
+            chatOpened: true,
+            chatMode: conversation.mode,
+            actualTitle: conversation.actualTitle,
+            actualCompany: conversation.actualCompany,
+          },
+        }
       : {
           status: 'blocked',
-          evidence: { identityMatched: true, chatOpened: false },
+          evidence: {
+            identityMatched: true,
+            chatOpened: false,
+            chatMode: conversation.mode,
+            actualTitle: conversation.actualTitle,
+            actualCompany: conversation.actualCompany,
+          },
           error: '已点击沟通入口，但聊天身份未通过二次校验',
         }
   }
@@ -146,6 +208,27 @@ async function waitForExpectedJob(expectedJobId: string, expectedTitle: string) 
   return null
 }
 
+function matchExpectedConversation(expectedJobId: string, expectedTitle: string): ChatContextMatch {
+  // BOSS now sometimes opens the composer as an in-page dialog and keeps the
+  // verified job detail behind it. That dialog does not repeat the job title.
+  // Accept it only when a chat editor exists and the underlying job still has
+  // the exact id and title that were validated before clicking the entry.
+  return matchChatContext(document, expectedJobId, expectedTitle, captureBossJob(document, location))
+}
+
+async function waitForExpectedConversation(
+  expectedJobId: string,
+  expectedTitle: string,
+): Promise<ChatContextMatch> {
+  const deadline = Date.now() + 8_000
+  let result = matchExpectedConversation(expectedJobId, expectedTitle)
+  while (!result.matched && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 200))
+    result = matchExpectedConversation(expectedJobId, expectedTitle)
+  }
+  return result
+}
+
 function sameJobTitle(actual: string, expected: string): boolean {
   return actual.replace(/\s+/g, '').toLowerCase() === expected.replace(/\s+/g, '').toLowerCase()
 }
@@ -155,8 +238,9 @@ async function sendResumeWithPreview(
 ): Promise<Omit<BrowserActionResult, 'requestId'>> {
   const expectedTitle = String(envelope.payload.expectedTitle ?? '')
   const expectedCompany = String(envelope.payload.expectedCompany ?? '')
-  const identity = readChatIdentity(document)
-  if (!chatJobTitleMatches(identity, expectedTitle)) {
+  const expectedJobId = String(envelope.payload.expectedJobId ?? '')
+  const conversation = matchExpectedConversation(expectedJobId, expectedTitle)
+  if (!conversation.matched) {
     return {
       status: 'blocked',
       evidence: { identityMatched: false, sideEffectExecuted: false },
@@ -171,8 +255,17 @@ async function sendResumeWithPreview(
       error: '未找到 BOSS 聊天图片上传控件',
     }
   }
+  const settings = await readAutomationSettings()
+  if (settings.resumeSendMode === 'off') {
+    return {
+      status: 'blocked',
+      evidence: { identityMatched: true, sideEffectExecuted: false, resumeSendMode: 'off' },
+      error: '扩展设置为不发送简历图片',
+    }
+  }
   const { file, url } = await loadDefaultImage()
-  const confirmed = await confirmResumePreview(file, url, expectedTitle, expectedCompany)
+  const confirmed = settings.resumeSendMode === 'automatic'
+    || await confirmResumePreview(file, url, expectedTitle, expectedCompany)
   URL.revokeObjectURL(url)
   if (!confirmed) {
     return {
@@ -187,7 +280,9 @@ async function sendResumeWithPreview(
   const imageMessageObserved = countOutgoingImages(document) > outgoingImagesBefore
   const evidence = {
     identityMatched: true,
-    userConfirmed: true,
+    userConfirmed: settings.resumeSendMode === 'confirm',
+    planApproved: true,
+    resumeSendMode: settings.resumeSendMode,
     sideEffectExecuted: true,
     imageMessageObserved,
     filename: file.name,
@@ -248,9 +343,10 @@ async function sendGreetingWithConfirmation(
 ): Promise<Omit<BrowserActionResult, 'requestId'>> {
   const expectedTitle = String(envelope.payload.expectedTitle ?? '')
   const expectedCompany = String(envelope.payload.expectedCompany ?? '')
+  const expectedJobId = String(envelope.payload.expectedJobId ?? '')
   const text = String(envelope.payload.text ?? '').trim()
-  const identity = readChatIdentity(document)
-  if (!text || !chatJobTitleMatches(identity, expectedTitle)) {
+  const conversation = matchExpectedConversation(expectedJobId, expectedTitle)
+  if (!text || !conversation.matched) {
     return {
       status: 'blocked',
       evidence: { identityMatched: false, sideEffectExecuted: false },
@@ -267,47 +363,76 @@ async function sendGreetingWithConfirmation(
       },
     }
   }
-  const decision = await confirmGreetingSend(
-    expectedTitle,
-    expectedCompany,
-    text,
-    confirmationTimeoutMs(envelope),
+  const approval = await resolveGreetingSendApproval(
+    envelope.payload,
+    () => confirmGreetingSend(
+      expectedTitle,
+      expectedCompany,
+      text,
+      confirmationTimeoutMs(envelope),
+    ),
   )
-  if (decision !== 'confirmed') {
+  const { planApproved } = approval
+  if (!approval.approved) {
     return {
       status: 'confirmation_required',
       evidence: {
         identityMatched: true,
         userConfirmed: false,
-        confirmationExpired: decision === 'expired',
+        planApproved: false,
+        interactiveConfirmationShown: true,
+        confirmationExpired: approval.decision === 'expired',
         sideEffectExecuted: false,
       },
-      error: decision === 'expired' ? '确认超时，未发送' : '用户取消发送',
+      error: approval.decision === 'expired' ? '确认超时，未发送' : '用户取消发送',
     }
   }
-  const identityAfterConfirmation = readChatIdentity(document)
-  if (!chatJobTitleMatches(identityAfterConfirmation, expectedTitle)) {
+  const identityAfterConfirmation = matchExpectedConversation(expectedJobId, expectedTitle)
+  if (!identityAfterConfirmation.matched) {
     return {
       status: 'blocked',
-      evidence: { identityMatched: false, userConfirmed: true, sideEffectExecuted: false },
-      error: '确认期间当前聊天岗位已变化，未发送',
+      evidence: {
+        identityMatched: false,
+        userConfirmed: true,
+        planApproved,
+        interactiveConfirmationShown: !planApproved,
+        sideEffectExecuted: false,
+      },
+      error: planApproved
+        ? '自动发送前当前聊天岗位已变化，未发送'
+        : '确认期间当前聊天岗位已变化，未发送',
     }
   }
   const editor = findChatEditor(document)
   if (!editor) {
     return {
       status: 'blocked',
-      evidence: { identityMatched: true, userConfirmed: true, sideEffectExecuted: false },
+      evidence: {
+        identityMatched: true,
+        userConfirmed: true,
+        planApproved,
+        interactiveConfirmationShown: !planApproved,
+        sideEffectExecuted: false,
+      },
       error: '未找到聊天编辑器',
     }
   }
   fillChatEditor(editor, text)
-  await new Promise(resolve => setTimeout(resolve, 100))
-  const sendButton = findSendButton(document)
+  let sendButton: HTMLElement | null = null
+  for (let attempt = 0; attempt < 20 && !sendButton; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    sendButton = findSendButton(document, editor)
+  }
   if (!sendButton) {
     return {
       status: 'blocked',
-      evidence: { identityMatched: true, userConfirmed: true, sideEffectExecuted: false },
+      evidence: {
+        identityMatched: true,
+        userConfirmed: true,
+        planApproved,
+        interactiveConfirmationShown: !planApproved,
+        sideEffectExecuted: false,
+      },
       error: '问候语已填入，但发送按钮不可用，未点击发送',
     }
   }
@@ -320,6 +445,8 @@ async function sendGreetingWithConfirmation(
   const evidence = {
     identityMatched: true,
     userConfirmed: true,
+    planApproved,
+    interactiveConfirmationShown: !planApproved,
     sideEffectExecuted: true,
     messageBubbleObserved,
     editorCleared,

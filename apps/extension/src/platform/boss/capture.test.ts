@@ -74,6 +74,57 @@ describe('captureBossJob', () => {
       .toMatchObject({ platformJobId: 'list-current', title: 'AI Agent 工程师', location: '北京', experience: '3-5年', education: '本科' })
   })
 
+  it('reads the company name from the real BOSS .boss-info card field', () => {
+    document.body.innerHTML = `
+      <article class="job-card-wrapper active">
+        <a class="job-name" href="/job_detail/real-boss-1.html">AI Agent 开发工程师</a>
+        <a class="boss-info" href="/gongsi/star-sea.html">星海智能科技</a>
+      </article>
+      <section class="job-detail-info"><h1 class="job-name">AI Agent 开发工程师</h1></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责 Agent 工作流、RAG 与 Python 服务开发</div></section>
+    `
+
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/web/geek/jobs?query=Agent',
+      pathname: '/web/geek/jobs',
+    })).toMatchObject({
+      platformJobId: 'real-boss-1',
+      companyName: '星海智能科技',
+    })
+  })
+
+  it('reads only the visible JD from the current BOSS detail body', () => {
+    document.body.innerHTML = `
+      <div class="job-card-wrap active">
+        <li class="job-card-box">
+          <a class="job-name" href="/job_detail/real-detail-1.html">AI Agent 开发工程师</a>
+          <a class="boss-info" href="/gongsi/example.html">示例智能</a>
+        </li>
+      </div>
+      <div class="job-detail-box">
+        <section class="job-detail-info"><h1 class="job-name">AI Agent 开发工程师</h1><span class="salary">25-35K</span></section>
+        <div class="job-detail-body">
+          <h3>职位描述</h3>
+          <p class="desc">
+            <style>.salary-decoy{display:none!important}</style>
+            <span hidden>不应进入职位描述</span>
+            负责 Agent 工作流、RAG 检索与 Python 服务开发
+          </p>
+        </div>
+        <a class="more-job-btn" href="/job_detail/real-detail-1.html">查看更多信息</a>
+      </div>
+    `
+
+    const result = captureBossJob(document, {
+      href: 'https://www.zhipin.com/web/geek/jobs?query=Agent',
+      pathname: '/web/geek/jobs',
+    })
+
+    expect(result?.description).toBe('负责 Agent 工作流、RAG 检索与 Python 服务开发')
+    expect(result?.description).not.toContain('display:none')
+    expect(result?.description).not.toContain('立即沟通')
+  })
+
   it('matches the visible list card by title when Boss does not mark it active', () => {
     document.body.innerHTML = `
       <div class="job-card-wrapper">
@@ -134,6 +185,70 @@ describe('captureBossJob', () => {
     })
   })
 
+  it('decodes the BOSS private-use salary digits from a direct detail field', () => {
+    document.body.innerHTML = `
+      <section class="job-detail-info">
+        <h1 class="job-name">AI Agent 工程师</h1>
+        <span class="salary">\uE033\uE031-\uE035\uE031K·\uE032\uE035薪</span>
+      </section>
+      <section class="job-detail-company"><div class="company-name">示例科技</div></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责 Agent 与 RAG 平台开发</div></section>
+    `
+
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/job_detail/private-direct.html',
+      pathname: '/job_detail/private-direct.html',
+    })).toMatchObject({ salaryText: '20-40K·14薪' })
+  })
+
+  it('decodes the active search card salary when the detail pane has no salary field', () => {
+    document.body.innerHTML = `
+      <article class="job-card-wrapper active">
+        <a class="job-name" href="/job_detail/private-card.html">AI Agent 开发工程师</a>
+        <span class="job-salary">\uE033\uE036-\uE036\uE031K·\uE032\uE037薪</span>
+        <a class="boss-info" href="/gongsi/example.html">示例智能科技</a>
+      </article>
+      <section class="job-detail-info"><h1 class="job-name">AI Agent 开发工程师</h1></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责 Agent 工作流和 Python 服务开发</div></section>
+    `
+
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/web/geek/jobs?query=Agent',
+      pathname: '/web/geek/jobs',
+    })).toMatchObject({ salaryText: '25-50K·16薪' })
+  })
+
+  it('decodes salary labels before applying the formatted-header fallback', () => {
+    document.body.innerHTML = `
+      <section class="job-primary"><h1 class="job-title">AI Agent 工程师</h1>
+        <div>\uE034\uE031-\uE036\uE031K·\uE032\uE035薪</div><div>北京</div><div>3-5年</div><div>本科</div>
+      </section>
+      <div class="company-info">公司名称示例智能科技</div>
+      <div class="job-sec-text">负责 Agent 平台开发</div>
+    `
+
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/job_detail/private-fallback.html',
+      pathname: '/job_detail/private-fallback.html',
+    })).toMatchObject({ salaryText: '30-50K·14薪' })
+  })
+
+  it('does not invent a salary for an unknown private-use glyph', () => {
+    document.body.innerHTML = `
+      <section class="job-detail-info">
+        <h1 class="job-name">AI Agent 工程师</h1>
+        <span class="salary">\uE033\uE041-\uE036\uE031K</span>
+      </section>
+      <section class="job-detail-company"><div class="company-name">示例科技</div></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责 Agent 与 RAG 平台开发</div></section>
+    `
+
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/job_detail/private-unknown.html',
+      pathname: '/job_detail/private-unknown.html',
+    })?.salaryText).toBeUndefined()
+  })
+
   it('falls back to formatted header text when metadata classes change', () => {
     document.body.innerHTML = `
       <section class="job-primary"><h1 class="job-title">AI Agent 工程师</h1>
@@ -149,24 +264,19 @@ describe('captureBossJob', () => {
     expect(result).toMatchObject({ salaryText: '30-50K·14薪', location: '北京', experience: '3-5年', education: '本科' })
   })
 
-  it('continues with a partial snapshot when optional core fields are missing', () => {
+  it('waits instead of inventing a company name when company identity is missing', () => {
     document.body.innerHTML = '<h1 class="job-title">缺少公司和 JD</h1>'
     const page = {
       href: 'https://www.zhipin.com/job_detail/empty.html',
       pathname: '/job_detail/empty.html',
     }
-    expect(captureBossJob(document, page)).toMatchObject({
-      platformJobId: 'empty',
-      title: '缺少公司和 JD',
-      companyName: '公司名称待补充',
-      description: '职位描述暂未采集。',
-    })
+    expect(captureBossJob(document, page)).toBeNull()
     expect(diagnoseBossJobCapture(document, page)).toMatchObject({
       level: 'warning',
       details: {
         missingFields: ['companyName', 'description'],
-        recoveredFields: ['companyName', 'description'],
-        continued: true,
+        recoveredFields: ['description'],
+        continued: false,
       },
     })
   })

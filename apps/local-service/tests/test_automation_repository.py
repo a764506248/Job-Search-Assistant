@@ -16,6 +16,53 @@ def test_automation_run_persists_transitions_and_events(tmp_path) -> None:
     assert [event["sequence"] for event in repository.list_events(run["id"])] == [1, 2, 3, 4, 5]
 
 
+def test_plan_confirmation_is_server_owned_and_issues_runner_capability(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    run = repository.create_run(
+        {
+            "plannedJobs": [{"jobId": "draft-job"}],
+            "planConfirmation": {
+                "status": "confirmed",
+                "approvalToken": "client-forged-token",
+            },
+        },
+        1,
+    )
+
+    assert "planConfirmation" not in run["config_snapshot"]
+
+    confirmed = repository.confirm_plan(
+        run["id"],
+        [
+            {
+                "jobId": "job-1",
+                "title": "AI 工程师",
+                "companyName": "示例公司",
+                "greeting": "您好",
+            }
+        ],
+    )
+    evidence = confirmed["config_snapshot"]["planConfirmation"]
+
+    assert evidence["status"] == "confirmed"
+    assert evidence["source"] == "selected-job-list"
+    assert evidence["selectedJobIds"] == ["job-1"]
+    assert "approvalToken" not in evidence
+    assert "approval_token" not in repository.get_run(run["id"])
+    assert "approvalToken" not in repository.list_events(run["id"])[-1]["payload"]
+
+    repository.transition(run["id"], "validating")
+    repository.transition(run["id"], "ready")
+    repository.transition(run["id"], "running")
+    claimed = repository.claim_next_run("runner-a")
+    assert claimed is not None
+    assert claimed["approval_token"]
+    assert claimed["approval_token"] != "client-forged-token"
+    assert repository.approval_token_matches(
+        run["id"], claimed["approval_token"]
+    )
+
+
 def test_active_run_becomes_interrupted_after_repository_restart(tmp_path) -> None:
     database_path = tmp_path / "jobs.sqlite3"
     repository = AutomationRepository(database_path)
