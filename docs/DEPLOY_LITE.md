@@ -14,6 +14,23 @@
 关闭 embedding 后仍有完整功能：资料库、JD 分析、规则决策、投递记录、简历导入导出都能用，
 只是 RAG 召回退化成关键词匹配（中文按 trigram 切词），语义相关度不如向量。
 
+## 两个编排文件怎么选
+
+| 文件 | 镜像来源 | 适用场景 |
+|---|---|---|
+| `docker-compose.deploy.yml` | **服务器本地构建**（`build:`） | 没接 CI、想直接跑最新代码 |
+| `docker-compose.server.yml` | **GitHub Actions 构建的 ghcr 镜像**（`image:`） | 已接 CI，发布只需 `pull` + `up -d`（实测 9 秒） |
+
+用 ghcr 版本时，发布流程变成纯拉取：
+
+```bash
+docker compose -f docker-compose.server.yml pull
+docker compose -f docker-compose.server.yml up -d
+
+# 回滚到某个历史版本（用 CI 产出的 sha tag）
+JSA_IMAGE_TAG=sha-4a452f1 docker compose -f docker-compose.server.yml up -d
+```
+
 ## 部署步骤
 
 ```bash

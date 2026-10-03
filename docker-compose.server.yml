@@ -1,0 +1,57 @@
+# 服务器部署编排（使用 GitHub Actions 构建好的 ghcr 镜像）
+#
+# 与 docker-compose.deploy.yml 的区别：
+#   deploy 版是 build（在服务器本地构建镜像，吃内存、每次要等 1 分钟）
+#   本文件是 image（直接拉 ghcr 上构建好的镜像，实测 9 秒）
+#
+# 用法：
+#   docker compose -f docker-compose.server.yml pull
+#   docker compose -f docker-compose.server.yml up -d
+#
+# 回滚到指定版本（用 CI 产出的 sha tag）：
+#   JSA_IMAGE_TAG=sha-4a452f1 docker compose -f docker-compose.server.yml up -d
+services:
+  web:
+    image: ghcr.io/a764506248/job-search-assistant-web:${JSA_IMAGE_TAG:-latest}
+    ports:
+      # 80 为对外入口（云防火墙默认放行）；8080 保留给内网/调试
+      - "80:80"
+      - "8080:80"
+    depends_on:
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  local-service:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    expose:
+      - "8765"
+    environment:
+      JSA_HOST: 0.0.0.0
+      JSA_PORT: 8765
+      JSA_DATA_DIR: /data
+      # 低配机器不跑 embedding 容器，RAG 降级为 FTS5/BM25 关键词检索
+      JSA_EMBEDDING_ENABLED: "false"
+    volumes:
+      - ./deploy-data:/data
+    mem_limit: 768m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
