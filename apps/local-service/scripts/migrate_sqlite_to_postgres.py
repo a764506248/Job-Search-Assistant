@@ -48,7 +48,7 @@ def migrate(source: str, target: str) -> None:
             placeholders = ", ".join(["%s"] * len(columns))
             rows = sqlite.execute(f'SELECT {quoted} FROM "{table}"').fetchall()
             if rows:
-                postgres.executemany(
+                postgres.cursor().executemany(
                     f'INSERT INTO "{table}" ({quoted}) VALUES ({placeholders})',
                     [tuple(row) for row in rows],
                 )
