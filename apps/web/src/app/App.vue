@@ -70,10 +70,19 @@ const pageTitle = computed(() => String(route.meta.title || '工作台'))
 onMounted(async () => {
   try {
     isAdmin.value = (await api.me()).user.isAdmin
+  } catch {
+    // Authentication state must not affect the service-health indicator.
+    // The router handles unauthenticated users; keep the shell usable while
+    // the auth request is settling (or when an expired token is present).
+    isAdmin.value = false
+  }
+
+  try {
     const health = await api.health()
     service.online = true
     service.text = `本地服务 ${health.version}`
   } catch {
+    service.online = false
     service.text = '本地服务连接失败'
   }
 })
