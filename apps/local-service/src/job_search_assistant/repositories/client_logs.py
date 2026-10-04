@@ -43,7 +43,7 @@ class ClientLogRepository:
                 """INSERT INTO client_logs(
                     source, level, event, message, page_url, platform_job_id,
                     details_json, occurred_at, received_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
                 (
                     data["source"],
                     data["level"],

@@ -111,7 +111,7 @@ class AutomationRepository:
             cursor = connection.execute(
                 """INSERT INTO automation_runs(
                     user_id, status, config_snapshot_json, target_count, created_at, updated_at
-                ) VALUES (?, 'draft', ?, ?, ?, ?)""",
+                ) VALUES (?, 'draft', ?, ?, ?, ?) RETURNING id""",
                 (user_id, json.dumps(config, ensure_ascii=False), target_count, now, now),
             )
             run_id = int(cursor.lastrowid)
@@ -127,7 +127,7 @@ class AutomationRepository:
             ).fetchone()
         if row is None:
             raise KeyError(run_id)
-        result = dict(row)
+        result = row.as_dict() if hasattr(row, "as_dict") else dict(row)
         # The capability is intentionally excluded from ordinary run reads.  It
         # is exposed only by claim_next_run to the host runner.
         result.pop("approval_token", None)
@@ -369,7 +369,7 @@ class AutomationRepository:
                 "succeeded",
                 "uncertain",
             }:
-                return dict(existing), False
+                return (existing.as_dict() if hasattr(existing, "as_dict") else dict(existing)), False
             if existing is None:
                 connection.execute(
                     """INSERT INTO automation_actions(
@@ -396,7 +396,7 @@ class AutomationRepository:
                 "SELECT * FROM automation_actions WHERE idempotency_key = ?",
                 (idempotency_key,),
             ).fetchone()
-        return dict(row), True
+        return (row.as_dict() if hasattr(row, "as_dict") else dict(row)), True
 
     def finish_action(
         self,
@@ -450,7 +450,7 @@ class AutomationRepository:
                 "SELECT * FROM automation_actions WHERE run_id = ? ORDER BY updated_at",
                 (run_id,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [row.as_dict() if hasattr(row, "as_dict") else dict(row) for row in rows]
 
     def report(self, run_id: int) -> dict[str, Any]:
         run = self.get_run(run_id)
@@ -526,7 +526,7 @@ class AutomationRepository:
             rows = connection.execute(
                 "SELECT * FROM automation_events WHERE run_id = ? ORDER BY sequence", (run_id,)
             ).fetchall()
-        return [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]
+        return [{**(row.as_dict() if hasattr(row, "as_dict") else dict(row)), "payload": json.loads(row["payload_json"])} for row in rows]
 
     @staticmethod
     def _append_event(

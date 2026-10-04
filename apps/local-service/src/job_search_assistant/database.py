@@ -20,6 +20,9 @@ class CompatRow:
     def __iter__(self):
         return iter(self._values)
 
+    def as_dict(self) -> dict[str, Any]:
+        return dict(zip(self._columns, self._values))
+
 
 class PostgresCursor:
     def __init__(self, cursor: Any) -> None:
@@ -92,14 +95,9 @@ class PostgresConnection:
                 if returned:
                     wrapped.lastrowid = int(returned[0])
             else:
-                # SQLite exposes lastrowid for every INSERT, while PostgreSQL
-                # only has LASTVAL after a sequence-backed insert. Session and
-                # join-table inserts do not need an id, so tolerate the absence.
-                try:
-                    cursor.execute("SELECT LASTVAL()")
-                    wrapped.lastrowid = int(cursor.fetchone()[0])
-                except Exception:
-                    wrapped.lastrowid = None
+                # PostgreSQL has no safe transaction-neutral equivalent of
+                # SQLite's lastrowid. Callers that need an id use RETURNING id.
+                wrapped.lastrowid = None
         return wrapped
 
     def executescript(self, sql: str) -> None:

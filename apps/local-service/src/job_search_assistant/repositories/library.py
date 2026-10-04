@@ -82,7 +82,7 @@ class LibraryRepository:
             cursor = connection.execute(
                 """
                 INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?) RETURNING id
                 """,
                 (kind, name, json.dumps(data, ensure_ascii=False), now, now),
             )
@@ -204,7 +204,7 @@ class LibraryRepository:
         with self._connect() as connection:
             resume_cursor = connection.execute(
                 """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                VALUES ('resumes', ?, ?, ?, ?)""",
+                VALUES ('resumes', ?, ?, ?, ?) RETURNING id""",
                 (filename, json.dumps(staged_resume, ensure_ascii=False), now, now),
             )
         return {
@@ -378,7 +378,7 @@ class LibraryRepository:
             else:
                 cursor = connection.execute(
                     """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                    VALUES ('projects', ?, ?, ?, ?)""",
+                    VALUES ('projects', ?, ?, ?, ?) RETURNING id""",
                     (
                         project["name"],
                         json.dumps(project["data"], ensure_ascii=False),
