@@ -25,6 +25,7 @@ class AutomationRepository:
                 """
                 CREATE TABLE IF NOT EXISTS automation_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL,
                     config_snapshot_json TEXT NOT NULL,
                     target_count INTEGER NOT NULL,
@@ -69,6 +70,7 @@ class AutomationRepository:
             self._ensure_column(connection, "automation_runs", "runner_id", "TEXT")
             self._ensure_column(connection, "automation_runs", "heartbeat_at", "TEXT")
             self._ensure_column(connection, "automation_runs", "approval_token", "TEXT")
+            self._ensure_column(connection, "automation_runs", "user_id", "INTEGER NOT NULL DEFAULT 1")
             now = datetime.now(UTC).isoformat()
             legacy_failures = connection.execute(
                 """SELECT id FROM automation_runs
@@ -98,7 +100,7 @@ class AutomationRepository:
             )
         self._initialized = True
 
-    def create_run(self, config: dict[str, Any], target_count: int) -> dict[str, Any]:
+    def create_run(self, config: dict[str, Any], target_count: int, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
         config = self._normalize_config(config)
         # Confirmation evidence is server-owned.  A client may provide a draft
@@ -108,9 +110,9 @@ class AutomationRepository:
         with db_connect(self.database_path) as connection:
             cursor = connection.execute(
                 """INSERT INTO automation_runs(
-                    status, config_snapshot_json, target_count, created_at, updated_at
-                ) VALUES ('draft', ?, ?, ?, ?)""",
-                (json.dumps(config, ensure_ascii=False), target_count, now, now),
+                    user_id, status, config_snapshot_json, target_count, created_at, updated_at
+                ) VALUES (?, 'draft', ?, ?, ?, ?)""",
+                (user_id, json.dumps(config, ensure_ascii=False), target_count, now, now),
             )
             run_id = int(cursor.lastrowid)
             self._append_event(connection, run_id, "run-created", "info", {"target": target_count})
@@ -458,15 +460,16 @@ class AutomationRepository:
             "events": self.list_events(run_id),
         }
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(self, user_id: int | None = None) -> list[dict[str, Any]]:
         self.initialize()
         with db_connect(self.database_path) as connection:
-            run_ids = [
-                row[0]
-                for row in connection.execute(
-                    "SELECT id FROM automation_runs ORDER BY id DESC"
-                ).fetchall()
-            ]
+            query = "SELECT id FROM automation_runs"
+            params: tuple[Any, ...] = ()
+            if user_id is not None:
+                query += " WHERE user_id = ?"
+                params = (user_id,)
+            query += " ORDER BY id DESC"
+            run_ids = [row[0] for row in connection.execute(query, params).fetchall()]
         return [self.get_run(run_id) for run_id in run_ids]
 
     def append_event(

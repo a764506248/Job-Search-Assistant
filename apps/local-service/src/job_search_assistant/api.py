@@ -196,6 +196,12 @@ def create_router(
         token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
         return auth_repository.get_user_by_token(token) if token else None
 
+    def required_user(request: Request) -> dict:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="未登录")
+        return user
+
     @router.post("/auth/register")
     async def register(request: Request) -> dict:
         payload = await request.json()
@@ -1039,8 +1045,11 @@ def create_router(
 
     @router.post("/automation/runs", response_model=AutomationRun, status_code=201)
     async def create_automation_run(
-        request: AutomationRunCreateRequest, background_tasks: BackgroundTasks
+        request: AutomationRunCreateRequest,
+        background_tasks: BackgroundTasks,
+        http_request: Request,
     ) -> AutomationRun:
+        user = required_user(http_request)
         config = automation_config().model_dump(mode="json", by_alias=True)
         config.update(request.config)
         should_auto_collect = "plannedJobs" not in config
@@ -1089,7 +1098,7 @@ def create_router(
                 "error": None,
             }
         created = AutomationRun.model_validate(
-            automation_repository.create_run(config, request.target_count)
+            automation_repository.create_run(config, request.target_count, user_id=int(user["id"]))
         )
         if should_auto_collect:
             automation_repository.append_event(
@@ -1106,9 +1115,10 @@ def create_router(
         return created
 
     @router.get("/automation/runs", response_model=AutomationRunListResponse)
-    def list_automation_runs() -> AutomationRunListResponse:
+    def list_automation_runs(http_request: Request) -> AutomationRunListResponse:
+        user = required_user(http_request)
         return AutomationRunListResponse(
-            items=[AutomationRun.model_validate(run) for run in automation_repository.list_runs()]
+            items=[AutomationRun.model_validate(run) for run in automation_repository.list_runs(int(user["id"]))]
         )
 
     @router.post(
