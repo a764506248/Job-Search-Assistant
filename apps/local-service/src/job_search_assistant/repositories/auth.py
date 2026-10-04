@@ -62,8 +62,10 @@ class AuthRepository:
                     (username, _hash_password(password), int(is_admin), now, now),
                 )
                 user_id = int(cursor.lastrowid)
-        except sqlite3.IntegrityError as error:
-            raise ValueError("用户名已存在") from error
+        except Exception as error:
+            if isinstance(error, sqlite3.IntegrityError) or "unique" in str(error).lower():
+                raise ValueError("用户名已存在") from error
+            raise
         return self.get_user(user_id)
 
     def authenticate(self, username: str, password: str) -> tuple[dict, str] | None:
