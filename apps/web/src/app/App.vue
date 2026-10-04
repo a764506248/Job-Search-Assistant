@@ -1,6 +1,7 @@
 <template>
   <a-config-provider :theme="theme">
-    <a-layout class="app-shell">
+    <router-view v-if="route.name === 'login'" />
+    <a-layout v-else class="app-shell">
       <aside class="sidebar">
         <div class="brand">
           <span class="brand-mark">J</span>
