@@ -34,6 +34,11 @@ class PostgresCursor:
     def fetchall(self) -> list[CompatRow]:
         return [self._row(row) for row in self._cursor.fetchall()]
 
+    def __iter__(self):
+        # A few legacy repository helpers iterate directly over sqlite cursors.
+        # Keep that behavior for the PostgreSQL compatibility cursor.
+        return iter(self.fetchall())
+
     def _row(self, row: Any) -> CompatRow | None:
         if row is None:
             return None
@@ -81,9 +86,20 @@ class PostgresConnection:
         cursor = self._connection.cursor()
         cursor.execute(sql, parameters)
         wrapped = PostgresCursor(cursor)
-        if sql.lstrip().upper().startswith("INSERT") and "RETURNING" not in sql.upper():
-            cursor.execute("SELECT LASTVAL()")
-            wrapped.lastrowid = int(cursor.fetchone()[0])
+        if sql.lstrip().upper().startswith("INSERT"):
+            if "RETURNING" in sql.upper():
+                returned = cursor.fetchone()
+                if returned:
+                    wrapped.lastrowid = int(returned[0])
+            else:
+                # SQLite exposes lastrowid for every INSERT, while PostgreSQL
+                # only has LASTVAL after a sequence-backed insert. Session and
+                # join-table inserts do not need an id, so tolerate the absence.
+                try:
+                    cursor.execute("SELECT LASTVAL()")
+                    wrapped.lastrowid = int(cursor.fetchone()[0])
+                except Exception:
+                    wrapped.lastrowid = None
         return wrapped
 
     def executescript(self, sql: str) -> None:

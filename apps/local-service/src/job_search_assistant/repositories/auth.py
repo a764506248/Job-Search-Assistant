@@ -23,7 +23,7 @@ class AuthRepository:
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     is_admin INTEGER NOT NULL DEFAULT 0,
                     is_active INTEGER NOT NULL DEFAULT 1,
@@ -48,7 +48,9 @@ class AuthRepository:
 
     def create_user(self, username: str, password: str, *, is_admin: bool = False) -> dict:
         self.initialize()
-        username = username.strip()
+        # Store usernames in a canonical form so SQLite and PostgreSQL enforce
+        # the same case-insensitive account semantics.
+        username = username.strip().lower()
         if len(username) < 3 or len(username) > 80:
             raise ValueError("用户名长度必须为 3-80 个字符")
         if len(password) < 8:
@@ -58,7 +60,7 @@ class AuthRepository:
             with db_connect(self.database_path) as connection:
                 cursor = connection.execute(
                     """INSERT INTO users(username, password_hash, is_admin, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?) RETURNING id""",
                     (username, _hash_password(password), int(is_admin), now, now),
                 )
                 user_id = int(cursor.lastrowid)
@@ -74,7 +76,7 @@ class AuthRepository:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM users WHERE username = ? AND is_active = 1",
-                (username.strip(),),
+                (username.strip().lower(),),
             ).fetchone()
         if row is None or not _verify_password(password, row["password_hash"]):
             return None

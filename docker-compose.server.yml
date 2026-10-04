@@ -1,11 +1,31 @@
 # 服务器部署编排：只拉取 GHCR 预构建镜像，不在低配服务器本地构建。
 # 数据目录必须保持为 ./deploy-data:/data，避免更新容器时切换到空数据库。
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-job_search_assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-jsa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./deploy-data/postgres:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   web:
     image: ghcr.io/a764506248/job-search-assistant-web:${JSA_IMAGE_TAG:-latest}
     ports:
       - "80:80"
     depends_on:
+      postgres:
+        condition: service_healthy
       local-service:
         condition: service_healthy
     mem_limit: 256m
@@ -25,6 +45,8 @@ services:
       JSA_HOST: 0.0.0.0
       JSA_PORT: 8765
       JSA_DATA_DIR: /data
+      # Pass a URL-encoded DSN (especially if the password contains @, &, or #).
+      JSA_DATABASE_URL: ${JSA_DATABASE_URL:?set JSA_DATABASE_URL in .env}
     volumes:
       - ./deploy-data:/data
     mem_limit: 768m
