@@ -1,6 +1,6 @@
 # PostgreSQL 迁移阶段
 
-当前线上业务仍使用 SQLite。本阶段只增加 PostgreSQL 基础设施，不改变现有读写链路，便于随时回滚。
+当前分支已完成 PostgreSQL 连接兼容层、核心 Repository 初始化验证和 SQLite 一次性迁移脚本；线上仍应在发布新镜像前保持 SQLite，避免半切换。
 
 ## 本地启动
 
@@ -21,4 +21,25 @@ docker compose -f docker-compose.postgres.yml ps
 5. 备份线上数据后切换 `JSA_DATABASE_URL`；
 6. 保留原 SQLite 文件用于回滚。
 
-在全部 Repository 迁移完成前，不应设置 `JSA_DATABASE_URL` 或删除现有 SQLite 文件。
+在新镜像通过本地/预发布验证前，不应设置 `JSA_DATABASE_URL` 或删除现有 SQLite 文件。
+
+## 服务器切换
+
+服务器只需要在项目目录准备 `.env`（不要提交 Git），例如：
+
+```dotenv
+POSTGRES_PASSWORD=随机强密码
+JSA_DATABASE_URL=postgresql://jsa:URL编码后的密码@postgres:5432/job_search_assistant
+JSA_IMAGE_TAG=v0.3.2
+```
+
+先备份 `deploy-data`，再使用迁移脚本把 SQLite 副本导入 PostgreSQL；确认表记录数后执行：
+
+```bash
+docker compose -f docker-compose.server.yml pull
+docker compose -f docker-compose.server.yml up -d postgres
+docker compose -f docker-compose.server.yml up -d local-service automation-runner web
+docker compose -f docker-compose.server.yml ps
+```
+
+回滚时停止新编排，移除 `JSA_DATABASE_URL`，恢复旧镜像和 SQLite 文件即可。PostgreSQL 数据目录不要删除，便于再次切换或排查。
