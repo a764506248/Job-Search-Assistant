@@ -200,8 +200,7 @@ def create_router(
             if claims:
                 try: return auth_repository.get_user(int(claims["sub"]))
                 except (KeyError, ValueError): return None
-        token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
-        return auth_repository.get_user_by_token(token) if token else None
+        return None
 
     def required_user(request: Request) -> dict:
         user = current_user(request)
@@ -233,17 +232,11 @@ def create_router(
         user, token = result
         jwt = issue_token(user)
         response = Response(content=json.dumps({"user": user, "token": jwt}, ensure_ascii=False), media_type="application/json")
-        response.set_cookie("jsa_session", token, httponly=True, samesite="lax", secure=False, max_age=30 * 86400)
         return response
 
     @router.post("/auth/logout")
     async def logout(request: Request) -> dict:
-        token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
-        if token:
-            auth_repository.delete_session(token)
-        response = Response(content=json.dumps({"ok": True}), media_type="application/json")
-        response.delete_cookie("jsa_session")
-        return response
+        return {"ok": True}
 
     @router.get("/auth/me")
     async def me(request: Request) -> dict:
