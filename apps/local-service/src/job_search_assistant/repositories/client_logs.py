@@ -2,6 +2,8 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+
+from ..database import db_connect
 from typing import Any
 
 
@@ -11,7 +13,7 @@ class ClientLogRepository:
 
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS client_logs (
@@ -36,7 +38,7 @@ class ClientLogRepository:
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         self.initialize()
         received_at = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             cursor = connection.execute(
                 """INSERT INTO client_logs(
                     source, level, event, message, page_url, platform_job_id,
@@ -59,7 +61,7 @@ class ClientLogRepository:
 
     def list_recent(self, limit: int) -> list[dict[str, Any]]:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM client_logs ORDER BY received_at DESC, id DESC LIMIT ?", (limit,)

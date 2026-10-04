@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..domain.models import DeliveryRecord, DeliveryRecordInput
 from ..domain.salary import normalize_salary_text, prefer_salary_text
+from ..database import db_connect
 
 
 class DeliveryRepository:
@@ -127,7 +128,7 @@ class DeliveryRepository:
         return [self._from_row(row) for row in rows]
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path)
+        return db_connect(self.database_path)
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> DeliveryRecord:

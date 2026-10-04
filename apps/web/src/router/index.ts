@@ -1,8 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { api } from '../services/api'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: () => import('../views/auth/LoginView.vue'), meta: { title: '登录' } },
     { path: '/', name: 'overview', component: () => import('../views/dashboard/OverviewView.vue'), meta: { title: '工作台' } },
     { path: '/setup', name: 'setup', component: () => import('../views/setup/SetupView.vue'), meta: { title: '安装向导' } },
     { path: '/automation', name: 'automation', component: () => import('../views/automation/AutomationView.vue'), meta: { title: '自动投递' } },
@@ -17,6 +19,16 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),
+})
+
+router.beforeEach(async (to) => {
+  if (to.name === 'login') return true
+  try {
+    await api.me()
+    return true
+  } catch {
+    return { name: 'login' }
+  }
 })
 
 router.afterEach((route) => {

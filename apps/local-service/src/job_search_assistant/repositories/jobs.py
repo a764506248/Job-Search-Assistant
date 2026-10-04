@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..domain.models import CapturedJob, StoredJob
 from ..domain.salary import normalize_salary_text, prefer_salary_text
+from ..database import db_connect
 
 
 class JobRepository:
@@ -350,7 +351,7 @@ class JobRepository:
         return cursor.rowcount > 0
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path)
+        return db_connect(self.database_path)
 
     @staticmethod
     def _deduplicate_existing(connection: sqlite3.Connection) -> None:

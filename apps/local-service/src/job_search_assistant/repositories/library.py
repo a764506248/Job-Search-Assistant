@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from ..database import db_connect
+
 LibraryKind = Literal["projects", "resumes", "rules", "models", "targets"]
 ALLOWED_KINDS = {"projects", "resumes", "rules", "models", "targets"}
 
@@ -399,7 +401,7 @@ class LibraryRepository:
         return re.sub(r"[\s·•_\-—–]+", "", name).casefold()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path)
+        return db_connect(self.database_path)
 
     @staticmethod
     def _structure_profile(data: dict[str, Any]) -> dict[str, Any]:

@@ -519,3 +519,14 @@ td small { color: var(--muted); }
   .analysis-command > div:first-child { grid-column: auto; }
   .analysis-actions { flex-direction: column; }
 }
+ .auth-page { min-height: 100vh; display: grid; place-items: center; background: #f3f7f4; padding: 24px; }
+.auth-card { width: min(420px, 100%); padding: 34px; border: 1px solid #d6e5dd; border-radius: 18px; background: #fff; box-shadow: 0 18px 50px rgba(20, 60, 45, .1); }
+.auth-card h1 { margin: 8px 0; }
+.auth-hint { color: #65766e; line-height: 1.6; }
+.auth-card form { display: grid; gap: 14px; margin-top: 20px; }
+.auth-card label { display: grid; gap: 6px; color: #32483e; font-weight: 600; }
+.auth-card input { padding: 11px 12px; border: 1px solid #bdd2c7; border-radius: 8px; font: inherit; }
+.auth-card form button { padding: 12px; border: 0; border-radius: 8px; background: #176b55; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+.auth-card form button:disabled { opacity: .6; }
+.link-button { margin-top: 16px; border: 0; background: none; color: #176b55; cursor: pointer; }
+.auth-error { color: #b42318; }

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8765
     local_token: str | None = None
+    database_url: str | None = None
     data_dir: Path = Path("data")
 
 

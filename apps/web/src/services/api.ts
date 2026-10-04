@@ -22,7 +22,7 @@ import type {
 } from '../types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const response = await fetch(path, { ...init, credentials: 'include' })
   if (!response.ok) {
     let message = `请求失败（${response.status}）`
     try {
@@ -44,6 +44,10 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 export const api = {
+  me: () => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/me'),
+  login: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/login', json('POST', { username, password })),
+  register: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/register', json('POST', { username, password })),
+  logout: () => request<{ ok: boolean }>('/v1/auth/logout', { method: 'POST', credentials: 'include' }),
   health: () => request<HealthResponse>('/v1/health'),
   setupStatus: () => request<SetupStatus>('/v1/setup/status'),
   saveBrowserProbe: (probe: BrowserProbe) => request<BrowserProbe>('/v1/setup/browser/probe', json('POST', probe)),

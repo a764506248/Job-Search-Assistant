@@ -24,6 +24,7 @@ from .project_extraction import (
 )
 from .repositories import (
     AutomationRepository,
+    AuthRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -64,6 +65,7 @@ def create_app(
     client_log_repository = ClientLogRepository(resolved_database_path)
     delivery_repository = DeliveryRepository(resolved_database_path)
     automation_repository = AutomationRepository(resolved_database_path)
+    auth_repository = AuthRepository(resolved_database_path)
     resolved_browser_hub = browser_hub or BrowserConnectionHub(
         resolved_database_path.parent / "browser-token.sha256"
     )
@@ -92,6 +94,7 @@ def create_app(
             resolved_database_path.parent / "resume-images",
             automation_repository,
             resolved_browser_hub,
+            auth_repository,
         )
     )
     return application

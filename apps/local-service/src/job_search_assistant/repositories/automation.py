@@ -3,6 +3,8 @@ import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from ..database import db_connect
 from typing import Any
 
 from ..automation import AutomationRunStatus, ensure_transition
@@ -18,7 +20,7 @@ class AutomationRepository:
         if self._initialized:
             return
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS automation_runs (
@@ -103,7 +105,7 @@ class AutomationRepository:
         # plan, but it cannot mark that plan as approved while creating it.
         config.pop("planConfirmation", None)
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             cursor = connection.execute(
                 """INSERT INTO automation_runs(
                     status, config_snapshot_json, target_count, created_at, updated_at
@@ -116,7 +118,7 @@ class AutomationRepository:
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM automation_runs WHERE id = ?", (run_id,)
@@ -155,7 +157,7 @@ class AutomationRepository:
             "selectedJobIds": selected_job_ids,
         }
         approval_token = secrets.token_urlsafe(32)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """UPDATE automation_runs SET config_snapshot_json = ?, target_count = ?,
                 approval_token = ?, updated_at = ? WHERE id = ?""",
@@ -210,7 +212,7 @@ class AutomationRepository:
         }.get(state, "collection-updated")
         level = "error" if state == "failed" else "info"
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """UPDATE automation_runs SET config_snapshot_json = ?, updated_at = ?
                 WHERE id = ?""",
@@ -238,7 +240,7 @@ class AutomationRepository:
 
     def _approval_token(self, run_id: int) -> str | None:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             row = connection.execute(
                 "SELECT approval_token FROM automation_runs WHERE id = ?", (run_id,)
             ).fetchone()
@@ -250,7 +252,7 @@ class AutomationRepository:
         """Atomically claim the oldest runnable task for one host runner."""
         self.initialize()
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.row_factory = sqlite3.Row
             self._upsert_runner(connection, runner_id, now)
@@ -281,13 +283,13 @@ class AutomationRepository:
     def runner_heartbeat(self, runner_id: str) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             self._upsert_runner(connection, runner_id, now)
         return {"runner_id": runner_id, "heartbeat_at": now, "online": True}
 
     def runner_status(self, max_age_seconds: int = 30) -> dict[str, Any]:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT runner_id, heartbeat_at FROM automation_runners "
@@ -306,7 +308,7 @@ class AutomationRepository:
     def heartbeat(self, run_id: int, runner_id: str) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             cursor = connection.execute(
                 """UPDATE automation_runs SET heartbeat_at = ?, updated_at = ?
                 WHERE id = ? AND runner_id = ?""",
@@ -327,7 +329,7 @@ class AutomationRepository:
         success_delta = 1 if outcome == "success" else 0
         failure_delta = 1 if outcome == "failure" else 0
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """UPDATE automation_runs SET current_job_id = ?,
                 success_count = success_count + ?, failure_count = failure_count + ?,
@@ -353,7 +355,7 @@ class AutomationRepository:
         self.get_run(run_id)
         idempotency_key = f"{run_id}:{job_id}:{action_type}"
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -404,7 +406,7 @@ class AutomationRepository:
     ) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 "SELECT * FROM automation_actions WHERE idempotency_key = ?",
@@ -440,7 +442,7 @@ class AutomationRepository:
 
     def list_actions(self, run_id: int) -> list[dict[str, Any]]:
         self.get_run(run_id)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM automation_actions WHERE run_id = ? ORDER BY updated_at",
@@ -458,7 +460,7 @@ class AutomationRepository:
 
     def list_runs(self) -> list[dict[str, Any]]:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             run_ids = [
                 row[0]
                 for row in connection.execute(
@@ -475,7 +477,7 @@ class AutomationRepository:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         self.get_run(run_id)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             self._append_event(connection, run_id, event_type, level, payload)
         return self.list_events(run_id)[-1]
 
@@ -494,7 +496,7 @@ class AutomationRepository:
             AutomationRunStatus.BLOCKED,
             AutomationRunStatus.CANCELLED,
         } else run["finished_at"]
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """UPDATE automation_runs SET status = ?, stop_reason = ?, started_at = ?,
                 finished_at = ?, updated_at = ? WHERE id = ?""",
@@ -516,7 +518,7 @@ class AutomationRepository:
 
     def list_events(self, run_id: int) -> list[dict[str, Any]]:
         self.get_run(run_id)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 "SELECT * FROM automation_events WHERE run_id = ? ORDER BY sequence", (run_id,)

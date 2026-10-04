@@ -18,6 +18,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
     WebSocket,
@@ -116,6 +117,7 @@ from .project_extraction import (
 )
 from .repositories import (
     AutomationRepository,
+    AuthRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -180,13 +182,70 @@ def create_router(
     resume_image_dir: Path,
     automation_repository: AutomationRepository,
     browser_hub: BrowserConnectionHub,
+    auth_repository: AuthRepository | None = None,
 ) -> APIRouter:
+    auth_repository = auth_repository or AuthRepository(job_repository.database_path)
     router = APIRouter(prefix="/v1")
     greeting_generation_ids: set[int] = set()
     greeting_generation_lock = Lock()
     collection_lock = asyncio.Lock()
     scheduled_collection_run_ids: set[int] = set()
     collection_schedule_lock = Lock()
+
+    def current_user(request: Request) -> dict | None:
+        token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
+        return auth_repository.get_user_by_token(token) if token else None
+
+    @router.post("/auth/register")
+    async def register(request: Request) -> dict:
+        payload = await request.json()
+        try:
+            user = auth_repository.create_user(
+                str(payload.get("username", "")),
+                str(payload.get("password", "")),
+                is_admin=not auth_repository.has_users(),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"user": user}
+
+    @router.post("/auth/login")
+    async def login(request: Request) -> Response:
+        payload = await request.json()
+        result = auth_repository.authenticate(
+            str(payload.get("username", "")), str(payload.get("password", ""))
+        )
+        if result is None:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        user, token = result
+        response = Response(content=json.dumps({"user": user}, ensure_ascii=False), media_type="application/json")
+        response.set_cookie("jsa_session", token, httponly=True, samesite="lax", secure=False, max_age=30 * 86400)
+        return response
+
+    @router.post("/auth/logout")
+    async def logout(request: Request) -> dict:
+        token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
+        if token:
+            auth_repository.delete_session(token)
+        response = Response(content=json.dumps({"ok": True}), media_type="application/json")
+        response.delete_cookie("jsa_session")
+        return response
+
+    @router.get("/auth/me")
+    async def me(request: Request) -> dict:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="未登录")
+        return {"user": user}
+
+    @router.get("/admin/users")
+    async def admin_users(request: Request) -> dict:
+        user = current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="未登录")
+        if not user["isAdmin"]:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        return {"items": auth_repository.list_users()}
 
     def schedule_automation_collection(
         run_id: int, background_tasks: BackgroundTasks
