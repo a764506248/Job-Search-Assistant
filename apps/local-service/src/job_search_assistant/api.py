@@ -253,6 +253,44 @@ def create_router(
             raise HTTPException(status_code=403, detail="需要管理员权限")
         return {"items": auth_repository.list_users()}
 
+    @router.post("/admin/users")
+    async def admin_create_user(request: Request) -> dict:
+        admin = required_user(request)
+        if not admin["isAdmin"]:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        payload = await request.json()
+        try:
+            user = auth_repository.create_user(str(payload.get("username", "")), str(payload.get("password", "")), is_admin=bool(payload.get("isAdmin", False)))
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        return {"user": user}
+
+    @router.patch("/admin/users/{user_id}")
+    async def admin_update_user(user_id: int, request: Request) -> dict:
+        admin = required_user(request)
+        if not admin["isAdmin"]:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        if int(admin["id"]) == user_id and (await request.json()).get("isActive") is False:
+            raise HTTPException(status_code=400, detail="不能停用当前管理员账号")
+        payload = await request.json()
+        try:
+            return {"user": auth_repository.update_user(user_id, password=payload.get("password"), is_admin=payload.get("isAdmin"), is_active=payload.get("isActive"))}
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @router.delete("/admin/users/{user_id}")
+    async def admin_delete_user(user_id: int, request: Request) -> dict:
+        admin = required_user(request)
+        if not admin["isAdmin"]:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        if int(admin["id"]) == user_id:
+            raise HTTPException(status_code=400, detail="不能删除当前管理员账号")
+        try:
+            auth_repository.delete_user(user_id)
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="用户不存在或无法删除") from error
+        return {"ok": True}
+
     def schedule_automation_collection(
         run_id: int, background_tasks: BackgroundTasks
     ) -> bool:

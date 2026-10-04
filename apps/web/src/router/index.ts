@@ -16,6 +16,7 @@ const router = createRouter({
     { path: '/templates', name: 'templates', component: () => import('../views/resume/TemplatesView.vue'), meta: { title: '简历模板' } },
     { path: '/rules', name: 'rules', component: () => import('../views/library/RulesView.vue'), meta: { title: '匹配规则' } },
     { path: '/models', name: 'models', component: () => import('../views/library/ModelsView.vue'), meta: { title: '模型配置' } },
+    { path: '/admin/users', name: 'admin-users', component: () => import('../views/admin/AdminUsersView.vue'), meta: { title: '用户管理', adminOnly: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),
@@ -24,7 +25,8 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   if (to.name === 'login') return true
   try {
-    await api.me()
+    const result = await api.me()
+    if (to.meta.adminOnly && !result.user.isAdmin) return { name: 'overview' }
     return true
   } catch {
     return { name: 'login' }

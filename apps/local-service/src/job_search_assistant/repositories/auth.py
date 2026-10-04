@@ -121,6 +121,29 @@ class AuthRepository:
             raise KeyError(user_id)
         return self._user(row)
 
+    def update_user(self, user_id: int, *, password: str | None = None, is_admin: bool | None = None, is_active: bool | None = None) -> dict:
+        self.initialize()
+        fields: list[str] = []
+        values: list[object] = []
+        if password is not None:
+            if len(password) < 8:
+                raise ValueError("密码至少需要 8 个字符")
+            fields.append("password_hash = ?"); values.append(_hash_password(password))
+        if is_admin is not None:
+            fields.append("is_admin = ?"); values.append(int(is_admin))
+        if is_active is not None:
+            fields.append("is_active = ?"); values.append(int(is_active))
+        if fields:
+            fields.append("updated_at = ?"); values.append(datetime.now(UTC).isoformat()); values.append(user_id)
+            with db_connect(self.database_path) as connection:
+                connection.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
+        return self.get_user(user_id)
+
+    def delete_user(self, user_id: int) -> None:
+        self.initialize()
+        with db_connect(self.database_path) as connection:
+            connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
     @staticmethod
     def _user(row: sqlite3.Row) -> dict:
         return {"id": int(row["id"]), "username": row["username"], "isAdmin": bool(row["is_admin"]), "isActive": bool(row["is_active"]), "createdAt": row["created_at"]}

@@ -21,6 +21,8 @@ import type {
   StoredJob,
 } from '../types'
 
+export type AdminUser = { id: number; username: string; isAdmin: boolean; isActive: boolean; createdAt: string }
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, credentials: 'include' })
   if (!response.ok) {
@@ -47,6 +49,10 @@ export const api = {
   me: () => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/me'),
   login: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/login', json('POST', { username, password })),
   register: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/register', json('POST', { username, password })),
+  adminUsers: () => request<{ items: AdminUser[] }>('/v1/admin/users'),
+  adminCreateUser: (username: string, password: string, isAdmin = false) => request<{ user: AdminUser }>('/v1/admin/users', json('POST', { username, password, isAdmin })),
+  adminUpdateUser: (id: number, data: { password?: string; isAdmin?: boolean; isActive?: boolean }) => request<{ user: AdminUser }>(`/v1/admin/users/${id}`, json('PATCH', data)),
+  adminDeleteUser: (id: number) => request<{ ok: boolean }>(`/v1/admin/users/${id}`, { method: 'DELETE' }),
   logout: () => request<{ ok: boolean }>('/v1/auth/logout', { method: 'POST', credentials: 'include' }),
   health: () => request<HealthResponse>('/v1/health'),
   setupStatus: () => request<SetupStatus>('/v1/setup/status'),

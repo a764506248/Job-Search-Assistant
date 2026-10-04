@@ -530,3 +530,12 @@ td small { color: var(--muted); }
 .auth-card form button:disabled { opacity: .6; }
 .link-button { margin-top: 16px; border: 0; background: none; color: #176b55; cursor: pointer; }
 .auth-error { color: #b42318; }
+.admin-user-form { display: flex; gap: 12px; align-items: center; padding: 16px; border: 1px solid #d6e5dd; border-radius: 12px; background: #f8fbf9; }
+.admin-user-form input:not([type='checkbox']) { padding: 10px 12px; border: 1px solid #bdd2c7; border-radius: 8px; font: inherit; }
+.table-panel { overflow-x: auto; background: #fff; border: 1px solid #dce8e2; border-radius: 14px; }
+.table-panel table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.table-panel th, .table-panel td { padding: 13px 16px; border-bottom: 1px solid #edf2ef; text-align: left; }
+.table-panel th { color: #557066; font-size: .9rem; background: #f7faf8; }
+.admin-actions { display: flex; gap: 8px; white-space: nowrap; }
+.admin-actions button { padding: 6px 10px; border: 1px solid #bdd2c7; border-radius: 7px; background: #fff; color: #176b55; cursor: pointer; }
+.admin-actions .danger-button { color: #b42318; border-color: #e9b7b0; }

@@ -9,7 +9,7 @@
         </div>
         <nav aria-label="主要导航">
           <a-button
-            v-for="item in navigation"
+            v-for="item in visibleNavigation"
             :key="item.name"
             class="nav-item"
             :class="{ active: route.name === item.name }"
@@ -44,6 +44,7 @@ const route = useRoute()
 const router = useRouter()
 const refreshVersion = ref(0)
 const service = reactive({ online: false, text: '正在连接本地服务' })
+const isAdmin = ref(false)
 
 provide('refreshVersion', refreshVersion)
 
@@ -61,10 +62,14 @@ const navigation = [
   { name: 'models', path: '/models', label: '模型配置', icon: '✦' },
 ]
 
+const adminNavigation = { name: 'admin-users', path: '/admin/users', label: '用户管理', icon: '♙' }
+const visibleNavigation = computed(() => isAdmin.value ? [...navigation, adminNavigation] : navigation)
+
 const pageTitle = computed(() => String(route.meta.title || '工作台'))
 
 onMounted(async () => {
   try {
+    isAdmin.value = (await api.me()).user.isAdmin
     const health = await api.health()
     service.online = true
     service.text = `本地服务 ${health.version}`
