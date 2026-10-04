@@ -11,9 +11,30 @@ import {
 } from '../src/automation/content-script-recovery'
 import { isClosedMessageChannel, isMissingMessageReceiver } from '../src/automation/message-channel'
 
-const WS_URL = 'ws://127.0.0.1:8765/v1/browser/ws'
+const DEFAULT_SERVICE_URL = 'http://127.0.0.1:8765'
 const TOKEN_KEY = 'browserProtocolToken'
 const PAIRING_CODE_KEY = 'browserPairingCode'
+const SERVICE_URL_KEY = 'browserServiceUrl'
+
+function normalizeServiceUrl(value: unknown): string {
+  const raw = typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_SERVICE_URL
+  try {
+    const url = new URL(raw)
+    if (!['http:', 'https:'].includes(url.protocol)) return DEFAULT_SERVICE_URL
+    return `${url.protocol}//${url.host}`
+  }
+  catch {
+    return DEFAULT_SERVICE_URL
+  }
+}
+
+function websocketUrl(serviceUrl: string): string {
+  const url = new URL(serviceUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/v1/browser/ws'
+  url.search = ''
+  return url.toString()
+}
 
 export default defineBackground(() => {
   let socket: WebSocket | undefined
@@ -23,11 +44,12 @@ export default defineBackground(() => {
 
   const connect = async () => {
     if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
-    const stored = await browser.storage.local.get([TOKEN_KEY, PAIRING_CODE_KEY])
+    const stored = await browser.storage.local.get([TOKEN_KEY, PAIRING_CODE_KEY, SERVICE_URL_KEY])
     const token = typeof stored[TOKEN_KEY] === 'string' ? stored[TOKEN_KEY] : ''
     const pairingCode = typeof stored[PAIRING_CODE_KEY] === 'string' ? stored[PAIRING_CODE_KEY] : ''
+    const serviceUrl = normalizeServiceUrl(stored[SERVICE_URL_KEY])
     if (!token && !pairingCode) return
-    socket = new WebSocket(WS_URL)
+    socket = new WebSocket(websocketUrl(serviceUrl))
     socket.addEventListener('open', () => {
       socket?.send(JSON.stringify({
         type: 'hello', token, pairingCode,
@@ -70,19 +92,21 @@ export default defineBackground(() => {
     retryMs = Math.min(retryMs * 2, 30_000)
   }
 
-  browser.runtime.onMessage.addListener((message: unknown) => {
+  browser.runtime.onMessage.addListener(async (message: unknown) => {
     if (isDefaultResumeImageRequest(message)) return fetchDefaultResumeImage()
     if (isPairingRequest(message)) {
       return browser.storage.local
-        .set({ [PAIRING_CODE_KEY]: message.code })
+        .set({ [PAIRING_CODE_KEY]: message.code, [SERVICE_URL_KEY]: normalizeServiceUrl(message.serviceUrl) })
+        .then(() => browser.storage.local.remove(TOKEN_KEY))
         .then(() => { socket?.close(); return connect() })
         .then(() => ({ ok: true }))
     }
     if (isConnectionStatusRequest(message)) {
-      return Promise.resolve({
+      return {
         connected: socket?.readyState === WebSocket.OPEN,
         protocolVersion: BROWSER_PROTOCOL_VERSION,
-      })
+        serviceUrl: normalizeServiceUrl((await browser.storage.local.get(SERVICE_URL_KEY))[SERVICE_URL_KEY]),
+      }
     }
   })
   void connect()
@@ -105,9 +129,11 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
         city,
         normalizeBossSearchFilters(envelope.payload.filters),
       )
-      const ready = waitForTabReady(tab.id, url)
-      await browser.tabs.update(tab.id, { url })
-      await ready
+      if (!sameNavigationTarget(tab.url, url)) {
+        const ready = waitForTabReady(tab.id, url)
+        await browser.tabs.update(tab.id, { url })
+        await ready
+      }
       return success(envelope, { navigationCompleted: true, url })
     }
     if (envelope.action === 'open_job') {
@@ -115,9 +141,12 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       if (url.protocol !== 'https:' || !/(^|\.)zhipin\.com$/.test(url.hostname)) {
         return failure(envelope, '仅允许打开 BOSS 直聘 HTTPS 地址')
       }
-      const ready = waitForTabReady(tab.id, url.toString())
-      await browser.tabs.update(tab.id, { url: url.toString() })
-      await ready
+      const targetUrl = url.toString()
+      if (!sameNavigationTarget(tab.url, targetUrl)) {
+        const ready = waitForTabReady(tab.id, targetUrl)
+        await browser.tabs.update(tab.id, { url: targetUrl })
+        await ready
+      }
       return success(envelope, { navigationCompleted: true, url: url.toString() })
     }
     try {
@@ -236,6 +265,20 @@ function remainingTime(deadlineAt: number, maximumMs: number): number {
   return Math.max(1, Math.min(maximumMs, deadlineAt - Date.now()))
 }
 
+function sameNavigationTarget(currentUrl: string | undefined, targetUrl: string): boolean {
+  if (!currentUrl) return false
+  try {
+    const current = new URL(currentUrl)
+    const target = new URL(targetUrl)
+    return current.origin === target.origin
+      && current.pathname === target.pathname
+      && current.search === target.search
+  }
+  catch {
+    return false
+  }
+}
+
 async function recoverOpenChatAfterNavigation(
   tabId: number,
   envelope: BrowserActionEnvelope,
@@ -322,8 +365,8 @@ interface DefaultResumeImageResponse {
   filename: string
 }
 
-function isPairingRequest(message: unknown): message is { type: 'job-search-assistant:pair'; code: string } {
-  const request = message as { type?: unknown, code?: unknown }
+function isPairingRequest(message: unknown): message is { type: 'job-search-assistant:pair'; code: string; serviceUrl?: string } {
+  const request = message as { type?: unknown, code?: unknown, serviceUrl?: unknown }
   return !!request && request.type === 'job-search-assistant:pair' && typeof request.code === 'string'
 }
 
@@ -349,7 +392,9 @@ function isDefaultResumeImageRequest(message: unknown): message is DefaultResume
 }
 
 async function fetchDefaultResumeImage(): Promise<DefaultResumeImageResponse> {
-  const response = await fetch('http://127.0.0.1:8765/v1/resumes/default-image', {
+  const stored = await browser.storage.local.get(SERVICE_URL_KEY)
+  const serviceUrl = normalizeServiceUrl(stored[SERVICE_URL_KEY])
+  const response = await fetch(`${serviceUrl}/v1/resumes/default-image`, {
     headers: { Accept: 'image/png,image/jpeg,image/*' },
   })
   if (!response.ok) throw new Error(`默认简历图片读取失败：HTTP ${response.status}`)

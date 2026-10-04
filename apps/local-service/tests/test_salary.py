@@ -53,11 +53,17 @@ def test_minimum_salary_fails_closed_when_monthly_k_range_is_unverifiable(
     assert "禁止自动投递" in result.violations[0].reason
 
 
-def test_minimum_salary_uses_the_advertised_lower_bound() -> None:
+def test_minimum_salary_accepts_an_overlapping_advertised_range() -> None:
     result = evaluate_salary_policy("15-30K·14薪", minimum_salary_k=20, rules=[])
 
+    assert result.allowed is True
+
+
+def test_minimum_salary_rejects_a_disjoint_advertised_range() -> None:
+    result = evaluate_salary_policy("15-19K·14薪", minimum_salary_k=20, rules=[])
+
     assert result.allowed is False
-    assert "下限 15K 低于最低薪资 20K" in result.violations[0].reason
+    assert "上限 19K 低于最低薪资 20K，无交集" in result.violations[0].reason
 
 
 def test_extracts_allowed_range_from_blocking_price_rule() -> None:

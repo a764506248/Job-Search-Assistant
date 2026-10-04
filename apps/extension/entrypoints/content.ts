@@ -276,6 +276,28 @@ async function sendResumeWithPreview(
   }
   const outgoingImagesBefore = countOutgoingImages(document)
   putFileIntoInput(input, file)
+  // BOSS stages the selected image after the file input changes; it does not
+  // send it until the chat composer send button is clicked explicitly.
+  let sendButton: HTMLElement | null = null
+  for (let attempt = 0; attempt < 20 && !sendButton; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    sendButton = findSendButton(document)
+  }
+  if (!sendButton) {
+    return {
+      status: 'uncertain',
+      evidence: {
+        identityMatched: true,
+        userConfirmed: settings.resumeSendMode === 'confirm',
+        planApproved: true,
+        sideEffectExecuted: true,
+        imageMessageObserved: false,
+        filename: file.name,
+      },
+      error: '简历图片已加载，但未找到可用的发送按钮',
+    }
+  }
+  sendButton.click()
   await new Promise(resolve => setTimeout(resolve, 1500))
   const imageMessageObserved = countOutgoingImages(document) > outgoingImagesBefore
   const evidence = {

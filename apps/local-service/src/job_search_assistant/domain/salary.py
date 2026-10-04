@@ -185,14 +185,18 @@ def evaluate_salary_policy(
         )
 
     violations: list[SalaryPolicyViolation] = []
-    if minimum_salary_k > 0 and monthly_range.minimum_k < Decimal(minimum_salary_k):
+    # A salary preference is satisfied when the advertised interval has any
+    # overlap with the requested floor. For example, 16-22K overlaps a 20K
+    # minimum at 20-22K and must not be rejected solely because its lower
+    # bound is below 20K.
+    if minimum_salary_k > 0 and monthly_range.maximum_k < Decimal(minimum_salary_k):
         violations.append(
             SalaryPolicyViolation(
                 rule_id="builtin:minimum-salary",
                 rule_name="最低薪资",
                 reason=(
-                    f"岗位月薪下限 {_format_k(monthly_range.minimum_k)}K "
-                    f"低于最低薪资 {minimum_salary_k}K"
+                    f"岗位月薪上限 {_format_k(monthly_range.maximum_k)}K "
+                    f"低于最低薪资 {minimum_salary_k}K，无交集"
                 ),
                 evidence=(normalized or "",),
             )

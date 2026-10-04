@@ -754,7 +754,7 @@ def test_restart_and_resume_revalidate_current_plan_salary(
     response = client.post(f"/v1/automation/runs/{created['id']}/{endpoint}")
 
     assert response.status_code == 422
-    assert "下限 15K 低于最低薪资 20K" in response.json()["detail"]
+    assert "上限 15K 低于最低薪资 20K，无交集" in response.json()["detail"]
     assert client.get(f"/v1/automation/runs/{created['id']}").json()["status"] == status
 
 
@@ -1459,7 +1459,7 @@ def test_analyze_and_plan_blocks_salary_but_still_generates_preview_greeting(tmp
     decision = result["match"]["decision"]
     assert decision["shouldDeliver"] is False
     assert decision["materialStrategy"] == "blocked"
-    assert any("下限 15K 低于最低薪资 20K" in reason for reason in decision["reasons"])
+    assert any("上限 15K 低于最低薪资 20K，无交集" in reason for reason in decision["reasons"])
     assert decision["ruleMatches"][-1]["ruleId"] == "builtin:minimum-salary"
     assert result["generatedGreeting"].startswith("您好")
     assert client.get("/v1/jobs").json()["items"][0]["generatedGreeting"].startswith("您好")

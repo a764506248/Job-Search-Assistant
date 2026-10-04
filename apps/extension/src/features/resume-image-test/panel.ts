@@ -101,6 +101,7 @@ export function mountBrowserControlPanel(doc: Document): void {
       .status.ready { background:#def5e9;color:#0a6a4e }.dot { width:8px;height:8px;border-radius:50%;background:currentColor }
       .pairing { margin-top:11px }.pairing.hidden { display:none }
       label { display:block;margin:0 0 5px;color:#52645c;font-size:11px }
+      .service-url { width:100%;box-sizing:border-box;margin-bottom:7px;padding:8px 10px;border:1px solid #bcd2c8;border-radius:8px;font:12px/1.2 inherit }
       .pair-row { display:flex;gap:7px }.pair-row input { min-width:0;flex:1;padding:9px 10px;border:1px solid #bcd2c8;border-radius:8px;font:700 16px/1 monospace;letter-spacing:.18em }
       .primary { padding:9px 12px;background:#087f5f;color:white }.primary:disabled { opacity:.5;cursor:wait }
       .section { margin-top:12px;padding-top:12px;border-top:1px solid #dce8e2 }
@@ -119,6 +120,8 @@ export function mountBrowserControlPanel(doc: Document): void {
       <div class="body">
         <div class="status"><span class="dot"></span><span class="status-text">正在检查本地连接…</span></div>
         <div class="pairing">
+          <label for="service-url">服务地址（本地或线上域名）</label>
+          <input id="service-url" class="service-url" inputmode="url" placeholder="http://127.0.0.1:8765">
           <label for="pair-code">本地后台显示的 6 位配对码</label>
           <div class="pair-row"><input id="pair-code" inputmode="numeric" maxlength="6" placeholder="000000"><button class="primary pair">连接</button></div>
         </div>
@@ -141,6 +144,7 @@ export function mountBrowserControlPanel(doc: Document): void {
   const statusText = shadow.querySelector<HTMLElement>('.status-text')!
   const pairing = shadow.querySelector<HTMLElement>('.pairing')!
   const code = shadow.querySelector<HTMLInputElement>('#pair-code')!
+  const serviceUrl = shadow.querySelector<HTMLInputElement>('#service-url')!
   const pair = shadow.querySelector<HTMLButtonElement>('.pair')!
   const resumeMode = shadow.querySelector<HTMLSelectElement>('.resume-mode')!
   let settings = { ...DEFAULT_SETTINGS }
@@ -164,10 +168,12 @@ export function mountBrowserControlPanel(doc: Document): void {
 
   const refreshStatus = async () => {
     try {
-      const result = await browser.runtime.sendMessage({ type: 'job-search-assistant:connection-status' }) as { connected: boolean, protocolVersion: string }
+      const result = await browser.runtime.sendMessage({ type: 'job-search-assistant:connection-status' }) as { connected: boolean, protocolVersion: string, serviceUrl?: string }
       status.classList.toggle('ready', result.connected)
-      statusText.textContent = result.connected ? `本地服务已连接 · 协议 ${result.protocolVersion}` : '尚未连接本地服务'
-      pairing.classList.toggle('hidden', result.connected)
+      statusText.textContent = result.connected
+        ? `${result.serviceUrl ?? '服务'} 已连接 · 协议 ${result.protocolVersion}`
+        : '尚未连接服务，请检查地址与配对码'
+      pairing.classList.remove('hidden')
     }
     catch {
       status.classList.remove('ready')
@@ -184,12 +190,15 @@ export function mountBrowserControlPanel(doc: Document): void {
     pair.disabled = true
     statusText.textContent = '正在连接…'
     try {
-      await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value })
+      await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value, serviceUrl: serviceUrl.value })
       await new Promise(resolve => setTimeout(resolve, 500))
       await refreshStatus()
     }
     catch (error) { statusText.textContent = error instanceof Error ? error.message : String(error) }
     finally { pair.disabled = false }
+  })
+  void browser.storage.local.get('browserServiceUrl').then((stored) => {
+    serviceUrl.value = typeof stored.browserServiceUrl === 'string' ? stored.browserServiceUrl : 'http://127.0.0.1:8765'
   })
   void readAutomationSettings().then((value) => {
     settings = value

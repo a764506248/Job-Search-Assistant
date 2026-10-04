@@ -446,7 +446,7 @@ def test_all_rule_rejected_jobs_are_a_reviewed_no_matches_outcome(tmp_path) -> N
     assert reviewed[0]["salaryText"] == "10-15K"
     assert reviewed[0]["outcome"] == "rule_rejected"
     assert reviewed[0]["suitabilityScore"] is not None
-    assert any("低于最低薪资 20K" in reason for reason in reviewed[0]["reasons"])
+    assert any("低于最低薪资 20K，无交集" in reason for reason in reviewed[0]["reasons"])
     assert any(
         match["ruleId"] == "builtin:minimum-salary"
         for match in reviewed[0]["ruleMatches"]
