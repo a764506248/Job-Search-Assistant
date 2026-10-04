@@ -56,7 +56,7 @@ def create_app(
         CORSMiddleware,
         allow_origin_regex=ALLOWED_EXTENSION_ORIGIN.pattern,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Local-Token"],
+        allow_headers=["Content-Type", "Authorization", "X-Local-Token"],
         allow_private_network=True,
     )
     resolved_database_path = database_path or settings.data_dir / "jobs.sqlite3"

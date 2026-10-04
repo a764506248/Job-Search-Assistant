@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__
+from .auth_token import issue_token, verify_token
 from .automation.browser_protocol import (
     ALLOWED_ACTIONS,
     PROTOCOL_VERSION,
@@ -193,6 +194,12 @@ def create_router(
     collection_schedule_lock = Lock()
 
     def current_user(request: Request) -> dict | None:
+        authorization = request.headers.get("Authorization", "")
+        if authorization.lower().startswith("bearer "):
+            claims = verify_token(authorization[7:].strip())
+            if claims:
+                try: return auth_repository.get_user(int(claims["sub"]))
+                except (KeyError, ValueError): return None
         token = request.cookies.get("jsa_session") or request.headers.get("X-Session-Token")
         return auth_repository.get_user_by_token(token) if token else None
 
@@ -224,7 +231,8 @@ def create_router(
         if result is None:
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         user, token = result
-        response = Response(content=json.dumps({"user": user}, ensure_ascii=False), media_type="application/json")
+        jwt = issue_token(user)
+        response = Response(content=json.dumps({"user": user, "token": jwt}, ensure_ascii=False), media_type="application/json")
         response.set_cookie("jsa_session", token, httponly=True, samesite="lax", secure=False, max_age=30 * 86400)
         return response
 
