@@ -1,4 +1,19 @@
+from job_search_assistant.database import CompatRow
 from job_search_assistant.repositories import AutomationRepository
+from job_search_assistant.repositories.automation import _row_as_dict
+
+
+def test_automation_action_rows_support_postgres_compatibility_rows() -> None:
+    row = CompatRow(
+        ["idempotency_key", "status", "last_error"],
+        ("5:job-1:open_job", "succeeded", None),
+    )
+
+    assert _row_as_dict(row) == {
+        "idempotency_key": "5:job-1:open_job",
+        "status": "succeeded",
+        "last_error": None,
+    }
 
 
 def test_automation_run_persists_transitions_and_events(tmp_path) -> None:

@@ -698,25 +698,25 @@ useRefresh(load)
 }
 
 .automation-retry-action :deep(.ant-btn-primary) {
-  border-color: #ad6218;
-  background: #b96a1d;
+  border-color: #176b55;
+  background: #176b55;
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 2px 0 rgb(101 55 12 / 16%);
+  box-shadow: 0 2px 0 rgb(10 74 57 / 18%);
 }
 
 .automation-retry-action :deep(.ant-btn-primary:not(:disabled):hover),
 .automation-retry-action :deep(.ant-btn-primary:not(:disabled):focus-visible) {
-  border-color: #8f4d0e;
-  background: #98520f;
+  border-color: #0f5745;
+  background: #0f5745;
   color: #fff;
 }
 
 .automation-retry-action :deep(.ant-btn-primary:disabled),
 .automation-retry-action :deep(.ant-btn-primary.ant-btn-loading) {
-  border-color: #dfc19f;
-  background: #f3e4d2;
-  color: #75471d;
+  border-color: #75aa9b;
+  background: #75aa9b;
+  color: #fff;
   opacity: 1;
   box-shadow: none;
 }

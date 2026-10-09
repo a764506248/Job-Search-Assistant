@@ -10,6 +10,11 @@ from ..database import db_connect
 from ..domain.salary import normalize_salary_text
 
 
+def _row_as_dict(row: Any) -> dict[str, Any]:
+    """Normalize SQLite rows and PostgreSQL compatibility rows."""
+    return row.as_dict() if hasattr(row, "as_dict") else dict(row)
+
+
 class AutomationRepository:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
@@ -489,7 +494,9 @@ class AutomationRepository:
                 "SELECT * FROM automation_actions WHERE idempotency_key = ?",
                 (idempotency_key,),
             ).fetchone()
-        return dict(result)
+        if result is None:  # pragma: no cover - the action was read in this transaction
+            raise KeyError(idempotency_key)
+        return _row_as_dict(result)
 
     def list_actions(self, run_id: int) -> list[dict[str, Any]]:
         self.get_run(run_id)
