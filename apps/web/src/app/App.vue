@@ -30,7 +30,7 @@
           <div><p class="eyebrow">本地知识库</p><h1>{{ pageTitle }}</h1></div>
           <div class="topbar-account">
             <span v-if="username" class="account-name">{{ username }}</span>
-            <a-button :loading="signingOut" @click="signOut">退出登录</a-button>
+            <a-button :loading="signingOut" @click="confirmSignOut">退出登录</a-button>
           </div>
         </header>
         <router-view />
@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import { Modal } from 'ant-design-vue'
 import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../services/api'
@@ -121,6 +122,17 @@ async function signOut() {
     signingOut.value = false
     router.replace({ name: 'login' })
   }
+}
+
+function confirmSignOut() {
+  Modal.confirm({
+    title: '确认退出登录？',
+    content: '退出后将返回登录页面，需要重新登录才能继续使用。',
+    okText: '确认退出',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: signOut,
+  })
 }
 
 const theme = {
