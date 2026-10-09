@@ -609,7 +609,7 @@ def create_router(
         if not probe_fresh:
             browser_probe = None
 
-        browser_state = browser_hub.status()
+        browser_state = browser_hub.status(user_id)
         browser_connected = bool(browser_state["connected"])
         extension_version = browser_state.get("extensionVersion")
         unified_extension_ready = browser_connected and extension_supports_collection(
@@ -893,17 +893,18 @@ def create_router(
 
     @router.get("/browser/status", response_model=BrowserProtocolStatus)
     def get_browser_status(http_request: Request) -> BrowserProtocolStatus:
-        required_user(http_request)
-        return BrowserProtocolStatus.model_validate(browser_hub.status())
+        user = required_user(http_request)
+        return BrowserProtocolStatus.model_validate(browser_hub.status(int(user["id"])))
 
     @router.post("/browser/actions/test", response_model=BrowserActionResponse)
     async def test_browser_action(
         request: BrowserTestActionRequest, http_request: Request
     ) -> BrowserActionResponse:
-        required_user(http_request)
+        user = required_user(http_request)
         try:
             response = await browser_hub.dispatch(
                 run_id=0,
+                user_id=int(user["id"]),
                 action=request.action,
                 payload=request.payload,
                 deadline_ms=5_000,
@@ -938,7 +939,18 @@ def create_router(
                         "protocolVersion": PROTOCOL_VERSION,
                     }
                 )
-            browser_hub.attach(websocket, str(hello.get("extensionVersion", "unknown")))
+            owner_id = browser_hub.resolve_user(token)
+            if owner_id is None:
+                await websocket.send_json(
+                    {"type": "error", "error": "pairing token has no user owner; pair again"}
+                )
+                await websocket.close(code=1008)
+                return
+            browser_hub.attach(
+                websocket,
+                str(hello.get("extensionVersion", "unknown")),
+                owner_id,
+            )
             await websocket.send_json(
                 {"type": "ready", "protocolVersion": PROTOCOL_VERSION}
             )
@@ -1258,7 +1270,14 @@ def create_router(
         request: AutomationHeartbeatRequest, http_request: Request,
     ) -> AutomationRunnerClaimResponse:
         require_runner(http_request)
-        run = automation_repository.claim_next_run(request.runner_id)
+        extension_user_id = browser_hub.connected_user_id()
+        run = (
+            automation_repository.claim_next_run(
+                request.runner_id, user_id=extension_user_id
+            )
+            if extension_user_id is not None
+            else None
+        )
         approval_token = run.pop("approval_token", None) if run else None
         return AutomationRunnerClaimResponse(
             run=AutomationRun.model_validate(run) if run else None,
@@ -1363,6 +1382,7 @@ def create_router(
         try:
             result = await browser_hub.dispatch(
                 run_id=run_id,
+                user_id=int(claimed_run["user_id"]),
                 action=request.action,
                 payload=dispatch_payload,
                 deadline_ms=request.deadline_ms,
@@ -2233,7 +2253,7 @@ def create_router(
                 },
             )
             raise HTTPException(status_code=422, detail=reason)
-        browser_state = browser_hub.status()
+        browser_state = browser_hub.status(user_id)
         if not browser_state["connected"]:
             automation_repository.update_collection(
                 run_id,
@@ -2311,6 +2331,7 @@ def create_router(
                 session = BrowserActionResponse.model_validate(
                     await browser_hub.dispatch(
                         run_id=run_id,
+                        user_id=user_id,
                         action="session_status",
                         payload={},
                         deadline_ms=30_000,
@@ -2427,6 +2448,7 @@ def create_router(
                     navigation = BrowserActionResponse.model_validate(
                         await browser_hub.dispatch(
                             run_id=run_id,
+                            user_id=user_id,
                             action="navigate_search",
                             payload={
                                 "query": keyword,
@@ -2504,6 +2526,7 @@ def create_router(
                             collection = BrowserActionResponse.model_validate(
                                 await browser_hub.dispatch(
                                     run_id=run_id,
+                                    user_id=user_id,
                                     action="collect_jobs",
                                     payload={
                                         "limit": batch_limit,

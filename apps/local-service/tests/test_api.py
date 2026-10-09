@@ -100,7 +100,7 @@ class RecordingBrowserHub:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def status(self) -> dict[str, object]:
+    def status(self, user_id: int) -> dict[str, object]:
         return {
             "connected": True,
             "paired": True,
@@ -108,10 +108,14 @@ class RecordingBrowserHub:
             "extensionVersion": "0.4.11-test",
         }
 
+    def connected_user_id(self) -> int:
+        return 1
+
     async def dispatch(
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, object],
         deadline_ms: int,

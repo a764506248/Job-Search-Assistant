@@ -69,7 +69,7 @@ def test_plan_confirmation_is_server_owned_and_issues_runner_capability(tmp_path
     repository.transition(run["id"], "validating")
     repository.transition(run["id"], "ready")
     repository.transition(run["id"], "running")
-    claimed = repository.claim_next_run("runner-a")
+    claimed = repository.claim_next_run("runner-a", user_id=1)
     assert claimed is not None
     assert claimed["approval_token"]
     assert claimed["approval_token"] != "client-forged-token"
@@ -99,10 +99,10 @@ def test_runner_claim_is_atomic_and_action_is_idempotent(tmp_path) -> None:
     repository.transition(run["id"], "ready")
     repository.transition(run["id"], "running")
 
-    claimed = repository.claim_next_run("runner-a")
+    claimed = repository.claim_next_run("runner-a", user_id=1)
     assert claimed is not None
     assert claimed["runner_id"] == "runner-a"
-    assert repository.claim_next_run("runner-b") is None
+    assert repository.claim_next_run("runner-b", user_id=1) is None
     assert repository.heartbeat(run["id"], "runner-a")["heartbeat_at"]
     progress = repository.record_progress(run["id"], "job-1", "success", "confirmed")
     assert progress["success_count"] == 1
@@ -129,13 +129,30 @@ def test_runner_claim_is_atomic_and_action_is_idempotent(tmp_path) -> None:
     assert repository.report(run["id"])["actions"][0]["attempt_count"] == 1
 
 
+def test_runner_claims_only_runs_owned_by_connected_user(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    first_user_run = repository.create_run({}, 1, user_id=1)
+    second_user_run = repository.create_run({}, 1, user_id=2)
+    for run in (first_user_run, second_user_run):
+        repository.transition(run["id"], "validating")
+        repository.transition(run["id"], "ready")
+        repository.transition(run["id"], "running")
+
+    claimed = repository.claim_next_run("runner-a", user_id=2)
+
+    assert claimed is not None
+    assert claimed["id"] == second_user_run["id"]
+    assert claimed["user_id"] == 2
+    assert repository.get_run(first_user_run["id"])["runner_id"] is None
+
+
 def test_stale_claimed_run_becomes_interrupted_and_releasable(tmp_path) -> None:
     repository = AutomationRepository(tmp_path / "jobs.sqlite3")
     run = repository.create_run({"keywords": ["AI Agent"]}, 1)
     repository.transition(run["id"], "validating")
     repository.transition(run["id"], "ready")
     repository.transition(run["id"], "running")
-    assert repository.claim_next_run("runner-a") is not None
+    assert repository.claim_next_run("runner-a", user_id=1) is not None
 
     interrupted = repository.interrupt_stale_runs(max_age_seconds=-1)
 

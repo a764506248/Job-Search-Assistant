@@ -125,7 +125,7 @@ class FakeConnectedBrowserHub:
         self.logged_in = logged_in
         self.calls: list[dict[str, Any]] = []
 
-    def status(self) -> dict[str, object]:
+    def status(self, user_id: int) -> dict[str, object]:
         return {
             "connected": True,
             "paired": True,
@@ -133,10 +133,14 @@ class FakeConnectedBrowserHub:
             "extensionVersion": self.version,
         }
 
+    def connected_user_id(self) -> int:
+        return 1
+
     async def dispatch(
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, object],
         deadline_ms: int,
@@ -201,6 +205,7 @@ class TimeoutAfterFirstBatchHub(FakeConnectedBrowserHub):
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, object],
         deadline_ms: int,
@@ -208,6 +213,7 @@ class TimeoutAfterFirstBatchHub(FakeConnectedBrowserHub):
         if action != "collect_jobs":
             return await super().dispatch(
                 run_id=run_id,
+                user_id=user_id,
                 action=action,
                 payload=payload,
                 deadline_ms=deadline_ms,
@@ -248,6 +254,7 @@ class AlwaysTimeoutHub(FakeConnectedBrowserHub):
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, object],
         deadline_ms: int,
@@ -255,6 +262,7 @@ class AlwaysTimeoutHub(FakeConnectedBrowserHub):
         if action != "collect_jobs":
             return await super().dispatch(
                 run_id=run_id,
+                user_id=user_id,
                 action=action,
                 payload=payload,
                 deadline_ms=deadline_ms,
@@ -275,6 +283,7 @@ class TimeoutOnceHub(FakeConnectedBrowserHub):
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, object],
         deadline_ms: int,
@@ -293,6 +302,7 @@ class TimeoutOnceHub(FakeConnectedBrowserHub):
             raise BrowserProtocolError("browser action timed out: collect_jobs")
         return await super().dispatch(
             run_id=run_id,
+            user_id=user_id,
             action=action,
             payload=payload,
             deadline_ms=deadline_ms,

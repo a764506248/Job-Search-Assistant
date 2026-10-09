@@ -43,6 +43,7 @@ class BrowserConnectionHub:
         self._token_hash: str | None = state[0] if state else None
         self._token_user_id: int | None = state[1] if state else None
         self._websocket: WebSocket | None = None
+        self._websocket_user_id: int | None = None
         self._extension_version: str | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._send_lock = asyncio.Lock()
@@ -87,31 +88,40 @@ class BrowserConnectionHub:
             return None
         return self._token_user_id
 
-    def attach(self, websocket: WebSocket, extension_version: str) -> None:
+    def attach(self, websocket: WebSocket, extension_version: str, user_id: int) -> None:
         self._websocket = websocket
+        self._websocket_user_id = user_id
         self._extension_version = extension_version
 
     def detach(self, websocket: WebSocket) -> None:
-        if self._websocket is websocket:
-            self._websocket = None
-            self._extension_version = None
+        if self._websocket is not websocket:
+            return
+        self._websocket = None
+        self._websocket_user_id = None
+        self._extension_version = None
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(BrowserProtocolError("browser extension disconnected"))
         self._pending.clear()
 
-    def status(self) -> dict[str, Any]:
+    def status(self, user_id: int) -> dict[str, Any]:
+        owned_connection = self._websocket is not None and self._websocket_user_id == user_id
         return {
-            "connected": self._websocket is not None,
-            "paired": self._token_hash is not None,
+            "connected": owned_connection,
+            "paired": self._token_hash is not None and self._token_user_id == user_id,
             "protocolVersion": PROTOCOL_VERSION,
-            "extensionVersion": self._extension_version,
+            "extensionVersion": self._extension_version if owned_connection else None,
         }
+
+    def connected_user_id(self) -> int | None:
+        """Return the owner of the currently attached browser extension."""
+        return self._websocket_user_id if self._websocket is not None else None
 
     async def dispatch(
         self,
         *,
         run_id: int,
+        user_id: int,
         action: str,
         payload: dict[str, Any],
         deadline_ms: int = 20_000,
@@ -121,6 +131,10 @@ class BrowserConnectionHub:
         websocket = self._websocket
         if websocket is None:
             raise BrowserProtocolError("browser extension is not connected")
+        if self._websocket_user_id != user_id:
+            raise BrowserProtocolError(
+                "browser extension belongs to a different user; pair this account before continuing"
+            )
         request_id = str(uuid4())
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future

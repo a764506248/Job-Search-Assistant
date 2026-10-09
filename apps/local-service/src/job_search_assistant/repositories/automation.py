@@ -257,8 +257,8 @@ class AutomationRepository:
             raise KeyError(run_id)
         return str(row[0]) if row[0] else None
 
-    def claim_next_run(self, runner_id: str) -> dict[str, Any] | None:
-        """Atomically claim the oldest runnable task for one host runner."""
+    def claim_next_run(self, runner_id: str, *, user_id: int) -> dict[str, Any] | None:
+        """Atomically claim the oldest runnable task owned by the connected user."""
         self.initialize()
         self.interrupt_stale_runs()
         now = datetime.now(UTC).isoformat()
@@ -267,18 +267,18 @@ class AutomationRepository:
             connection.row_factory = sqlite3.Row
             self._upsert_runner(connection, runner_id, now)
             claim_sql = """SELECT id FROM automation_runs
-                WHERE status = 'running' AND runner_id IS NULL
+                WHERE status = 'running' AND runner_id IS NULL AND user_id = ?
                 ORDER BY id LIMIT 1"""
             if getattr(connection, "is_postgres", False):
                 claim_sql += " FOR UPDATE SKIP LOCKED"
-            row = connection.execute(claim_sql).fetchone()
+            row = connection.execute(claim_sql, (user_id,)).fetchone()
             if row is None:
                 return None
             run_id = int(row["id"])
             updated = connection.execute(
                 """UPDATE automation_runs SET runner_id = ?, heartbeat_at = ?, updated_at = ?
-                WHERE id = ? AND runner_id IS NULL""",
-                (runner_id, now, now, run_id),
+                WHERE id = ? AND runner_id IS NULL AND user_id = ?""",
+                (runner_id, now, now, run_id, user_id),
             )
             if updated.rowcount != 1:
                 return None

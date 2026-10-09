@@ -2,7 +2,10 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from job_search_assistant.automation.browser_protocol import BrowserConnectionHub
+from job_search_assistant.automation.browser_protocol import (
+    BrowserConnectionHub,
+    BrowserProtocolError,
+)
 from job_search_assistant.main import create_app
 
 
@@ -62,9 +65,59 @@ def test_hub_dispatches_allowlisted_action_and_correlates_response() -> None:
 
     async def exercise() -> None:
         socket = FakeSocket()
-        hub.attach(socket, "test")  # type: ignore[arg-type]
-        result = await hub.dispatch(run_id=1, action="ping", payload={})
+        hub.attach(socket, "test", 1)  # type: ignore[arg-type]
+        result = await hub.dispatch(run_id=1, user_id=1, action="ping", payload={})
         assert result["status"] == "success"
         assert result["evidence"]["extensionAlive"] is True
 
     asyncio.run(exercise())
+
+
+def test_hub_rejects_dispatch_for_another_user() -> None:
+    hub = BrowserConnectionHub()
+
+    class FakeSocket:
+        async def send_json(self, envelope) -> None:
+            raise AssertionError("cross-user action must not reach the extension")
+
+    async def exercise() -> None:
+        hub.attach(FakeSocket(), "test", 1)  # type: ignore[arg-type]
+        try:
+            await hub.dispatch(run_id=2, user_id=2, action="send_greeting", payload={})
+        except BrowserProtocolError as error:
+            assert "different user" in str(error)
+        else:  # pragma: no cover - explicit failure message is clearer than pytest helpers here
+            raise AssertionError("cross-user dispatch was accepted")
+
+    asyncio.run(exercise())
+
+
+def test_browser_status_is_visible_only_to_connection_owner() -> None:
+    hub = BrowserConnectionHub()
+
+    class FakeSocket:
+        pass
+
+    hub.attach(FakeSocket(), "test", 1)  # type: ignore[arg-type]
+
+    assert hub.status(1)["connected"] is True
+    assert hub.status(2)["connected"] is False
+    assert hub.status(2)["extensionVersion"] is None
+
+
+def test_stale_socket_disconnect_does_not_detach_new_owner() -> None:
+    hub = BrowserConnectionHub()
+
+    class FakeSocket:
+        pass
+
+    first = FakeSocket()
+    second = FakeSocket()
+    hub.attach(first, "first", 1)  # type: ignore[arg-type]
+    hub.attach(second, "second", 2)  # type: ignore[arg-type]
+
+    hub.detach(first)  # type: ignore[arg-type]
+
+    assert hub.connected_user_id() == 2
+    assert hub.status(2)["connected"] is True
+    assert hub.status(2)["extensionVersion"] == "second"
