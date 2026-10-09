@@ -125,6 +125,13 @@
             <p>{{ browserReady ? '系统会自动调用 Chrome 扩展采集职位，随后直接进入本地分析，无需再次点击。' : '等待 Chrome 扩展恢复连接；连接后页面会自动续跑。' }}</p>
           </div>
           <template v-else>
+            <div v-if="collectionTargetShortfall" class="automation-collection-warning">
+              <div>
+                <strong>本次未达到投递目标</strong>
+                <p>目标 {{ collection?.requestedTarget }} 个，通过 {{ collectionMetrics.approved }} 个；{{ collection?.partial ? '采集曾超时并仅保留部分结果。' : '候选岗位经过规则判断后数量不足。' }}</p>
+              </div>
+              <a-button :disabled="!browserReady" :loading="collectingRunId === selected.id" @click="collectSelectedRun">重新采集</a-button>
+            </div>
             <div v-if="plannedJobs.length" class="automation-plan-toolbar">
               <label><input type="checkbox" :checked="allJobsSelected" @change="toggleAllJobs" /> 全选当前计划</label>
               <span>已选 {{ selectedJobIds.length }} / {{ plannedJobs.length }} 个岗位 · {{ selectedCompanyCount }} 家企业</span>
@@ -295,6 +302,8 @@ const collectionMetrics = computed(() => {
   const rejected = collection.value?.rejectedCount ?? Math.max(0, analyzed - approved)
   return { collected, analyzed, approved, rejected }
 })
+const collectionTargetShortfall = computed(() => collectionStatus.value === 'ready'
+  && (collection.value?.requestedTarget ?? 0) > collectionMetrics.value.approved)
 const allJobsSelected = computed(() => plannedJobs.value.length > 0 && selectedJobIds.value.length === plannedJobs.value.length)
 const selectedCompanyCount = computed(() => new Set(plannedJobs.value.filter(job => selectedJobIds.value.includes(job.jobId)).map(job => job.companyName)).size)
 const runUpdatedAge = (run: AutomationRun) => Date.now() - Date.parse(run.updatedAt || run.createdAt)

@@ -135,8 +135,9 @@ from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL
 
 logger = logging.getLogger("job_search_assistant.client")
 MIN_COLLECTION_EXTENSION_VERSION = (0, 4, 11)
-COLLECTION_BATCH_SIZE = 10
-COLLECTION_BATCH_DEADLINE_MS = 30_000
+COLLECTION_BATCH_SIZE = 5
+COLLECTION_BATCH_DEADLINE_MS = 60_000
+COLLECTION_BATCH_RETRY_COUNT = 1
 MAX_COLLECTION_BATCH_DEADLINE_MS = 330_000
 COLLECTION_FILTER_KEYS = (
     "jobType",
@@ -2496,20 +2497,45 @@ def create_router(
                                 "message": "扩展正在分批读取搜索结果的完整职位信息",
                             },
                         )
-                    try:
-                        collection = BrowserActionResponse.model_validate(
-                            await browser_hub.dispatch(
-                                run_id=run_id,
-                                action="collect_jobs",
-                                payload={
-                                    "limit": batch_limit,
-                                    "excludeJobIds": excluded_job_ids,
-                                    "itemIntervalMs": collection_interval_ms,
-                                },
-                                deadline_ms=batch_deadline_ms,
+                    collection: BrowserActionResponse | None = None
+                    collection_error: BrowserProtocolError | None = None
+                    for batch_attempt in range(1, COLLECTION_BATCH_RETRY_COUNT + 2):
+                        try:
+                            collection = BrowserActionResponse.model_validate(
+                                await browser_hub.dispatch(
+                                    run_id=run_id,
+                                    action="collect_jobs",
+                                    payload={
+                                        "limit": batch_limit,
+                                        "excludeJobIds": excluded_job_ids,
+                                        "itemIntervalMs": collection_interval_ms,
+                                    },
+                                    deadline_ms=batch_deadline_ms,
+                                )
                             )
+                            collection_error = None
+                            break
+                        except BrowserProtocolError as error:
+                            collection_error = error
+                            if batch_attempt <= COLLECTION_BATCH_RETRY_COUNT:
+                                automation_repository.append_event(
+                                    run_id,
+                                    "collection-batch-retrying",
+                                    "warning",
+                                    {
+                                        "phase": "collecting",
+                                        "keyword": keyword,
+                                        "batchNumber": batch_number,
+                                        "attempt": batch_attempt + 1,
+                                        "error": browser_protocol_error_message(
+                                            error, "collect_jobs"
+                                        ),
+                                    },
+                                )
+                    if collection is None:
+                        error = collection_error or BrowserProtocolError(
+                            "browser action timed out: collect_jobs"
                         )
-                    except BrowserProtocolError as error:
                         reason = browser_protocol_error_message(error, "collect_jobs")
                         browser_errors.append(f"{keyword}：{reason}")
                         automation_repository.update_collection(

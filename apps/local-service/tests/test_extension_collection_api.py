@@ -270,6 +270,35 @@ class AlwaysTimeoutHub(FakeConnectedBrowserHub):
         raise BrowserProtocolError("browser action timed out: collect_jobs")
 
 
+class TimeoutOnceHub(FakeConnectedBrowserHub):
+    async def dispatch(
+        self,
+        *,
+        run_id: int,
+        action: str,
+        payload: dict[str, object],
+        deadline_ms: int,
+    ) -> dict[str, object]:
+        if action == "collect_jobs" and not any(
+            call["action"] == "collect_jobs" for call in self.calls
+        ):
+            self.calls.append(
+                {
+                    "runId": run_id,
+                    "action": action,
+                    "payload": payload,
+                    "deadlineMs": deadline_ms,
+                }
+            )
+            raise BrowserProtocolError("browser action timed out: collect_jobs")
+        return await super().dispatch(
+            run_id=run_id,
+            action=action,
+            payload=payload,
+            deadline_ms=deadline_ms,
+        )
+
+
 def collection_client(tmp_path, hub: FakeConnectedBrowserHub) -> TestClient:
     return TestClient(
         create_app(
@@ -558,7 +587,7 @@ def test_collection_continues_past_old_three_times_target_until_match(tmp_path) 
         "eventual-match"
     ]
     assert run["configSnapshot"]["plannedJobs"][0]["greeting"]
-    assert len(collect_calls) == 2
+    assert len(collect_calls) == 3
 
 
 def test_pipeline_stops_at_confirmation_then_only_selected_jobs_can_start(tmp_path) -> None:
@@ -678,25 +707,28 @@ def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> No
 
     assert collection["status"] == "ready"
     assert collection["collectedCount"] == 12
-    assert len(collect_calls) == 2
+    assert len(collect_calls) == 3
     assert collect_calls[0]["payload"] == {
-        "limit": 10,
+        "limit": 5,
         "excludeJobIds": [],
         "itemIntervalMs": 2000,
     }
-    assert collect_calls[0]["deadlineMs"] == 50_000
-    assert collect_calls[1]["payload"]["limit"] == 10
+    assert collect_calls[0]["deadlineMs"] == 70_000
+    assert collect_calls[1]["payload"]["limit"] == 5
     assert collect_calls[1]["payload"]["excludeJobIds"] == [
+        f"batch-job-{index}" for index in range(5)
+    ]
+    assert collect_calls[1]["deadlineMs"] == 70_000
+    assert collect_calls[2]["payload"]["excludeJobIds"] == [
         f"batch-job-{index}" for index in range(10)
     ]
-    assert collect_calls[1]["deadlineMs"] == 50_000
 
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
     batch_events = [
         event for event in events if event["eventType"] == "collection-batch-finished"
     ]
-    assert [event["payload"]["collectedCount"] for event in batch_events] == [10, 12]
-    assert [event["payload"]["newCount"] for event in batch_events] == [10, 2]
+    assert [event["payload"]["collectedCount"] for event in batch_events] == [5, 10, 12]
+    assert [event["payload"]["newCount"] for event in batch_events] == [5, 5, 2]
     checks = {
         item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
     }
@@ -724,8 +756,9 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == [
         "retained-job"
     ]
-    assert len(collect_calls) == 2
+    assert len(collect_calls) == 3
     assert collect_calls[1]["payload"]["excludeJobIds"] == ["retained-job"]
+    assert collect_calls[2]["payload"]["excludeJobIds"] == ["retained-job"]
     assert client.get("/v1/jobs").json()["total"] == 1
 
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
@@ -734,6 +767,27 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     )
     assert timeout_event["payload"]["retainedCount"] == 1
     assert timeout_event["payload"]["error"] == "扩展采集单批职位超时，请适当降低岗位采集间隔"
+    assert any(event["eventType"] == "collection-batch-retrying" for event in events)
+
+
+def test_collection_retries_a_transient_batch_timeout(tmp_path) -> None:
+    hub = TimeoutOnceHub([captured_job("retry-job", "重试公司")])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=1)
+
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
+
+    assert collection["status"] == "ready"
+    assert collection["collectedCount"] == 1
+    assert collection["partial"] is False
+    assert len(collect_calls) == 2
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    retry_event = next(
+        event for event in events if event["eventType"] == "collection-batch-retrying"
+    )
+    assert retry_event["payload"]["attempt"] == 2
 
 
 def test_collection_timeout_without_results_fails_with_chinese_error(tmp_path) -> None:
@@ -749,6 +803,7 @@ def test_collection_timeout_without_results_fails_with_chinese_error(tmp_path) -
     )
     assert run["configSnapshot"]["collection"]["collectedCount"] == 0
     assert run["configSnapshot"]["collection"]["attemptId"] == 1
+    assert len([call for call in hub.calls if call["action"] == "collect_jobs"]) == 2
     events = client.get(
         f"/v1/automation/runs/{created['id']}/events"
     ).json()["items"]

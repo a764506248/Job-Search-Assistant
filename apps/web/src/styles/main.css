@@ -446,6 +446,9 @@ td small { color: var(--muted); }
 .automation-report-summary { display: flex; gap: 14px; margin: 12px 18px 0; color: var(--muted); font-size: 12px; }
 .automation-report-summary strong { color: var(--ink); }
 .automation-plan { padding: 14px 18px 18px; }
+.automation-collection-warning { margin-bottom: 10px; padding: 12px; border: 1px solid #e4c58d; border-radius: 9px; background: #fff7e8; color: #70440d; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.automation-collection-warning strong { display: block; }
+.automation-collection-warning p { margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
 .automation-plan-toolbar { padding: 11px 12px; border-radius: 9px; background: var(--surface-soft); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
 .automation-plan-toolbar label { display: flex; align-items: center; gap: 7px; color: var(--ink); font-weight: 700; cursor: pointer; }
 .automation-plan input[type='checkbox'] { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--brand); }
@@ -515,7 +518,7 @@ td small { color: var(--muted); }
   .setup-next-step { flex-direction: column; }
   .setup-next-step .ant-btn { width: 100%; }
   .automation-command { align-items: stretch; flex-direction: column; }
-  .automation-plan-toolbar, .automation-plan footer { align-items: stretch; flex-direction: column; }
+  .automation-collection-warning, .automation-plan-toolbar, .automation-plan footer { align-items: stretch; flex-direction: column; }
   .automation-plan-job-copy { grid-template-columns: 1fr; }
   .automation-plan-job-copy b, .automation-plan-job-copy small, .automation-plan-job-copy em { grid-column: 1; text-align: left; }
   .analysis-command, .analysis-grid { grid-template-columns: 1fr; }
