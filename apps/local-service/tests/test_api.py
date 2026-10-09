@@ -23,7 +23,11 @@ class FakeMaterialPreviewGenerator:
         self.context: dict[str, object] = {}
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         self.context = context
         return {
@@ -49,7 +53,11 @@ class FakeGreetingGenerator:
         self.contexts: list[dict[str, object]] = []
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         self.contexts.append(context)
         if self.error:
@@ -68,7 +76,11 @@ class FakeJobAnalysisGenerator:
         self.model_record_id: int | None = None
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         self.context = context
         self.model_record_id = model_record_id
@@ -739,7 +751,7 @@ def test_restart_and_resume_revalidate_current_plan_salary(
                         "jobId": "resume-salary-job",
                         "title": "AI Agent 工程师",
                         "companyName": "示例公司",
-                        "salaryText": "15-30K",
+                        "salaryText": "10-15K",
                     }
                 ],
             },
@@ -1445,7 +1457,7 @@ def test_analyze_and_plan_blocks_salary_but_still_generates_preview_greeting(tmp
                 "url": "https://www.zhipin.com/job_detail/low-salary-plan.html",
                 "title": "AI Agent 工程师",
                 "companyName": "示例科技",
-                "salaryText": "15-30K",
+                "salaryText": "10-15K",
                 "description": "负责 RAG 与 Agent 应用开发",
                 "skills": ["Python", "RAG"],
                 "capturedAt": "2026-10-03T08:00:00Z",

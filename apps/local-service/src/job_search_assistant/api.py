@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -30,6 +31,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .auth_token import issue_token, verify_token
+from .config import settings
 from .automation.browser_protocol import (
     ALLOWED_ACTIONS,
     PROTOCOL_VERSION,
@@ -198,8 +200,19 @@ def create_router(
         if authorization.lower().startswith("bearer "):
             claims = verify_token(authorization[7:].strip())
             if claims:
-                try: return auth_repository.get_user(int(claims["sub"]))
+                try:
+                    user = auth_repository.get_user(int(claims["sub"]))
+                    return user if user.get("isActive") else None
                 except (KeyError, ValueError): return None
+        # 浏览器扩展通道：配对时由某个登录用户生成配对码，token 直接映射到该用户。
+        local_token = request.headers.get("X-Local-Token", "").strip()
+        if local_token:
+            owner_id = browser_hub.resolve_user(local_token)
+            if owner_id is not None:
+                try:
+                    user = auth_repository.get_user(owner_id)
+                    return user if user.get("isActive") else None
+                except KeyError: return None
         return None
 
     def required_user(request: Request) -> dict:
@@ -208,14 +221,31 @@ def create_router(
             raise HTTPException(status_code=401, detail="未登录")
         return user
 
+    def runner_authenticated(request: Request) -> bool:
+        expected = settings.runner_token
+        supplied = request.headers.get("X-Runner-Token", "")
+        return bool(expected and supplied and hmac.compare_digest(supplied, expected))
+
+    def require_runner(request: Request) -> None:
+        if settings.runner_token and not runner_authenticated(request):
+            raise HTTPException(status_code=401, detail="执行器认证失败")
+
+    @router.get("/auth/bootstrap")
+    async def auth_bootstrap() -> dict:
+        """公开端点：告知前端是否需要创建首个管理员账号（尚未初始化时）。"""
+        return {"needsSetup": not auth_repository.has_users()}
+
     @router.post("/auth/register")
     async def register(request: Request) -> dict:
+        # 系统初始化完成后自助注册关闭，账号统一由管理员在“用户管理”中创建。
+        if auth_repository.has_users():
+            raise HTTPException(status_code=403, detail="注册已关闭，请联系管理员创建账号")
         payload = await request.json()
         try:
             user = auth_repository.create_user(
                 str(payload.get("username", "")),
                 str(payload.get("password", "")),
-                is_admin=not auth_repository.has_users(),
+                is_admin=True,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -271,9 +301,24 @@ def create_router(
         admin = required_user(request)
         if not admin["isAdmin"]:
             raise HTTPException(status_code=403, detail="需要管理员权限")
-        if int(admin["id"]) == user_id and (await request.json()).get("isActive") is False:
-            raise HTTPException(status_code=400, detail="不能停用当前管理员账号")
         payload = await request.json()
+        if int(admin["id"]) == user_id and (
+            payload.get("isActive") is False or payload.get("isAdmin") is False
+        ):
+            raise HTTPException(status_code=400, detail="不能停用当前管理员或移除自己的管理员权限")
+        try:
+            target = auth_repository.get_user(user_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="用户不存在") from error
+        removes_active_admin = target["isAdmin"] and target["isActive"] and (
+            payload.get("isAdmin") is False or payload.get("isActive") is False
+        )
+        active_admins = [
+            item for item in auth_repository.list_users()
+            if item["isAdmin"] and item["isActive"]
+        ]
+        if removes_active_admin and len(active_admins) <= 1:
+            raise HTTPException(status_code=409, detail="系统至少需要保留一个启用的管理员账号")
         try:
             return {"user": auth_repository.update_user(user_id, password=payload.get("password"), is_admin=payload.get("isAdmin"), is_active=payload.get("isActive"))}
         except (KeyError, ValueError) as error:
@@ -287,7 +332,17 @@ def create_router(
         if int(admin["id"]) == user_id:
             raise HTTPException(status_code=400, detail="不能删除当前管理员账号")
         try:
+            target = auth_repository.get_user(user_id)
+            if target["isAdmin"] and target["isActive"]:
+                active_admins = [
+                    item for item in auth_repository.list_users()
+                    if item["isAdmin"] and item["isActive"]
+                ]
+                if len(active_admins) <= 1:
+                    raise HTTPException(status_code=409, detail="系统至少需要保留一个启用的管理员账号")
             auth_repository.delete_user(user_id)
+        except HTTPException:
+            raise
         except Exception as error:
             raise HTTPException(status_code=400, detail="用户不存在或无法删除") from error
         return {"ok": True}
@@ -335,9 +390,9 @@ def create_router(
             return []
         return [item.strip() for item in re.split(r"[,，|\n;/；]+", str(value)) if item.strip()]
 
-    def matching_rules() -> list[RiskRuleInput]:
+    def matching_rules(user_id: int = 1) -> list[RiskRuleInput]:
         rules: list[RiskRuleInput] = []
-        for record in library_repository.list("rules"):
+        for record in library_repository.list("rules", user_id=user_id):
             data = record["data"]
             patterns = string_list(data.get("patterns") or data.get("pattern"))
             if not patterns:
@@ -358,8 +413,8 @@ def create_router(
             )
         return rules
 
-    def automation_config() -> AutomationConfigResponse:
-        profile = library_repository.get_profile()
+    def automation_config(user_id: int = 1) -> AutomationConfigResponse:
+        profile = library_repository.get_profile(user_id=user_id)
         target_roles = string_list(profile.get("targetRoles"))
         target_cities = string_list(profile.get("cities"))
         keywords = string_list(profile.get("searchKeywords")) or target_roles
@@ -375,7 +430,7 @@ def create_router(
             boss_city_codes.get(target_cities[0], "") if target_cities else ""
         )
         try:
-            library_repository.get_default_resume_image()
+            library_repository.get_default_resume_image(user_id=user_id)
             image_available = True
         except KeyError:
             image_available = False
@@ -399,13 +454,13 @@ def create_router(
             send_resume_image=bool(profile.get("sendResumeImage", False)),
             default_greeting=str(profile.get("defaultGreeting", "")).strip(),
             default_resume_image_available=image_available,
-            matching_rules=matching_rules(),
+            matching_rules=matching_rules(user_id),
         )
 
-    def setup_status() -> SetupStatusResponse:
-        config = automation_config()
-        models = library_repository.list("models")
-        all_resumes = library_repository.list("resumes")
+    def setup_status(user_id: int = 1) -> SetupStatusResponse:
+        config = automation_config(user_id)
+        models = library_repository.list("models", user_id=user_id)
+        all_resumes = library_repository.list("resumes", user_id=user_id)
         resumes = [
             record
             for record in all_resumes
@@ -686,6 +741,7 @@ def create_router(
     def build_job_material_context(
         job: StoredJob,
         *,
+        user_id: int = 1,
         minimum_suitability_score: int = 75,
         minimum_customization_confidence: int = 80,
         rules: list[RiskRuleInput] | None = None,
@@ -705,12 +761,12 @@ def create_router(
         query = "\n".join(
             part for part in [job.title, " ".join(job.skills), job.description] if part
         )
-        evidence = knowledge_search.search(query, 8)
+        evidence = knowledge_search.search(query, 8, user_id=user_id)
         match = build_automatic_match(match_request, evidence)
-        profile = library_repository.get_profile()
+        profile = library_repository.get_profile(user_id=user_id)
         resumes = [
             record
-            for record in library_repository.list("resumes")
+            for record in library_repository.list("resumes", user_id=user_id)
             if record["data"].get("confirmationStatus", "confirmed") == "confirmed"
         ]
         default_greeting = str(profile.get("defaultGreeting", "")).strip()
@@ -776,12 +832,12 @@ def create_router(
             "interviewQuestions": interview_questions,
         }
 
-    def generate_and_store_greeting(snapshot_id: int) -> None:
+    def generate_and_store_greeting(snapshot_id: int, user_id: int = 1) -> None:
         try:
-            job = job_repository.get(snapshot_id)
+            job = job_repository.get(snapshot_id, user_id=user_id)
             if job.generated_greeting:
                 return
-            context, default_greeting, _ = build_job_material_context(job)
+            context, default_greeting, _ = build_job_material_context(job, user_id=user_id)
             try:
                 greeting_context = {
                     key: context[key]
@@ -793,7 +849,7 @@ def create_router(
                         "match",
                     )
                 }
-                generated = greeting_generator.generate(greeting_context)
+                generated = greeting_generator.generate(greeting_context, user_id=user_id)
                 greeting = str(generated["greeting"]).strip()
             except (RuntimeError, KeyError, TypeError) as error:
                 greeting = default_greeting or (
@@ -805,38 +861,45 @@ def create_router(
                     snapshot_id,
                     error,
                 )
-            job_repository.update_generated_greeting(snapshot_id, greeting)
+            job_repository.update_generated_greeting(snapshot_id, greeting, user_id=user_id)
         except KeyError:
             logger.warning("automatic greeting skipped: job=%s no longer exists", snapshot_id)
         except Exception:
             logger.exception("automatic greeting failed unexpectedly for job=%s", snapshot_id)
 
-    def run_greeting_task(snapshot_id: int) -> None:
+    def run_greeting_task(snapshot_id: int, user_id: int = 1) -> None:
         try:
-            generate_and_store_greeting(snapshot_id)
+            generate_and_store_greeting(snapshot_id, user_id)
         finally:
             with greeting_generation_lock:
                 greeting_generation_ids.discard(snapshot_id)
 
     def queue_greeting_generation(
-        snapshot_id: int, background_tasks: BackgroundTasks
+        snapshot_id: int, background_tasks: BackgroundTasks, user_id: int = 1
     ) -> None:
         with greeting_generation_lock:
             if snapshot_id in greeting_generation_ids:
                 return
             greeting_generation_ids.add(snapshot_id)
-        background_tasks.add_task(run_greeting_task, snapshot_id)
+        background_tasks.add_task(run_greeting_task, snapshot_id, user_id)
 
     @router.post("/browser/pairing", response_model=BrowserPairingResponse)
-    def create_browser_pairing() -> BrowserPairingResponse:
-        return BrowserPairingResponse.model_validate(browser_hub.create_pairing())
+    def create_browser_pairing(http_request: Request) -> BrowserPairingResponse:
+        user = required_user(http_request)
+        return BrowserPairingResponse.model_validate(
+            browser_hub.create_pairing(int(user["id"]))
+        )
 
     @router.get("/browser/status", response_model=BrowserProtocolStatus)
-    def get_browser_status() -> BrowserProtocolStatus:
+    def get_browser_status(http_request: Request) -> BrowserProtocolStatus:
+        required_user(http_request)
         return BrowserProtocolStatus.model_validate(browser_hub.status())
 
     @router.post("/browser/actions/test", response_model=BrowserActionResponse)
-    async def test_browser_action(request: BrowserTestActionRequest) -> BrowserActionResponse:
+    async def test_browser_action(
+        request: BrowserTestActionRequest, http_request: Request
+    ) -> BrowserActionResponse:
+        required_user(http_request)
         try:
             response = await browser_hub.dispatch(
                 run_id=0,
@@ -891,41 +954,51 @@ def create_router(
         return HealthResponse(version=__version__)
 
     @router.get("/automation/config", response_model=AutomationConfigResponse)
-    def get_automation_config() -> AutomationConfigResponse:
-        return automation_config()
+    def get_automation_config(http_request: Request) -> AutomationConfigResponse:
+        user = required_user(http_request)
+        return automation_config(int(user["id"]))
 
     @router.get("/automation/runner/status", response_model=AutomationRunnerStatus)
-    def get_automation_runner_status() -> AutomationRunnerStatus:
+    def get_automation_runner_status(http_request: Request) -> AutomationRunnerStatus:
+        required_user(http_request)
         return AutomationRunnerStatus.model_validate(automation_repository.runner_status())
 
     @router.post("/automation/runner/heartbeat", response_model=AutomationRunnerStatus)
     def automation_runner_heartbeat(
-        request: AutomationHeartbeatRequest,
+        request: AutomationHeartbeatRequest, http_request: Request,
     ) -> AutomationRunnerStatus:
+        require_runner(http_request)
         return AutomationRunnerStatus.model_validate(
             automation_repository.runner_heartbeat(request.runner_id)
         )
 
     @router.get("/setup/status", response_model=SetupStatusResponse)
-    def get_setup_status() -> SetupStatusResponse:
-        return setup_status()
+    def get_setup_status(http_request: Request) -> SetupStatusResponse:
+        user = required_user(http_request)
+        return setup_status(int(user["id"]))
 
     @router.post("/setup/browser/probe", response_model=BrowserProbeResponse)
-    def save_browser_probe(request: BrowserProbeRequest) -> BrowserProbeResponse:
+    def save_browser_probe(
+        request: BrowserProbeRequest, http_request: Request
+    ) -> BrowserProbeResponse:
+        # 浏览器探针描述的是本机扩展连接状态（设备级），不对单个用户做隔离。
+        required_user(http_request)
         state = library_repository.save_setup_state(
             "browser-probe", request.model_dump(mode="json", by_alias=True)
         )
         return BrowserProbeResponse.model_validate(state)
 
     @router.post("/setup/test-run", response_model=SetupTestRunResponse)
-    def run_setup_test() -> SetupTestRunResponse:
-        status_result = setup_status()
+    def run_setup_test(http_request: Request) -> SetupTestRunResponse:
+        user = required_user(http_request)
+        user_id = int(user["id"])
+        status_result = setup_status(user_id)
         blocking_checks = [
             check.label
             for check in status_result.checks
             if check.blocking and check.status != "ready"
         ]
-        config = automation_config()
+        config = automation_config(user_id)
         ok = not blocking_checks
         return SetupTestRunResponse(
             ok=ok,
@@ -939,17 +1012,33 @@ def create_router(
             ),
         )
 
-    def automation_run(run_id: int) -> AutomationRun:
+    def automation_run(run_id: int, user_id: int | None = None) -> AutomationRun:
         try:
-            return AutomationRun.model_validate(automation_repository.get_run(run_id))
+            return AutomationRun.model_validate(
+                automation_repository.get_run(run_id, user_id=user_id)
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="automation run not found") from error
+
+    def require_owned_run(run_id: int, http_request: Request) -> tuple[AutomationRun, int]:
+        """Resolve the caller's identity and assert they own this automation run."""
+        user = required_user(http_request)
+        user_id = int(user["id"])
+        return automation_run(run_id, user_id), user_id
+
+    def run_owner_id(run_id: int) -> int:
+        """Owner of an automation run, used by host-runner driven collection flows."""
+        try:
+            return int(automation_repository.get_run(run_id).get("user_id") or 1)
+        except KeyError:
+            return 1
 
     def validate_planned_job_salaries(
         config_snapshot: dict[str, object],
         planned_jobs: list[dict[str, object]],
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
-        current_config = automation_config()
+        current_config = automation_config(user_id)
         raw_minimum_salary = config_snapshot.get("minimumSalaryK", 0)
         raw_rules = config_snapshot.get("matchingRules", [])
         try:
@@ -1089,7 +1178,8 @@ def create_router(
         http_request: Request,
     ) -> AutomationRun:
         user = required_user(http_request)
-        config = automation_config().model_dump(mode="json", by_alias=True)
+        user_id = int(user["id"])
+        config = automation_config(user_id).model_dump(mode="json", by_alias=True)
         config.update(request.config)
         should_auto_collect = "plannedJobs" not in config
         if "plannedJobs" not in config:
@@ -1164,8 +1254,9 @@ def create_router(
         "/automation/runner/claim", response_model=AutomationRunnerClaimResponse
     )
     def claim_automation_run(
-        request: AutomationHeartbeatRequest,
+        request: AutomationHeartbeatRequest, http_request: Request,
     ) -> AutomationRunnerClaimResponse:
+        require_runner(http_request)
         run = automation_repository.claim_next_run(request.runner_id)
         approval_token = run.pop("approval_token", None) if run else None
         return AutomationRunnerClaimResponse(
@@ -1175,8 +1266,9 @@ def create_router(
 
     @router.post("/automation/runs/{run_id}/heartbeat", response_model=AutomationRun)
     def heartbeat_automation_run(
-        run_id: int, request: AutomationHeartbeatRequest
+        run_id: int, request: AutomationHeartbeatRequest, http_request: Request
     ) -> AutomationRun:
+        require_runner(http_request)
         try:
             return AutomationRun.model_validate(
                 automation_repository.heartbeat(run_id, request.runner_id)
@@ -1188,8 +1280,9 @@ def create_router(
 
     @router.post("/automation/runs/{run_id}/progress", response_model=AutomationRun)
     def update_automation_progress(
-        run_id: int, request: AutomationProgressRequest
+        run_id: int, request: AutomationProgressRequest, http_request: Request
     ) -> AutomationRun:
+        require_runner(http_request)
         try:
             automation_repository.heartbeat(run_id, request.runner_id)
             return AutomationRun.model_validate(
@@ -1204,8 +1297,9 @@ def create_router(
 
     @router.post("/automation/runs/{run_id}/runner-finish", response_model=AutomationRun)
     def finish_automation_run(
-        run_id: int, request: AutomationRunnerFinishRequest
+        run_id: int, request: AutomationRunnerFinishRequest, http_request: Request
     ) -> AutomationRun:
+        require_runner(http_request)
         try:
             automation_repository.heartbeat(run_id, request.runner_id)
             return AutomationRun.model_validate(
@@ -1221,8 +1315,9 @@ def create_router(
         response_model=AutomationBrowserActionResponse,
     )
     async def execute_automation_browser_action(
-        run_id: int, request: AutomationBrowserActionRequest
+        run_id: int, request: AutomationBrowserActionRequest, http_request: Request
     ) -> AutomationBrowserActionResponse:
+        require_runner(http_request)
         if request.action not in ALLOWED_ACTIONS:
             raise HTTPException(status_code=422, detail="unsupported browser action")
         if request.action in {"send_greeting", "send_resume"} and not all(
@@ -1295,8 +1390,9 @@ def create_router(
         response_model=AutomationActionClaimResponse,
     )
     def claim_automation_action(
-        run_id: int, request: AutomationActionClaimRequest
+        run_id: int, request: AutomationActionClaimRequest, http_request: Request
     ) -> AutomationActionClaimResponse:
+        require_runner(http_request)
         try:
             action, execute = automation_repository.claim_action(
                 run_id, request.job_id, request.action_type
@@ -1310,8 +1406,9 @@ def create_router(
         response_model=AutomationActionClaimResponse,
     )
     def finish_automation_action(
-        idempotency_key: str, request: AutomationActionResultRequest
+        idempotency_key: str, request: AutomationActionResultRequest, http_request: Request
     ) -> AutomationActionClaimResponse:
+        require_runner(http_request)
         try:
             action = automation_repository.finish_action(
                 idempotency_key,
@@ -1324,21 +1421,31 @@ def create_router(
         return AutomationActionClaimResponse(action=action, execute=False)
 
     @router.get("/automation/runs/{run_id}", response_model=AutomationRun)
-    def get_automation_run(run_id: int) -> AutomationRun:
-        return automation_run(run_id)
+    def get_automation_run(run_id: int, http_request: Request) -> AutomationRun:
+        if runner_authenticated(http_request):
+            return automation_run(run_id)
+        user = required_user(http_request)
+        return automation_run(run_id, int(user["id"]))
 
     @router.get("/automation/runs/{run_id}/report", response_model=AutomationReport)
-    def get_automation_report(run_id: int) -> AutomationReport:
+    def get_automation_report(run_id: int, http_request: Request) -> AutomationReport:
+        user = required_user(http_request)
         try:
-            return AutomationReport.model_validate(automation_repository.report(run_id))
+            return AutomationReport.model_validate(
+                automation_repository.report(run_id, user_id=int(user["id"]))
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="automation run not found") from error
 
     @router.post("/automation/runs/{run_id}/start", response_model=AutomationRun)
     def start_automation_run(
-        run_id: int, request: AutomationRunStartRequest | None = None
+        run_id: int,
+        http_request: Request,
+        request: AutomationRunStartRequest | None = None,
     ) -> AutomationRun:
-        run = automation_run(run_id)
+        user = required_user(http_request)
+        user_id = int(user["id"])
+        run = automation_run(run_id, user_id)
         if collection_lock.locked() or another_collection_is_scheduled(run_id):
             raise HTTPException(
                 status_code=409,
@@ -1354,8 +1461,8 @@ def create_router(
                         "没有可执行的岗位计划；请先采集岗位，再新建任务",
                     )
                 )
-            validate_planned_job_salaries(run.config_snapshot, planned_jobs)
-            status_result = setup_status()
+            validate_planned_job_salaries(run.config_snapshot, planned_jobs, user_id)
+            status_result = setup_status(user_id)
             blockers = [
                 check.label
                 for check in status_result.checks
@@ -1370,7 +1477,7 @@ def create_router(
             raise HTTPException(status_code=409, detail=f"run cannot start from {run.status}")
         active = [
             item
-            for item in automation_repository.list_runs()
+            for item in automation_repository.list_runs(user_id)
             if item["id"] != run_id and item["status"] in {"running", "paused", "stopping"}
         ]
         if active:
@@ -1397,6 +1504,7 @@ def create_router(
         selected_jobs = validate_planned_job_salaries(
             run.config_snapshot,
             [jobs_by_id[job_id] for job_id in requested_ids],
+            user_id,
         )
         run = AutomationRun.model_validate(
             automation_repository.confirm_plan(
@@ -1413,7 +1521,7 @@ def create_router(
                     "没有可执行的岗位计划；请先采集岗位，再新建任务",
                 )
             )
-        status_result = setup_status()
+        status_result = setup_status(user_id)
         blockers = [
             check.label
             for check in status_result.checks
@@ -1434,7 +1542,8 @@ def create_router(
         return AutomationRun.model_validate(running)
 
     @router.post("/automation/runs/{run_id}/pause", response_model=AutomationRun)
-    def pause_automation_run(run_id: int) -> AutomationRun:
+    def pause_automation_run(run_id: int, http_request: Request) -> AutomationRun:
+        require_owned_run(run_id, http_request)
         try:
             return AutomationRun.model_validate(automation_repository.transition(run_id, "paused"))
         except KeyError as error:
@@ -1443,12 +1552,12 @@ def create_router(
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @router.post("/automation/runs/{run_id}/resume", response_model=AutomationRun)
-    def resume_automation_run(run_id: int) -> AutomationRun:
-        run = automation_run(run_id)
+    def resume_automation_run(run_id: int, http_request: Request) -> AutomationRun:
+        run, user_id = require_owned_run(run_id, http_request)
         planned_jobs = run.config_snapshot.get("plannedJobs", [])
         if not isinstance(planned_jobs, list) or not planned_jobs:
             raise HTTPException(status_code=422, detail="没有可执行的岗位计划")
-        validate_planned_job_salaries(run.config_snapshot, planned_jobs)
+        validate_planned_job_salaries(run.config_snapshot, planned_jobs, user_id)
         try:
             return AutomationRun.model_validate(automation_repository.transition(run_id, "running"))
         except KeyError as error:
@@ -1457,8 +1566,8 @@ def create_router(
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @router.post("/automation/runs/{run_id}/retry", response_model=AutomationRun)
-    def retry_automation_run(run_id: int) -> AutomationRun:
-        source = automation_run(run_id)
+    def retry_automation_run(run_id: int, http_request: Request) -> AutomationRun:
+        source, user_id = require_owned_run(run_id, http_request)
         if source.status not in {"blocked", "failed", "cancelled"}:
             raise HTTPException(
                 status_code=409,
@@ -1466,7 +1575,7 @@ def create_router(
             )
         active = [
             item
-            for item in automation_repository.list_runs()
+            for item in automation_repository.list_runs(user_id)
             if item["id"] != run_id and item["status"] in {"running", "paused", "stopping"}
         ]
         if active:
@@ -1475,7 +1584,7 @@ def create_router(
         planned_jobs = source.config_snapshot.get("plannedJobs", [])
         if not isinstance(planned_jobs, list):
             planned_jobs = []
-        report = automation_repository.report(run_id)
+        report = automation_repository.report(run_id, user_id=user_id)
         succeeded_job_ids = {
             str(event["payload"].get("jobId", ""))
             for event in report["events"]
@@ -1503,12 +1612,12 @@ def create_router(
         if not retry_jobs:
             raise HTTPException(status_code=409, detail="没有失败或未完成的岗位可以重试")
 
-        validate_planned_job_salaries(source.config_snapshot, retry_jobs)
+        validate_planned_job_salaries(source.config_snapshot, retry_jobs, user_id)
         retry_config = dict(source.config_snapshot)
         retry_config["plannedJobs"] = retry_jobs
         retry_config["retryOfRunId"] = run_id
         retry_config["retryReason"] = source.stop_reason
-        created = automation_repository.create_run(retry_config, len(retry_jobs))
+        created = automation_repository.create_run(retry_config, len(retry_jobs), user_id=user_id)
         retry_run_id = int(created["id"])
         automation_repository.append_event(
             retry_run_id,
@@ -1522,7 +1631,7 @@ def create_router(
         )
         automation_repository.confirm_plan(retry_run_id, retry_jobs)
         automation_repository.transition(retry_run_id, "validating")
-        status_result = setup_status()
+        status_result = setup_status(user_id)
         blockers = [
             check.label
             for check in status_result.checks
@@ -1543,7 +1652,8 @@ def create_router(
         return AutomationRun.model_validate(running)
 
     @router.post("/automation/runs/{run_id}/stop", response_model=AutomationRun)
-    def stop_automation_run(run_id: int) -> AutomationRun:
+    def stop_automation_run(run_id: int, http_request: Request) -> AutomationRun:
+        require_owned_run(run_id, http_request)
         try:
             automation_repository.transition(run_id, "stopping", "user-requested")
             return AutomationRun.model_validate(
@@ -1557,7 +1667,8 @@ def create_router(
     @router.get(
         "/automation/runs/{run_id}/events", response_model=AutomationEventListResponse
     )
-    def list_automation_events(run_id: int) -> AutomationEventListResponse:
+    def list_automation_events(run_id: int, http_request: Request) -> AutomationEventListResponse:
+        require_owned_run(run_id, http_request)
         try:
             events = automation_repository.list_events(run_id)
         except KeyError as error:
@@ -1565,8 +1676,10 @@ def create_router(
         return AutomationEventListResponse(items=events)
 
     @router.get("/automation/runs/{run_id}/events/stream")
-    def stream_automation_events(run_id: int, after: int = 0) -> StreamingResponse:
-        automation_run(run_id)
+    def stream_automation_events(
+        run_id: int, http_request: Request, after: int = 0
+    ) -> StreamingResponse:
+        require_owned_run(run_id, http_request)
 
         def events():
             cursor = after
@@ -1588,9 +1701,12 @@ def create_router(
         return StreamingResponse(events(), media_type="text/event-stream")
 
     @router.post("/client-logs", response_model=ClientLogRecord, status_code=201)
-    def create_client_log(request: ClientLogInput) -> ClientLogRecord:
+    def create_client_log(request: ClientLogInput, http_request: Request) -> ClientLogRecord:
+        user = required_user(http_request)
         record = ClientLogRecord.model_validate(
-            client_log_repository.create(request.model_dump(by_alias=False))
+            client_log_repository.create(
+                request.model_dump(by_alias=False), user_id=int(user["id"])
+            )
         )
         logger.log(
             logging.ERROR if request.level == "error" else logging.WARNING,
@@ -1603,18 +1719,29 @@ def create_router(
         return record
 
     @router.get("/client-logs", response_model=ClientLogListResponse)
-    def list_client_logs(limit: int = Query(default=100, ge=1, le=500)) -> ClientLogListResponse:
-        return ClientLogListResponse(items=client_log_repository.list_recent(limit))
+    def list_client_logs(
+        http_request: Request, limit: int = Query(default=100, ge=1, le=500)
+    ) -> ClientLogListResponse:
+        user = required_user(http_request)
+        return ClientLogListResponse(
+            items=client_log_repository.list_recent(limit, user_id=int(user["id"]))
+        )
 
     @router.post("/deliveries", response_model=DeliveryRecord, status_code=201)
-    def save_delivery(request: DeliveryRecordInput) -> DeliveryRecord:
-        return delivery_repository.upsert(request)
+    def save_delivery(request: DeliveryRecordInput, http_request: Request) -> DeliveryRecord:
+        # 扩展通过 X-Local-Token 访问，身份解析在 current_user 内统一处理。
+        user = required_user(http_request)
+        return delivery_repository.upsert(request, user_id=int(user["id"]))
 
     @router.get("/deliveries", response_model=DeliveryListResponse)
-    def list_deliveries(limit: int = Query(default=100, ge=1, le=500)) -> DeliveryListResponse:
+    def list_deliveries(
+        http_request: Request, limit: int = Query(default=100, ge=1, le=500)
+    ) -> DeliveryListResponse:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         return DeliveryListResponse(
-            total=delivery_repository.count(),
-            items=delivery_repository.list_recent(limit),
+            total=delivery_repository.count(user_id=user_id),
+            items=delivery_repository.list_recent(limit, user_id=user_id),
         )
 
     @router.post("/decisions/evaluate", response_model=DecisionResponse)
@@ -1623,23 +1750,26 @@ def create_router(
 
     @router.post("/jobs/capture", response_model=JobCaptureResponse)
     def capture_jobs(
-        request: JobCaptureRequest, background_tasks: BackgroundTasks
+        request: JobCaptureRequest, background_tasks: BackgroundTasks, http_request: Request
     ) -> JobCaptureResponse:
-        job_ids = job_repository.save_many(request.jobs)
+        user = required_user(http_request)
+        user_id = int(user["id"])
+        job_ids = job_repository.save_many(request.jobs, user_id=user_id)
         for captured in request.jobs:
             try:
                 stored = job_repository.get_by_platform_job_id(
-                    captured.platform, captured.platform_job_id
+                    captured.platform, captured.platform_job_id, user_id=user_id
                 )
             except KeyError:
                 continue
             if not stored.generated_greeting:
-                queue_greeting_generation(stored.id, background_tasks)
+                queue_greeting_generation(stored.id, background_tasks, user_id)
         return JobCaptureResponse(accepted=len(job_ids), job_ids=job_ids)
 
     @router.get("/jobs", response_model=JobListResponse)
     def list_jobs(
         background_tasks: BackgroundTasks,
+        http_request: Request,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
         query: str | None = Query(default=None, max_length=300),
@@ -1647,7 +1777,9 @@ def create_router(
             "not_communicated", "communicated", "interviewed"
         ] | None = Query(default=None, alias="communicationResult"),
     ) -> JobListResponse:
-        total = job_repository.count(query, communication_result)
+        user = required_user(http_request)
+        user_id = int(user["id"])
+        total = job_repository.count(query, communication_result, user_id=user_id)
         total_pages = max(1, (total + page_size - 1) // page_size)
         current_page = min(page, total_pages)
         items = job_repository.list_recent(
@@ -1655,6 +1787,7 @@ def create_router(
             offset=(current_page - 1) * page_size,
             query=query,
             communication_result=communication_result,
+            user_id=user_id,
         )
         # Automation collection writes snapshots through analyze-and-plan instead
         # of /jobs/capture. Older runs therefore left rejected snapshots without a
@@ -1662,7 +1795,7 @@ def create_router(
         # response; delivery eligibility remains a separate decision.
         for item in items:
             if not item.generated_greeting:
-                queue_greeting_generation(item.id, background_tasks)
+                queue_greeting_generation(item.id, background_tasks, user_id)
         return JobListResponse(
             total=total,
             page=current_page,
@@ -1672,7 +1805,11 @@ def create_router(
         )
 
     @router.post("/jobs", response_model=StoredJob, status_code=201)
-    def create_job(request: ManualJobInput, background_tasks: BackgroundTasks) -> StoredJob:
+    def create_job(
+        request: ManualJobInput, background_tasks: BackgroundTasks, http_request: Request
+    ) -> StoredJob:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         job = CapturedJob(
             platform="boss",
             platform_job_id=f"manual-{uuid4().hex}",
@@ -1698,23 +1835,27 @@ def create_router(
             captured_at=datetime.now(UTC),
             source="manual",
         )
-        stored = job_repository.create(job)
+        stored = job_repository.create(job, user_id=user_id)
         if not stored.generated_greeting:
-            queue_greeting_generation(stored.id, background_tasks)
+            queue_greeting_generation(stored.id, background_tasks, user_id)
         return stored
 
     @router.put("/jobs/{snapshot_id}/tracking", response_model=StoredJob)
-    def update_job_tracking(snapshot_id: int, request: JobTrackingUpdate) -> StoredJob:
+    def update_job_tracking(
+        snapshot_id: int, request: JobTrackingUpdate, http_request: Request
+    ) -> StoredJob:
+        user = required_user(http_request)
         try:
             return job_repository.update_tracking(
-                snapshot_id, request.model_dump(by_alias=False)
+                snapshot_id, request.model_dump(by_alias=False), user_id=int(user["id"])
             )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="job snapshot not found") from error
 
     @router.delete("/jobs/{snapshot_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def delete_job(snapshot_id: int) -> Response:
-        if not job_repository.delete(snapshot_id):
+    def delete_job(snapshot_id: int, http_request: Request) -> Response:
+        user = required_user(http_request)
+        if not job_repository.delete(snapshot_id, user_id=int(user["id"])):
             raise HTTPException(status_code=404, detail="job snapshot not found")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -1757,37 +1898,48 @@ def create_router(
         return JobEvaluationResponse(analysis=analysis, decision=decision)
 
     @router.post("/jobs/match", response_model=AutomaticJobMatchResponse)
-    def match_job(request: AutomaticJobMatchRequest) -> AutomaticJobMatchResponse:
+    def match_job(
+        request: AutomaticJobMatchRequest, http_request: Request
+    ) -> AutomaticJobMatchResponse:
+        user = required_user(http_request)
         query = "\n".join(
             part for part in [request.title, " ".join(request.skills), request.job_text] if part
         )
-        evidence = knowledge_search.search(query, 8)
+        evidence = knowledge_search.search(query, 8, user_id=int(user["id"]))
         return build_automatic_match(request, evidence)
 
-    @router.post("/jobs/analyze-and-plan", response_model=JobAnalysisPlanResponse)
-    def analyze_and_plan_job(request: JobAnalysisPlanRequest) -> JobAnalysisPlanResponse:
-        job_repository.save_many([request.job])
+    def resolve_job_plan(
+        job: CapturedJob,
+        *,
+        user_id: int,
+        minimum_suitability_score: int | None = None,
+        minimum_customization_confidence: int | None = None,
+        company_blocked: bool = False,
+    ) -> JobAnalysisPlanResponse:
+        """岗位分析入口：采集流水线与 HTTP 端点共用，因此不依赖 Request 对象。"""
+        job_repository.save_many([job], user_id=user_id)
         job = job_repository.get_by_platform_job_id(
-            request.job.platform, request.job.platform_job_id
+            job.platform, job.platform_job_id, user_id=user_id
         )
-        config = automation_config()
+        config = automation_config(user_id)
         suitability_threshold = (
-            request.minimum_suitability_score
-            if request.minimum_suitability_score is not None
+            minimum_suitability_score
+            if minimum_suitability_score is not None
             else config.minimum_suitability_score
         )
         confidence_threshold = (
-            request.minimum_customization_confidence
-            if request.minimum_customization_confidence is not None
+            minimum_customization_confidence
+            if minimum_customization_confidence is not None
             else config.minimum_customization_confidence
         )
         context, default_greeting, match = build_job_material_context(
             job,
+            user_id=user_id,
             minimum_suitability_score=suitability_threshold,
             minimum_customization_confidence=confidence_threshold,
             rules=config.matching_rules,
             duplicate=job.has_communicated,
-            company_blocked=request.company_blocked,
+            company_blocked=company_blocked,
         )
 
         # 适合度是是否投递的硬门槛；定制可信度不足时才回退默认材料。
@@ -1877,14 +2029,14 @@ def create_router(
                     "shouldDeliver": match.decision.should_deliver,
                     "reasons": match.decision.reasons,
                 }
-                generated = greeting_generator.generate(greeting_context)
+                generated = greeting_generator.generate(greeting_context, user_id=user_id)
                 greeting = str(generated["greeting"]).strip()
             except (RuntimeError, KeyError, TypeError) as error:
                 logger.warning("planned greeting fell back for job=%s: %s", job.id, error)
             greeting = greeting or default_greeting or (
                 f"您好，我对贵司的{job.title}岗位很感兴趣，希望有机会进一步沟通，谢谢。"
             )
-            job = job_repository.update_generated_greeting(job.id, greeting)
+            job = job_repository.update_generated_greeting(job.id, greeting, user_id=user_id)
 
         return JobAnalysisPlanResponse(
             snapshot=job,
@@ -1894,13 +2046,26 @@ def create_router(
             duplicate=job.has_communicated,
         )
 
+    @router.post("/jobs/analyze-and-plan", response_model=JobAnalysisPlanResponse)
+    def analyze_and_plan_job(
+        request: JobAnalysisPlanRequest, http_request: Request
+    ) -> JobAnalysisPlanResponse:
+        user = required_user(http_request)
+        return resolve_job_plan(
+            request.job,
+            user_id=int(user["id"]),
+            minimum_suitability_score=request.minimum_suitability_score,
+            minimum_customization_confidence=request.minimum_customization_confidence,
+            company_blocked=request.company_blocked,
+        )
+
     @router.post(
         "/automation/runs/{run_id}/collect",
         response_model=AutomationRun,
         status_code=202,
     )
     async def queue_automation_collection(
-        run_id: int, background_tasks: BackgroundTasks
+        run_id: int, background_tasks: BackgroundTasks, http_request: Request
     ) -> AutomationRun:
         """Queue or recover collection and return immediately.
 
@@ -1908,7 +2073,7 @@ def create_router(
         in-memory task is treated as an interrupted service process and is queued
         again from persisted configuration.
         """
-        run = automation_run(run_id)
+        run, _user_id = require_owned_run(run_id, http_request)
         if run.status != "draft":
             raise HTTPException(status_code=409, detail=f"run cannot collect from {run.status}")
         collection = run.config_snapshot.get("collection", {})
@@ -2006,9 +2171,11 @@ def create_router(
             with collection_schedule_lock:
                 scheduled_collection_run_ids.discard(run_id)
 
-    async def collect_and_analyze_automation_jobs(run_id: int) -> AutomationRun:
+    async def collect_and_analyze_automation_jobs(run_id: int, user_id: int | None = None) -> AutomationRun:
         """Collect through the extension, then analyze locally without any send action."""
         run = automation_run(run_id)
+        if user_id is None:
+            user_id = run_owner_id(run_id)
         if run.status != "draft":
             raise HTTPException(status_code=409, detail=f"run cannot collect from {run.status}")
         config = run.config_snapshot
@@ -2129,7 +2296,9 @@ def create_router(
             )
         }
         historical_job_ids = set(
-            await run_in_threadpool(job_repository.list_platform_job_ids, "boss")
+            await run_in_threadpool(
+                job_repository.list_platform_job_ids, "boss", user_id=user_id
+            )
         )
         captured: dict[str, CapturedJob] = {}
         browser_errors: list[str] = []
@@ -2420,7 +2589,9 @@ def create_router(
                         if len(captured) >= candidate_limit:
                             break
                     if new_jobs:
-                        await run_in_threadpool(job_repository.save_many, new_jobs)
+                        await run_in_threadpool(
+                            job_repository.save_many, new_jobs, user_id=user_id
+                        )
 
                     exhausted = collection.evidence.get("exhausted") is True
                     if exhausted and not new_jobs:
@@ -2562,7 +2733,7 @@ def create_router(
                 if snapshot is None:
                     try:
                         snapshot = job_repository.get_by_platform_job_id(
-                            job.platform, job.platform_job_id
+                            job.platform, job.platform_job_id, user_id=user_id
                         )
                     except KeyError:
                         snapshot = None
@@ -2624,15 +2795,14 @@ def create_router(
                 analyzed_count += 1
                 try:
                     result = await run_in_threadpool(
-                        analyze_and_plan_job,
-                        JobAnalysisPlanRequest(
-                            job=job,
-                            minimum_suitability_score=int(
-                                config.get("minimumSuitabilityScore", 60)
-                            ),
-                            minimum_customization_confidence=int(
-                                config.get("minimumCustomizationConfidence", 80)
-                            ),
+                        resolve_job_plan,
+                        job,
+                        user_id=user_id,
+                        minimum_suitability_score=int(
+                            config.get("minimumSuitabilityScore", 60)
+                        ),
+                        minimum_customization_confidence=int(
+                            config.get("minimumCustomizationConfidence", 80)
                         ),
                     )
                 except (HTTPException, KeyError, RuntimeError, TypeError, ValueError) as error:
@@ -2772,10 +2942,12 @@ def create_router(
         response_model=JobInsightResponse,
     )
     def analyze_job_snapshot(
-        snapshot_id: int, request: JobInsightRequest
+        snapshot_id: int, request: JobInsightRequest, http_request: Request
     ) -> JobInsightResponse:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         try:
-            job = job_repository.get(snapshot_id)
+            job = job_repository.get(snapshot_id, user_id=user_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="job snapshot not found") from error
 
@@ -2790,7 +2962,7 @@ def create_router(
         if request.use_ai:
             try:
                 generated = job_analysis_generator.generate(
-                    context, request.model_record_id
+                    context, request.model_record_id, user_id=user_id
                 )
             except RuntimeError as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
@@ -2825,17 +2997,22 @@ def create_router(
         response_model=MaterialPreviewResponse,
     )
     def preview_job_materials(
-        snapshot_id: int, request: MaterialPreviewRequest
+        snapshot_id: int, request: MaterialPreviewRequest, http_request: Request
     ) -> MaterialPreviewResponse:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         try:
-            job = job_repository.get(snapshot_id)
+            job = job_repository.get(snapshot_id, user_id=user_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="job snapshot not found") from error
         try:
-            context, default_greeting, match = build_job_material_context(job)
+            context, default_greeting, match = build_job_material_context(
+                job, user_id=user_id
+            )
             generated = material_preview_generator.generate(
                 context,
                 request.model_record_id,
+                user_id=user_id,
             )
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
@@ -2851,19 +3028,24 @@ def create_router(
         )
 
     @router.get("/profile", response_model=ProfilePayload)
-    def get_profile() -> ProfilePayload:
-        return ProfilePayload(data=library_repository.get_profile())
+    def get_profile(http_request: Request) -> ProfilePayload:
+        user = required_user(http_request)
+        return ProfilePayload(data=library_repository.get_profile(user_id=int(user["id"])))
 
     @router.put("/profile", response_model=ProfilePayload)
-    def save_profile(request: ProfilePayload) -> ProfilePayload:
-        profile = library_repository.save_profile(request.data)
+    def save_profile(request: ProfilePayload, http_request: Request) -> ProfilePayload:
+        user = required_user(http_request)
+        profile = library_repository.save_profile(request.data, user_id=int(user["id"]))
         return ProfilePayload(data=profile)
 
     @router.post("/resumes/import", response_model=ResumeImportResponse, status_code=201)
     async def import_resume(
         file: Annotated[UploadFile, File()],
+        http_request: Request,
         model_record_id: Annotated[int | None, Form(alias="modelRecordId")] = None,
     ) -> ResumeImportResponse:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         filename = Path((file.filename or "resume").replace("\\", "/")).name
         try:
             file_content = await file.read(MAX_RESUME_BYTES + 1)
@@ -2884,7 +3066,10 @@ def create_router(
                 extract_resume = getattr(project_extractor, "extract_resume", None)
                 if callable(extract_resume):
                     extraction = await run_in_threadpool(
-                        extract_resume, parsed.resume["rawText"], model_record_id
+                        extract_resume,
+                        parsed.resume["rawText"],
+                        model_record_id,
+                        user_id=user_id,
                     )
                     extracted_projects = list(extraction.get("projects", []))
                     extracted_profile = dict(extraction.get("profile", {}))
@@ -2899,7 +3084,10 @@ def create_router(
                     ai_extraction_used = bool(extracted_profile or extracted_projects)
                 else:
                     extracted_projects = await run_in_threadpool(
-                        project_extractor.extract, parsed.resume["rawText"], model_record_id
+                        project_extractor.extract,
+                        parsed.resume["rawText"],
+                        model_record_id,
+                        user_id=user_id,
                     )
                 if extracted_projects:
                     projects = extracted_projects
@@ -2907,7 +3095,7 @@ def create_router(
                 elif not ai_profile_extracted:
                     ai_extraction_error = "模型未识别到项目，已使用本地项目标题规则降级解析"
                 if ai_model_record is None:
-                    models = library_repository.list("models")
+                    models = library_repository.list("models", user_id=user_id)
                     if model_record_id is not None:
                         ai_model_record = next(
                             (record for record in models if record["id"] == model_record_id), None
@@ -2935,7 +3123,7 @@ def create_router(
                     "sourceKey": source_key,
                 }
             imported = library_repository.import_resume(
-                filename, profile, parsed.resume, projects
+                filename, profile, parsed.resume, projects, user_id=user_id
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -2962,9 +3150,10 @@ def create_router(
         "/resumes/{resume_id}/confirm",
         response_model=ResumeConfirmationResponse,
     )
-    def confirm_resume(resume_id: int) -> ResumeConfirmationResponse:
+    def confirm_resume(resume_id: int, http_request: Request) -> ResumeConfirmationResponse:
+        user = required_user(http_request)
         try:
-            confirmed = library_repository.confirm_resume(resume_id)
+            confirmed = library_repository.confirm_resume(resume_id, user_id=int(user["id"]))
         except KeyError as error:
             raise HTTPException(status_code=404, detail="resume not found") from error
         return ResumeConfirmationResponse(
@@ -2986,24 +3175,33 @@ def create_router(
         )
 
     @router.get("/resumes/default-image")
-    def get_default_resume_image() -> FileResponse:
+    def get_default_resume_image(http_request: Request) -> FileResponse:
+        user = required_user(http_request)
         try:
-            return resume_image_response(library_repository.get_default_resume_image())
+            return resume_image_response(
+                library_repository.get_default_resume_image(user_id=int(user["id"]))
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="default resume image not found") from error
 
     @router.get("/resumes/{resume_id}/preview-image")
-    def get_resume_preview_image(resume_id: int) -> FileResponse:
+    def get_resume_preview_image(resume_id: int, http_request: Request) -> FileResponse:
+        user = required_user(http_request)
         try:
-            record = library_repository.get("resumes", resume_id)
+            record = library_repository.get("resumes", resume_id, user_id=int(user["id"]))
         except KeyError as error:
             raise HTTPException(status_code=404, detail="resume not found") from error
         return resume_image_response(record)
 
     @router.put("/resumes/{resume_id}/default-image", response_model=LibraryRecord)
-    def set_default_resume_image(resume_id: int) -> LibraryRecord:
+    def set_default_resume_image(resume_id: int, http_request: Request) -> LibraryRecord:
+        user = required_user(http_request)
         try:
-            return LibraryRecord(**library_repository.set_default_resume_image(resume_id))
+            return LibraryRecord(
+                **library_repository.set_default_resume_image(
+                    resume_id, user_id=int(user["id"])
+                )
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="resume not found") from error
         except ValueError as error:
@@ -3012,10 +3210,13 @@ def create_router(
     @router.post("/resumes/{resume_id}/extract-projects")
     async def extract_existing_resume_projects(
         resume_id: int,
+        http_request: Request,
         model_record_id: Annotated[int | None, Form(alias="modelRecordId")] = None,
     ) -> dict[str, object]:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         try:
-            resume_record = library_repository.get("resumes", resume_id)
+            resume_record = library_repository.get("resumes", resume_id, user_id=user_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="resume not found") from error
         resume = resume_record["data"]
@@ -3028,7 +3229,7 @@ def create_router(
         extraction_error = None
         try:
             projects = await run_in_threadpool(
-                project_extractor.extract, raw_text, model_record_id
+                project_extractor.extract, raw_text, model_record_id, user_id=user_id
             )
         except RuntimeError as error:
             projects = []
@@ -3053,7 +3254,7 @@ def create_router(
                 "sourceHash": source_hash,
                 "sourceKey": source_key,
             }
-        project_ids = library_repository.upsert_projects(projects)
+        project_ids = library_repository.upsert_projects(projects, user_id=user_id)
         return {
             "resumeId": resume_id,
             "projectIds": project_ids,
@@ -3068,33 +3269,42 @@ def create_router(
         return kind  # type: ignore[return-value]
 
     @router.get("/library/{kind}", response_model=LibraryListResponse)
-    def list_library(kind: str) -> LibraryListResponse:
+    def list_library(kind: str, http_request: Request) -> LibraryListResponse:
+        user = required_user(http_request)
         valid = valid_kind(kind)
-        records = library_repository.list(valid)
+        records = library_repository.list(valid, user_id=int(user["id"]))
         if valid == "models":
             return LibraryListResponse(items=[public_model_record(record) for record in records])
         return LibraryListResponse(items=records)
 
     @router.post("/library/{kind}", response_model=LibraryRecord, status_code=201)
-    def create_library_record(kind: str, request: LibraryRecordInput) -> LibraryRecord:
+    def create_library_record(
+        kind: str, request: LibraryRecordInput, http_request: Request
+    ) -> LibraryRecord:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         valid = valid_kind(kind)
         if valid == "models":
             validate_model_data(request.data)
-            return public_model_record(library_repository.create(valid, request.name, request.data))
+            return public_model_record(
+                library_repository.create(valid, request.name, request.data, user_id=user_id)
+            )
         record = LibraryRecord.model_validate(
-            library_repository.create(valid, request.name, request.data)
+            library_repository.create(valid, request.name, request.data, user_id=user_id)
         )
         return record
 
     @router.put("/library/{kind}/{record_id}", response_model=LibraryRecord)
     def update_library_record(
-        kind: str, record_id: int, request: LibraryRecordInput
+        kind: str, record_id: int, request: LibraryRecordInput, http_request: Request
     ) -> LibraryRecord:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         try:
             valid = valid_kind(kind)
             data = request.data
             if valid == "models":
-                existing = library_repository.get(valid, record_id)
+                existing = library_repository.get(valid, record_id, user_id=user_id)
                 data = {**existing["data"], **request.data}
                 data.pop("apiKeyConfigured", None)
                 data.pop("apiKeyHint", None)
@@ -3108,7 +3318,9 @@ def create_router(
                     data.pop("lastVerifiedAt", None)
                     data.pop("lastVerifiedLatencyMs", None)
                 validate_model_data(data)
-            result = library_repository.update(valid, record_id, request.name, data)
+            result = library_repository.update(
+                valid, record_id, request.name, data, user_id=user_id
+            )
         except KeyError as error:
             raise HTTPException(status_code=404, detail="record not found") from error
         if valid == "models":
@@ -3117,16 +3329,19 @@ def create_router(
         return record
 
     @router.delete("/library/{kind}/{record_id}", status_code=204)
-    def delete_library_record(kind: str, record_id: int) -> Response:
+    def delete_library_record(kind: str, record_id: int, http_request: Request) -> Response:
+        user = required_user(http_request)
         valid = valid_kind(kind)
-        if not library_repository.delete(valid, record_id):
+        if not library_repository.delete(valid, record_id, user_id=int(user["id"])):
             raise HTTPException(status_code=404, detail="record not found")
         return Response(status_code=204)
 
     @router.post("/library/models/{record_id}/test")
-    def test_model_connection(record_id: int) -> dict[str, object]:
+    def test_model_connection(record_id: int, http_request: Request) -> dict[str, object]:
+        user = required_user(http_request)
+        user_id = int(user["id"])
         try:
-            record = library_repository.get("models", record_id)
+            record = library_repository.get("models", record_id, user_id=user_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="model configuration not found") from error
         try:
@@ -3139,7 +3354,7 @@ def create_router(
             "lastVerifiedAt": datetime.now(UTC).isoformat(),
             "lastVerifiedLatencyMs": result.get("latencyMs"),
         }
-        library_repository.update("models", record_id, record["name"], data)
+        library_repository.update("models", record_id, record["name"], data, user_id=user_id)
         return result
 
     @router.get("/resume-templates")

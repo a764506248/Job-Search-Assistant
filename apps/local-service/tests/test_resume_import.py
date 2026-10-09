@@ -27,7 +27,11 @@ def make_pdf(text: str) -> bytes:
 
 class FakeProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         assert "企业知识库问答系统" in resume_text
         assert model_record_id is None
@@ -49,7 +53,11 @@ class FakeProjectExtractor:
 
 class StructuredResumeExtractor:
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         return {
             "profile": {
@@ -79,7 +87,11 @@ class MutableStructuredResumeExtractor:
         ]
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         return {
             "profile": {},
@@ -282,7 +294,11 @@ class SelectedModelProjectExtractor:
         self.model_record_id: int | None = None
 
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         self.model_record_id = model_record_id
         return [{"name": "AI 项目", "data": {"summary": "模型提取结果"}}]
@@ -338,7 +354,11 @@ def test_import_resume_rejects_unsupported_file(tmp_path) -> None:
 
 class FailingProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         raise RuntimeError("模型接口暂时不可用")
 
@@ -374,7 +394,11 @@ def test_import_resume_keeps_data_when_ai_extraction_fails(tmp_path) -> None:
 
 class EmptyProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         return []
 

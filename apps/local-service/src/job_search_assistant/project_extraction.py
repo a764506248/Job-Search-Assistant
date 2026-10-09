@@ -12,11 +12,11 @@ from .repositories import LibraryRepository
 
 class ProjectExtractor(Protocol):
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> list[dict[str, object]]: ...
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
@@ -26,19 +26,19 @@ class ModelConnectionTester(Protocol):
 
 class MaterialPreviewGenerator(Protocol):
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
 class GreetingGenerator(Protocol):
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
 class JobAnalysisGenerator(Protocol):
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
@@ -79,10 +79,13 @@ def _model_settings(config: dict[str, object]) -> tuple[str, str, str, str]:
 
 
 def _model_candidates(
-    library: LibraryRepository, model_record_id: int | None = None
+    library: LibraryRepository, model_record_id: int | None = None, *, user_id: int = 1
 ) -> list[dict[str, object]]:
-    """Return primary then fallback model, without retrying the same record."""
-    configs = library.list("models")
+    """Return primary then fallback model, without retrying the same record.
+
+    模型配置按账号隔离，调用方必须传入当前用户，避免读到其他人的模型与密钥。
+    """
+    configs = library.list("models", user_id=user_id)
     if not configs:
         raise RuntimeError("尚未配置云端模型，请先填写模型 ID、API Key 和 Base URL")
     selected: dict[str, object] | None = None
@@ -116,16 +119,18 @@ class CloudProjectExtractor:
         self.library = library
 
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> list[dict[str, object]]:
-        return list(self.extract_resume(resume_text, model_record_id)["projects"])
+        return list(
+            self.extract_resume(resume_text, model_record_id, user_id=user_id)["projects"]
+        )
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]:
         prompt = self._prompt(resume_text[:60000])
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             config = record["data"]
             try:
                 model_id, api_key, base_url, provider = _model_settings(config)
@@ -386,11 +391,15 @@ class CloudMaterialPreviewGenerator:
         self.library = library
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         prompt = self._prompt(context)
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             try:
                 model_id, api_key, base_url, provider = _model_settings(record["data"])
                 if provider == "Anthropic":
@@ -456,11 +465,15 @@ class CloudJobAnalysisGenerator:
         self.library = library
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         prompt = self._prompt(context)
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             try:
                 model_id, api_key, base_url, provider = _model_settings(record["data"])
                 if provider == "Anthropic":
@@ -524,11 +537,15 @@ class CloudGreetingGenerator:
         self.library = library
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         prompt = self._prompt(context)
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             try:
                 model_id, api_key, base_url, provider = _model_settings(record["data"])
                 if provider == "Anthropic":

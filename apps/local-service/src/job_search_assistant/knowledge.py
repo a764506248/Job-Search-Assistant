@@ -11,12 +11,12 @@ class KnowledgeSearchService:
     def __init__(self, library: LibraryRepository) -> None:
         self.library = library
 
-    def search(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
+    def search(self, query: str, limit: int = 8, *, user_id: int = 1) -> list[dict[str, Any]]:
         query_tokens = self._tokens(query)
         if not query_tokens:
             return []
         ranked: list[dict[str, Any]] = []
-        for unit in self._collect_knowledge_units():
+        for unit in self._collect_knowledge_units(user_id):
             searchable = "\n".join([unit["content"], *unit["tags"]])
             content_tokens = self._tokens(searchable)
             overlap = query_tokens & content_tokens
@@ -36,9 +36,9 @@ class KnowledgeSearchService:
         ranked.sort(key=lambda item: (-float(item["score"]), str(item["sourceName"])))
         return ranked[:limit]
 
-    def _collect_knowledge_units(self) -> list[dict[str, Any]]:
+    def _collect_knowledge_units(self, user_id: int = 1) -> list[dict[str, Any]]:
         units: list[dict[str, Any]] = []
-        profile = self.library.get_profile()
+        profile = self.library.get_profile(user_id=user_id)
         strengths = [
             str(item.get("content", "")).strip()
             for item in profile.get("strengths", [])
@@ -100,7 +100,7 @@ class KnowledgeSearchService:
                     )
                 )
 
-        for record in self.library.list("projects"):
+        for record in self.library.list("projects", user_id=user_id):
             data = record["data"]
             if self._is_legacy_aggregate_project(record["name"], data):
                 continue

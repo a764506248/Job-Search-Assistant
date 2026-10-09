@@ -18,13 +18,70 @@ class DeterministicEmbedder:
 
 class DeterministicGreetingGenerator:
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         return {
             "modelRecordId": 1,
             "modelName": "test-greeting",
             "modelId": "test-greeting",
             "greeting": "您好，我有 Agent 与 RAG 项目经验，希望进一步沟通。",
+        }
+
+
+class DeterministicJobAnalysisGenerator:
+    """采集流水线里的本地分析替身。
+
+    不注入它时，采集流程会使用真实的 `CloudJobAnalysisGenerator`，在测试环境里
+    因为无法访问模型地址而把岗位记为分析失败，最终得到 `no_matches`。
+    """
+
+    def generate(
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        return {
+            "modelRecordId": 1,
+            "modelName": "test-analysis",
+            "modelId": "test-analysis",
+            "summary": "候选人的 RAG 与 Agent 经历与岗位需求匹配。",
+            "strengths": ["本地项目可证明 RAG 实践经验"],
+            "gaps": [],
+            "recommendations": [],
+            "interviewQuestions": [],
+        }
+
+
+class DeterministicMaterialPreviewGenerator:
+    """材料预览替身：真实实现会调用云端模型，测试环境必须替换掉。"""
+
+    def generate(
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        return {
+            "modelRecordId": 1,
+            "modelName": "test-material",
+            "modelId": "test-material",
+            "greeting": "您好，我有 Agent 与 RAG 项目经验，希望进一步沟通。",
+            "resume": {
+                "headline": "AI Agent 工程师",
+                "summary": ["具备 RAG 项目经验"],
+                "skills": ["Python", "RAG", "Agent"],
+                "projects": ["Agent 项目：负责 Python、RAG 与 Agent 应用开发"],
+                "workExperience": [],
+                "education": [],
+                "optimizationNotes": [],
+            },
         }
 
 
@@ -219,6 +276,8 @@ def collection_client(tmp_path, hub: FakeConnectedBrowserHub) -> TestClient:
             tmp_path / "jobs.sqlite3",
             embedder=DeterministicEmbedder(),
             greeting_generator=DeterministicGreetingGenerator(),
+            job_analysis_generator=DeterministicJobAnalysisGenerator(),
+            material_preview_generator=DeterministicMaterialPreviewGenerator(),
             model_tester=DeterministicModelTester(),
             browser_hub=hub,
         )

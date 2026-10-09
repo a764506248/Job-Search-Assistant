@@ -48,6 +48,7 @@ services:
       # Pass a URL-encoded DSN (especially if the password contains @, &, or #).
       JSA_DATABASE_URL: ${JSA_DATABASE_URL:?set JSA_DATABASE_URL in .env}
       JSA_JWT_SECRET: ${JSA_JWT_SECRET:?set JSA_JWT_SECRET in .env}
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:?set JSA_RUNNER_TOKEN in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,6 +69,8 @@ services:
       - job-search-assistant-runner
       - --base-url
       - http://local-service:8765
+    environment:
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:?set JSA_RUNNER_TOKEN in .env}
     depends_on:
       local-service:
         condition: service_healthy

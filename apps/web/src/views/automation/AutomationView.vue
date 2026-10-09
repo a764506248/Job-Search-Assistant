@@ -633,7 +633,7 @@ useRefresh(load)
 .automation-collection-settings header span,
 .automation-collection-settings > p {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-collection-settings header > span {
@@ -657,7 +657,7 @@ useRefresh(load)
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-filter-grid label.wide {
@@ -757,7 +757,7 @@ useRefresh(load)
   place-items: center;
   background: #dce6e1;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -774,14 +774,14 @@ useRefresh(load)
 }
 
 .automation-pipeline-copy strong {
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .automation-pipeline-copy small {
   overflow: hidden;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -803,7 +803,7 @@ useRefresh(load)
   gap: 8px 12px;
   background: var(--brand-soft);
   color: var(--brand);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -826,7 +826,7 @@ useRefresh(load)
   justify-content: center;
   gap: 18px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-no-matches {
@@ -856,7 +856,7 @@ useRefresh(load)
   max-width: 660px;
   margin: 7px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
@@ -883,7 +883,7 @@ useRefresh(load)
 
 .automation-result-metrics span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-review-results {
@@ -898,7 +898,7 @@ useRefresh(load)
   justify-content: space-between;
   gap: 12px;
   color: var(--ink);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .automation-review-heading span {
@@ -933,7 +933,7 @@ useRefresh(load)
 
 .automation-reviewed-job header span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-reviewed-job header em {
@@ -942,7 +942,7 @@ useRefresh(load)
   border-radius: 999px;
   background: #f6ece2;
   color: #946221;
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 700;
   white-space: nowrap;
@@ -970,7 +970,7 @@ useRefresh(load)
   flex-wrap: wrap;
   gap: 5px 12px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-reviewed-job ul {
@@ -986,7 +986,7 @@ useRefresh(load)
   padding: 0;
   border: 0;
   color: #52645b;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
@@ -996,7 +996,7 @@ useRefresh(load)
   border-radius: 8px;
   background: #fff;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-collection-history {
@@ -1026,7 +1026,7 @@ useRefresh(load)
 .automation-collection-history-heading p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .automation-collection-history-heading > span {
@@ -1035,7 +1035,7 @@ useRefresh(load)
   border-radius: 999px;
   background: var(--brand-soft);
   color: var(--brand-deep);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -1047,7 +1047,7 @@ useRefresh(load)
   width: fit-content;
   cursor: pointer;
   color: var(--brand-deep);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 

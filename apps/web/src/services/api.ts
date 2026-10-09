@@ -6,6 +6,7 @@ import type {
   AutomationReport,
   AutomationRun,
   AutomationCollectionConfig,
+  DeliveryRecord,
   HealthResponse,
   JobMatch,
   JobInsight,
@@ -23,12 +24,22 @@ import type {
 
 export type AdminUser = { id: number; username: string; isAdmin: boolean; isActive: boolean; createdAt: string }
 
+type UnauthorizedHandler = () => void
+let unauthorizedHandler: UnauthorizedHandler | null = null
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('jsa_access_token')
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const response = await fetch(path, { ...init, headers })
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith('/v1/auth/login') && !path.startsWith('/v1/auth/register')) {
+      localStorage.removeItem('jsa_access_token')
+      unauthorizedHandler?.()
+    }
     let message = `请求失败（${response.status}）`
     try {
       const payload = await response.json()
@@ -50,6 +61,7 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   me: () => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/me'),
+  bootstrap: () => request<{ needsSetup: boolean }>('/v1/auth/bootstrap'),
   login: async (username: string, password: string) => { const result = await request<{ user: { id: number; username: string; isAdmin: boolean }; token: string }>('/v1/auth/login', json('POST', { username, password })); localStorage.setItem('jsa_access_token', result.token); return result },
   register: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/register', json('POST', { username, password })),
   adminUsers: () => request<{ items: AdminUser[] }>('/v1/admin/users'),
@@ -65,6 +77,7 @@ export const api = {
   createBrowserPairing: () => request<BrowserPairing>('/v1/browser/pairing', { method: 'POST' }),
   testBrowserConnection: () => request<{ status: string; evidence: Record<string, unknown> }>('/v1/browser/actions/test', json('POST', { action: 'ping', payload: {} })),
   automationRuns: () => request<{ items: AutomationRun[] }>('/v1/automation/runs'),
+  deliveries: (limit = 500) => request<{ total: number; items: DeliveryRecord[] }>(`/v1/deliveries?limit=${limit}`),
   createAutomationRun: (targetCount: number, config: AutomationCollectionConfig) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config })),
   collectAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collect`, { method: 'POST' }),
   automationEvents: (id: number) => request<{ items: AutomationEvent[] }>(`/v1/automation/runs/${id}/events`),
@@ -83,8 +96,7 @@ export const api = {
     if (options.communicationResult) params.set('communicationResult', options.communicationResult)
     return request<{ total: number; page: number; pageSize: number; totalPages: number; items: StoredJob[] }>(`/v1/jobs?${params}`)
   },
-  createJob: (job: ManualJobInput) => request<StoredJob>('/v1/jobs', json('POST', job)),
-  updateJobTracking: (id: number, data: JobTrackingUpdate) => request<StoredJob>(`/v1/jobs/${id}/tracking`, json('PUT', data)),
+  createJob: (job: ManualJobInput) => request<StoredJob>('/v1/jobs', json('POST', job)),  updateJobTracking: (id: number, data: JobTrackingUpdate) => request<StoredJob>(`/v1/jobs/${id}/tracking`, json('PUT', data)),
   deleteJob: (id: number) => request<void>(`/v1/jobs/${id}`, { method: 'DELETE' }),
   matchJob: (job: StoredJob) => request<JobMatch>('/v1/jobs/match', json('POST', {
     title: job.title,

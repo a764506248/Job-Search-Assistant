@@ -6,6 +6,7 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/auth/LoginView.vue'), meta: { title: '登录' } },
     { path: '/', name: 'overview', component: () => import('../views/dashboard/OverviewView.vue'), meta: { title: '工作台' } },
+    { path: '/metrics', name: 'metrics', component: () => import('../views/metrics/MetricsView.vue'), meta: { title: '数据指标' } },
     { path: '/setup', name: 'setup', component: () => import('../views/setup/SetupView.vue'), meta: { title: '安装向导' } },
     { path: '/automation', name: 'automation', component: () => import('../views/automation/AutomationView.vue'), meta: { title: '自动投递' } },
     { path: '/jobs', name: 'jobs', component: () => import('../views/jobs/JobsView.vue'), meta: { title: '职位快照' } },
@@ -24,6 +25,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   if (to.name === 'login') return true
+  if (!localStorage.getItem('jsa_access_token')) return { name: 'login' }
   try {
     const result = await api.me()
     if (to.meta.adminOnly && !result.user.isAdmin) return { name: 'overview' }

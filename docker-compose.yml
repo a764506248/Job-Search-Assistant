@@ -26,6 +26,7 @@ services:
       JSA_HOST: 0.0.0.0
       JSA_PORT: 8765
       JSA_DATA_DIR: /data
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:-local-runner-development-token}
     volumes:
       - ./apps/local-service/data:/data
     healthcheck:
@@ -42,6 +43,8 @@ services:
       - job-search-assistant-runner
       - --base-url
       - http://local-service:8765
+    environment:
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:-local-runner-development-token}
     depends_on:
       local-service:
         condition: service_healthy

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from ..database import db_connect
+from ..database import db_connect, ensure_column, recreate_index, table_exists
 
 LibraryKind = Literal["projects", "resumes", "rules", "models", "targets"]
 ALLOWED_KINDS = {"projects", "resumes", "rules", "models", "targets"}
@@ -24,6 +24,7 @@ class LibraryRepository:
                 """
                 CREATE TABLE IF NOT EXISTS library_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
                     kind TEXT NOT NULL,
                     name TEXT NOT NULL,
                     data_json TEXT NOT NULL,
@@ -32,21 +33,33 @@ class LibraryRepository:
                 )
                 """
             )
-            connection.execute(
+            ensure_column(connection, "library_records", "user_id", "INTEGER NOT NULL DEFAULT 1")
+            recreate_index(
+                connection,
+                "idx_library_records_kind_updated",
                 """
                 CREATE INDEX IF NOT EXISTS idx_library_records_kind_updated
-                ON library_records(kind, updated_at DESC)
-                """
+                ON library_records(user_id, kind, updated_at DESC)
+                """,
             )
             connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS profile (
-                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    user_id INTEGER PRIMARY KEY,
                     data_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            # 历史数据：旧的 profile 表是全局单例，把已有档案迁移到首个用户名下。
+            if table_exists(connection, "profile"):
+                connection.execute(
+                    """
+                    INSERT INTO user_profiles(user_id, data_json, updated_at)
+                    SELECT 1, data_json, updated_at FROM profile WHERE singleton = 1
+                    ON CONFLICT(user_id) DO NOTHING
+                    """
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS setup_state (
@@ -63,49 +76,58 @@ class LibraryRepository:
             connection.execute("DROP TABLE IF EXISTS vector_chunks")
             connection.execute("PRAGMA optimize")
 
-    def list(self, kind: LibraryKind) -> list[dict[str, Any]]:
+    def list(self, kind: LibraryKind, *, user_id: int = 1) -> list[dict[str, Any]]:
         self._validate_kind(kind)
         self.initialize()
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT * FROM library_records WHERE kind = ? ORDER BY updated_at DESC, id DESC",
-                (kind,),
+                """SELECT * FROM library_records
+                WHERE kind = ? AND user_id = ? ORDER BY updated_at DESC, id DESC""",
+                (kind, user_id),
             ).fetchall()
         return [self._row(row) for row in rows]
 
-    def create(self, kind: LibraryKind, name: str, data: dict[str, Any]) -> dict[str, Any]:
+    def create(
+        self, kind: LibraryKind, name: str, data: dict[str, Any], *, user_id: int = 1
+    ) -> dict[str, Any]:
         self._validate_kind(kind)
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?) RETURNING id
+                INSERT INTO library_records(user_id, kind, name, data_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?) RETURNING id
                 """,
-                (kind, name, json.dumps(data, ensure_ascii=False), now, now),
+                (user_id, kind, name, json.dumps(data, ensure_ascii=False), now, now),
             )
             record_id = cursor.lastrowid
             if kind == "models":
-                self._make_model_role_exclusive(connection, int(record_id), data)
-        return self.get(kind, int(record_id))
+                self._make_model_role_exclusive(connection, int(record_id), data, user_id)
+        return self.get(kind, int(record_id), user_id=user_id)
 
-    def get(self, kind: LibraryKind, record_id: int) -> dict[str, Any]:
+    def get(self, kind: LibraryKind, record_id: int, *, user_id: int = 1) -> dict[str, Any]:
         self._validate_kind(kind)
         self.initialize()
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
-                "SELECT * FROM library_records WHERE kind = ? AND id = ?",
-                (kind, record_id),
+                "SELECT * FROM library_records WHERE kind = ? AND id = ? AND user_id = ?",
+                (kind, record_id, user_id),
             ).fetchone()
         if row is None:
             raise KeyError(record_id)
         return self._row(row)
 
     def update(
-        self, kind: LibraryKind, record_id: int, name: str, data: dict[str, Any]
+        self,
+        kind: LibraryKind,
+        record_id: int,
+        name: str,
+        data: dict[str, Any],
+        *,
+        user_id: int = 1,
     ) -> dict[str, Any]:
         self._validate_kind(kind)
         self.initialize()
@@ -113,7 +135,7 @@ class LibraryRepository:
             cursor = connection.execute(
                 """
                 UPDATE library_records SET name = ?, data_json = ?, updated_at = ?
-                WHERE kind = ? AND id = ?
+                WHERE kind = ? AND id = ? AND user_id = ?
                 """,
                 (
                     name,
@@ -121,42 +143,45 @@ class LibraryRepository:
                     datetime.now(UTC).isoformat(),
                     kind,
                     record_id,
+                    user_id,
                 ),
             )
             if kind == "models" and cursor.rowcount:
-                self._make_model_role_exclusive(connection, record_id, data)
+                self._make_model_role_exclusive(connection, record_id, data, user_id)
         if cursor.rowcount == 0:
             raise KeyError(record_id)
-        return self.get(kind, record_id)
+        return self.get(kind, record_id, user_id=user_id)
 
-    def delete(self, kind: LibraryKind, record_id: int) -> bool:
+    def delete(self, kind: LibraryKind, record_id: int, *, user_id: int = 1) -> bool:
         self._validate_kind(kind)
         self.initialize()
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM library_records WHERE kind = ? AND id = ?",
-                (kind, record_id),
+                "DELETE FROM library_records WHERE kind = ? AND id = ? AND user_id = ?",
+                (kind, record_id, user_id),
             )
         return cursor.rowcount > 0
 
-    def get_profile(self) -> dict[str, Any]:
+    def get_profile(self, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
         with self._connect() as connection:
-            row = connection.execute("SELECT data_json FROM profile WHERE singleton = 1").fetchone()
+            row = connection.execute(
+                "SELECT data_json FROM user_profiles WHERE user_id = ?", (user_id,)
+            ).fetchone()
         return self._structure_profile(json.loads(row[0])) if row else {}
 
-    def save_profile(self, data: dict[str, Any]) -> dict[str, Any]:
+    def save_profile(self, data: dict[str, Any], *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
         data = self._structure_profile(data)
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO profile(singleton, data_json, updated_at) VALUES (1, ?, ?)
-                ON CONFLICT(singleton) DO UPDATE SET
+                INSERT INTO user_profiles(user_id, data_json, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
                     data_json = excluded.data_json,
                     updated_at = excluded.updated_at
                 """,
-                (json.dumps(data, ensure_ascii=False), datetime.now(UTC).isoformat()),
+                (user_id, json.dumps(data, ensure_ascii=False), datetime.now(UTC).isoformat()),
             )
         return data
 
@@ -189,6 +214,8 @@ class LibraryRepository:
         profile: dict[str, Any],
         resume: dict[str, Any],
         projects: list[dict[str, Any]],
+        *,
+        user_id: int = 1,
     ) -> dict[str, Any]:
         """Stage parsed resume data until the user explicitly confirms it."""
         self.initialize()
@@ -203,9 +230,9 @@ class LibraryRepository:
         }
         with self._connect() as connection:
             resume_cursor = connection.execute(
-                """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                VALUES ('resumes', ?, ?, ?, ?) RETURNING id""",
-                (filename, json.dumps(staged_resume, ensure_ascii=False), now, now),
+                """INSERT INTO library_records(user_id, kind, name, data_json, created_at, updated_at)
+                VALUES (?, 'resumes', ?, ?, ?, ?) RETURNING id""",
+                (user_id, filename, json.dumps(staged_resume, ensure_ascii=False), now, now),
             )
         return {
             "profile": profile,
@@ -213,13 +240,14 @@ class LibraryRepository:
             "projectIds": [],
         }
 
-    def confirm_resume(self, resume_id: int) -> dict[str, Any]:
+    def confirm_resume(self, resume_id: int, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT name, data_json FROM library_records WHERE kind = 'resumes' AND id = ?",
-                (resume_id,),
+                """SELECT name, data_json FROM library_records
+                WHERE kind = 'resumes' AND id = ? AND user_id = ?""",
+                (resume_id, user_id),
             ).fetchone()
             if row is None:
                 raise KeyError(resume_id)
@@ -227,28 +255,29 @@ class LibraryRepository:
             resume = json.loads(raw_data)
             if resume.get("confirmationStatus") == "confirmed":
                 return {
-                    "profile": self.get_profile(),
+                    "profile": self.get_profile(user_id=user_id),
                     "projectIds": [],
-                    "resume": self.get("resumes", resume_id),
+                    "resume": self.get("resumes", resume_id, user_id=user_id),
                 }
             staged_profile = dict(resume.pop("stagedProfile", {}))
             staged_projects = list(resume.pop("stagedProjects", []))
             profile_row = connection.execute(
-                "SELECT data_json FROM profile WHERE singleton = 1"
+                "SELECT data_json FROM user_profiles WHERE user_id = ?", (user_id,)
             ).fetchone()
             current_profile = json.loads(profile_row[0]) if profile_row else {}
             merged_profile = self._structure_profile({**current_profile, **staged_profile})
             connection.execute(
-                """INSERT INTO profile(singleton, data_json, updated_at) VALUES (1, ?, ?)
-                ON CONFLICT(singleton) DO UPDATE SET
+                """INSERT INTO user_profiles(user_id, data_json, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
                     data_json = excluded.data_json,
                     updated_at = excluded.updated_at""",
-                (json.dumps(merged_profile, ensure_ascii=False), now),
+                (user_id, json.dumps(merged_profile, ensure_ascii=False), now),
             )
-            project_ids = self._upsert_projects(connection, staged_projects, now)
+            project_ids = self._upsert_projects(connection, staged_projects, now, user_id)
             existing_default = connection.execute(
-                "SELECT data_json FROM library_records WHERE kind = 'resumes' AND id != ?",
-                (resume_id,),
+                """SELECT data_json FROM library_records
+                WHERE kind = 'resumes' AND id != ? AND user_id = ?""",
+                (resume_id, user_id),
             ).fetchall()
             has_default_image = any(
                 data.get("confirmationStatus", "confirmed") == "confirmed"
@@ -261,28 +290,33 @@ class LibraryRepository:
             if resume.get("previewImageFile") and not has_default_image:
                 resume["isDefaultImage"] = True
             connection.execute(
-                "UPDATE library_records SET name = ?, data_json = ?, updated_at = ? WHERE id = ?",
-                (name, json.dumps(resume, ensure_ascii=False), now, resume_id),
+                """UPDATE library_records SET name = ?, data_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?""",
+                (name, json.dumps(resume, ensure_ascii=False), now, resume_id, user_id),
             )
         return {
             "profile": merged_profile,
             "projectIds": project_ids,
-            "resume": self.get("resumes", resume_id),
+            "resume": self.get("resumes", resume_id, user_id=user_id),
         }
 
-    def upsert_projects(self, projects: list[dict[str, Any]]) -> list[int]:
+    def upsert_projects(
+        self, projects: list[dict[str, Any]], *, user_id: int = 1
+    ) -> list[int]:
         """Persist structured projects and return their stable entity IDs."""
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
-            return self._upsert_projects(connection, projects, now)
+            return self._upsert_projects(connection, projects, now, user_id)
 
-    def set_default_resume_image(self, resume_id: int) -> dict[str, Any]:
+    def set_default_resume_image(self, resume_id: int, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT id, name, data_json FROM library_records WHERE kind = 'resumes'"
+                """SELECT id, name, data_json FROM library_records
+                WHERE kind = 'resumes' AND user_id = ?""",
+                (user_id,),
             ).fetchall()
             selected: tuple[int, str, dict[str, Any]] | None = None
             for record_id, name, data_json in rows:
@@ -296,22 +330,24 @@ class LibraryRepository:
                 if data.get("isDefaultImage"):
                     data["isDefaultImage"] = False
                     connection.execute(
-                        "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
-                        (json.dumps(data, ensure_ascii=False), now, record_id),
+                        """UPDATE library_records SET data_json = ?, updated_at = ?
+                        WHERE id = ? AND user_id = ?""",
+                        (json.dumps(data, ensure_ascii=False), now, record_id, user_id),
                     )
             if selected is None:
                 raise KeyError(resume_id)
             record_id, name, data = selected
             data["isDefaultImage"] = True
             connection.execute(
-                "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(data, ensure_ascii=False), now, record_id),
+                """UPDATE library_records SET data_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?""",
+                (json.dumps(data, ensure_ascii=False), now, record_id, user_id),
             )
-        return self.get("resumes", record_id)
+        return self.get("resumes", record_id, user_id=user_id)
 
-    def get_default_resume_image(self) -> dict[str, Any]:
+    def get_default_resume_image(self, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()
-        records = self.list("resumes")
+        records = self.list("resumes", user_id=user_id)
         selected = next(
             (
                 item
@@ -340,11 +376,13 @@ class LibraryRepository:
         connection: sqlite3.Connection,
         projects: list[dict[str, Any]],
         now: str,
+        user_id: int = 1,
     ) -> list[int]:
         """Accumulate imported projects while updating the same logical project."""
         project_ids: list[int] = []
         existing_projects = connection.execute(
-            "SELECT id, name, data_json FROM library_records WHERE kind = 'projects'"
+            "SELECT id, name, data_json FROM library_records WHERE kind = 'projects' AND user_id = ?",
+            (user_id,),
         ).fetchall()
         projects_by_source_key = {
             data.get("sourceKey"): record_id
@@ -366,20 +404,22 @@ class LibraryRepository:
             if existing_id:
                 connection.execute(
                     """UPDATE library_records SET name = ?, data_json = ?, updated_at = ?
-                    WHERE kind = 'projects' AND id = ?""",
+                    WHERE kind = 'projects' AND id = ? AND user_id = ?""",
                     (
                         project["name"],
                         json.dumps(project["data"], ensure_ascii=False),
                         now,
                         existing_id,
+                        user_id,
                     ),
                 )
                 project_ids.append(existing_id)
             else:
                 cursor = connection.execute(
-                    """INSERT INTO library_records(kind, name, data_json, created_at, updated_at)
-                    VALUES ('projects', ?, ?, ?, ?) RETURNING id""",
+                    """INSERT INTO library_records(user_id, kind, name, data_json, created_at, updated_at)
+                    VALUES (?, 'projects', ?, ?, ?, ?) RETURNING id""",
                     (
+                        user_id,
                         project["name"],
                         json.dumps(project["data"], ensure_ascii=False),
                         now,
@@ -468,14 +508,15 @@ class LibraryRepository:
 
     @staticmethod
     def _make_model_role_exclusive(
-        connection: sqlite3.Connection, record_id: int, data: dict[str, Any]
+        connection: sqlite3.Connection, record_id: int, data: dict[str, Any], user_id: int = 1
     ) -> None:
         role = str(data.get("usageRole", "available"))
         if role not in ("primary", "fallback"):
             return
         rows = connection.execute(
-            "SELECT id, data_json FROM library_records WHERE kind = 'models' AND id != ?",
-            (record_id,),
+            """SELECT id, data_json FROM library_records
+            WHERE kind = 'models' AND id != ? AND user_id = ?""",
+            (record_id, user_id),
         ).fetchall()
         now = datetime.now(UTC).isoformat()
         for other_id, raw_data in rows:
@@ -483,8 +524,9 @@ class LibraryRepository:
             if other.get("usageRole") == role:
                 other["usageRole"] = "available"
                 connection.execute(
-                    "UPDATE library_records SET data_json = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(other, ensure_ascii=False), now, other_id),
+                    """UPDATE library_records SET data_json = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?""",
+                    (json.dumps(other, ensure_ascii=False), now, other_id, user_id),
                 )
 
     @staticmethod

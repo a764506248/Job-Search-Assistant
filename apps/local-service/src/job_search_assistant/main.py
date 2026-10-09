@@ -60,6 +60,8 @@ def create_app(
         allow_private_network=True,
     )
     resolved_database_path = database_path or settings.data_dir / "jobs.sqlite3"
+    # 暴露数据文件位置，便于本地脚本与测试直接准备数据（不经过 HTTP 层）。
+    application.state.database_path = resolved_database_path
     job_repository = JobRepository(resolved_database_path)
     library_repository = LibraryRepository(resolved_database_path)
     client_log_repository = ClientLogRepository(resolved_database_path)

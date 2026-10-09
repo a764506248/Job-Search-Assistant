@@ -220,6 +220,28 @@ export interface StoredJob {
   resumeOptimization?: string
 }
 
+export type DeliveryStatus = 'delivered' | 'greeting_sent' | 'failed' | 'skipped' | 'blocked' | 'fatal_limit'
+
+export interface DeliveryRecord {
+  id: number
+  platform: string
+  platformJobId: string
+  title: string
+  companyName: string
+  salaryText?: string | null
+  location?: string | null
+  recruiterName?: string | null
+  status: DeliveryStatus
+  decision?: string | null
+  reason?: string | null
+  greetingText?: string | null
+  detail?: string | null
+  appliedAt: string
+  metadata: JsonData
+  createdAt: string
+  updatedAt: string
+}
+
 export interface JobTrackingUpdate {
   hasCommunicated: boolean
   hasInterview: boolean

@@ -118,13 +118,16 @@ class AutomationRepository:
             self._append_event(connection, run_id, "run-created", "info", {"target": target_count})
         return self.get_run(run_id)
 
-    def get_run(self, run_id: int) -> dict[str, Any]:
+    def get_run(self, run_id: int, *, user_id: int | None = None) -> dict[str, Any]:
         self.initialize()
         with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
-            row = connection.execute(
-                "SELECT * FROM automation_runs WHERE id = ?", (run_id,)
-            ).fetchone()
+            sql = "SELECT * FROM automation_runs WHERE id = ?"
+            params: tuple[Any, ...] = (run_id,)
+            if user_id is not None:
+                sql += " AND user_id = ?"
+                params = (run_id, user_id)
+            row = connection.execute(sql, params).fetchone()
         if row is None:
             raise KeyError(run_id)
         result = row.as_dict() if hasattr(row, "as_dict") else dict(row)
@@ -258,19 +261,22 @@ class AutomationRepository:
             connection.execute("BEGIN IMMEDIATE")
             connection.row_factory = sqlite3.Row
             self._upsert_runner(connection, runner_id, now)
-            row = connection.execute(
-                """SELECT id FROM automation_runs
+            claim_sql = """SELECT id FROM automation_runs
                 WHERE status = 'running' AND runner_id IS NULL
                 ORDER BY id LIMIT 1"""
-            ).fetchone()
+            if getattr(connection, "is_postgres", False):
+                claim_sql += " FOR UPDATE SKIP LOCKED"
+            row = connection.execute(claim_sql).fetchone()
             if row is None:
                 return None
             run_id = int(row["id"])
-            connection.execute(
+            updated = connection.execute(
                 """UPDATE automation_runs SET runner_id = ?, heartbeat_at = ?, updated_at = ?
                 WHERE id = ? AND runner_id IS NULL""",
                 (runner_id, now, now, run_id),
             )
+            if updated.rowcount != 1:
+                return None
             self._append_event(
                 connection,
                 run_id,
@@ -452,8 +458,8 @@ class AutomationRepository:
             ).fetchall()
         return [row.as_dict() if hasattr(row, "as_dict") else dict(row) for row in rows]
 
-    def report(self, run_id: int) -> dict[str, Any]:
-        run = self.get_run(run_id)
+    def report(self, run_id: int, *, user_id: int | None = None) -> dict[str, Any]:
+        run = self.get_run(run_id, user_id=user_id)
         return {
             "run": run,
             "actions": self.list_actions(run_id),

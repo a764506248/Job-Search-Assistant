@@ -28,6 +28,10 @@
       <a-layout-content class="main-content">
         <header class="topbar">
           <div><p class="eyebrow">本地知识库</p><h1>{{ pageTitle }}</h1></div>
+          <div class="topbar-account">
+            <span v-if="username" class="account-name">{{ username }}</span>
+            <a-button :loading="signingOut" @click="signOut">退出登录</a-button>
+          </div>
         </header>
         <router-view />
       </a-layout-content>
@@ -36,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../services/api'
 
@@ -45,11 +49,15 @@ const router = useRouter()
 const refreshVersion = ref(0)
 const service = reactive({ online: false, text: '正在连接本地服务' })
 const isAdmin = ref(false)
+const username = ref('')
+const signingOut = ref(false)
+let authWatchTimer: number | undefined
 
 provide('refreshVersion', refreshVersion)
 
 const navigation = [
   { name: 'overview', path: '/', label: '工作台', icon: '⌂' },
+  { name: 'metrics', path: '/metrics', label: '数据指标', icon: '▦' },
   { name: 'setup', path: '/setup', label: '安装向导', icon: '✓' },
   { name: 'automation', path: '/automation', label: '自动投递', icon: '▶' },
   { name: 'jobs', path: '/jobs', label: '职位快照', icon: '▤' },
@@ -68,13 +76,24 @@ const visibleNavigation = computed(() => isAdmin.value ? [...navigation, adminNa
 const pageTitle = computed(() => String(route.meta.title || '工作台'))
 
 onMounted(async () => {
+  const redirectIfTokenMissing = () => {
+    if (route.name !== 'login' && !localStorage.getItem('jsa_access_token')) {
+      router.replace({ name: 'login' })
+    }
+  }
+  redirectIfTokenMissing()
+  authWatchTimer = window.setInterval(redirectIfTokenMissing, 500)
+
   try {
-    isAdmin.value = (await api.me()).user.isAdmin
+    const me = await api.me()
+    isAdmin.value = me.user.isAdmin
+    username.value = me.user.username
   } catch {
     // Authentication state must not affect the service-health indicator.
     // The router handles unauthenticated users; keep the shell usable while
     // the auth request is settling (or when an expired token is present).
     isAdmin.value = false
+    username.value = ''
   }
 
   try {
@@ -86,6 +105,23 @@ onMounted(async () => {
     service.text = '本地服务连接失败'
   }
 })
+
+onUnmounted(() => {
+  if (authWatchTimer !== undefined) window.clearInterval(authWatchTimer)
+})
+
+async function signOut() {
+  signingOut.value = true
+  try {
+    await api.logout()
+  } catch {
+    // 登出接口失败也要回到登录页，本地会话以清 token 为准。
+  } finally {
+    localStorage.removeItem('jsa_access_token')
+    signingOut.value = false
+    router.replace({ name: 'login' })
+  }
+}
 
 const theme = {
   token: {

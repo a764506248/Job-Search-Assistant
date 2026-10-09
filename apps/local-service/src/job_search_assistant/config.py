@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     local_token: str | None = None
     database_url: str | None = None
     jwt_secret: str | None = None
+    runner_token: str | None = None
     data_dir: Path = Path("data")
 
 

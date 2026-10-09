@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import platform
 import time
 import urllib.error
@@ -10,14 +11,21 @@ from typing import Any
 
 
 class LocalApi:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, runner_token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        self.runner_token = runner_token
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.runner_token:
+            headers["X-Runner-Token"] = self.runner_token
+        return headers
 
     def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=json.dumps(body, ensure_ascii=False).encode(),
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={**self._headers(), "Content-Type": "application/json"},
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=130) as response:
@@ -26,7 +34,7 @@ class LocalApi:
     def get(self, path: str) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
-            headers={"Accept": "application/json"},
+            headers=self._headers(),
             method="GET",
         )
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -335,12 +343,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Job Search Assistant automation runner")
     parser.add_argument("--base-url", default="http://127.0.0.1:8765")
     parser.add_argument("--runner-id", default=f"{platform.node()}-automation-runner")
+    parser.add_argument("--runner-token", default=os.getenv("JSA_RUNNER_TOKEN"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     args = parser.parse_args()
     run_loop(
-        LocalApi(args.base_url),
+        LocalApi(args.base_url, args.runner_token),
         args.runner_id,
         dry_run=args.dry_run,
         once=args.once,

@@ -31,6 +31,7 @@ docker compose -f docker-compose.postgres.yml ps
 POSTGRES_PASSWORD=随机强密码
 JSA_DATABASE_URL=postgresql://jsa:URL编码后的密码@postgres:5432/job_search_assistant
 JSA_JWT_SECRET=随机生成的长随机字符串
+JSA_RUNNER_TOKEN=另一个独立的长随机字符串
 JSA_IMAGE_TAG=v0.3.2
 ```
 

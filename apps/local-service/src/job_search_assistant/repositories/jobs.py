@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..domain.models import CapturedJob, StoredJob
 from ..domain.salary import normalize_salary_text, prefer_salary_text
-from ..database import db_connect
+from ..database import db_connect, recreate_index
 
 
 class JobRepository:
@@ -19,6 +19,7 @@ class JobRepository:
                 """
                 CREATE TABLE IF NOT EXISTS job_postings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
                     platform TEXT NOT NULL,
                     platform_job_id TEXT NOT NULL,
                     url TEXT NOT NULL,
@@ -49,6 +50,7 @@ class JobRepository:
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(job_postings)")}
             migrations = {
+                "user_id": "INTEGER NOT NULL DEFAULT 1",
                 "has_communicated": "INTEGER NOT NULL DEFAULT 0",
                 "has_interview": "INTEGER NOT NULL DEFAULT 0",
                 "generated_greeting": "TEXT",
@@ -64,22 +66,25 @@ class JobRepository:
                         f"ALTER TABLE job_postings ADD COLUMN {name} {definition}"
                     )
             self._deduplicate_existing(connection)
-            connection.execute(
+            # 唯一索引必须带上 user_id，否则不同用户采集同一职位会互相顶掉。
+            recreate_index(
+                connection,
+                "idx_job_postings_platform_job_id",
                 """CREATE UNIQUE INDEX IF NOT EXISTS
                 idx_job_postings_platform_job_id
-                ON job_postings(platform, platform_job_id)"""
+                ON job_postings(user_id, platform, platform_job_id)""",
             )
 
-    def save_many(self, jobs: list[CapturedJob]) -> list[str]:
+    def save_many(self, jobs: list[CapturedJob], *, user_id: int = 1) -> list[str]:
         self.initialize()
         accepted: list[str] = []
         with self._connect() as connection:
             for job in jobs:
-                content_hash = self._content_hash(job)
+                content_hash = self._content_hash(job, user_id)
                 existing = connection.execute(
                     """SELECT salary_text FROM job_postings
-                    WHERE platform = ? AND platform_job_id = ?""",
-                    (job.platform, job.platform_job_id),
+                    WHERE platform = ? AND platform_job_id = ? AND user_id = ?""",
+                    (job.platform, job.platform_job_id, user_id),
                 ).fetchone()
                 salary_text = prefer_salary_text(
                     existing[0] if existing is not None else None,
@@ -88,17 +93,17 @@ class JobRepository:
                 cursor = connection.execute(
                     """
                     INSERT INTO job_postings (
-                        platform, platform_job_id, url, title, company_name, company_size,
+                        user_id, platform, platform_job_id, url, title, company_name, company_size,
                         location, work_address, salary_text, experience, education, description,
                         skills_json, recruiter_name, recruiter_title, captured_at,
                         has_communicated, has_interview, generated_greeting,
                         resume_variant, generated_resume_id, resume_optimization,
                         source, content_hash
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
-                    ON CONFLICT(platform, platform_job_id) DO UPDATE SET
+                    ON CONFLICT(user_id, platform, platform_job_id) DO UPDATE SET
                         url = excluded.url,
                         title = excluded.title,
                         company_name = excluded.company_name,
@@ -134,6 +139,7 @@ class JobRepository:
                         content_hash = excluded.content_hash
                     """,
                     (
+                        user_id,
                         job.platform,
                         job.platform_job_id,
                         job.url,
@@ -164,67 +170,75 @@ class JobRepository:
                     accepted.append(job.platform_job_id)
         return accepted
 
-    def get_by_platform_job_id(self, platform: str, platform_job_id: str) -> StoredJob:
+    def get_by_platform_job_id(
+        self, platform: str, platform_job_id: str, *, user_id: int = 1
+    ) -> StoredJob:
         self.initialize()
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
                 """SELECT * FROM job_postings
-                WHERE platform = ? AND platform_job_id = ?""",
-                (platform, platform_job_id),
+                WHERE platform = ? AND platform_job_id = ? AND user_id = ?""",
+                (platform, platform_job_id, user_id),
             ).fetchone()
         if row is None:
             raise KeyError(platform_job_id)
         return self._from_row(row)
 
-    def list_platform_job_ids(self, platform: str) -> list[str]:
+    def list_platform_job_ids(self, platform: str, *, user_id: int = 1) -> list[str]:
         """Return stable ids so browser collection can skip locally known jobs."""
         self.initialize()
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT platform_job_id FROM job_postings
-                WHERE platform = ? ORDER BY id""",
-                (platform,),
+                WHERE platform = ? AND user_id = ? ORDER BY id""",
+                (platform, user_id),
             ).fetchall()
         return [str(row[0]) for row in rows if row[0]]
 
     def count(
-        self, query: str | None = None, communication_result: str | None = None
+        self,
+        query: str | None = None,
+        communication_result: str | None = None,
+        *,
+        user_id: int = 1,
     ) -> int:
         self.initialize()
-        where_sql, parameters = self._filters(query, communication_result)
+        where_sql, parameters = self._filters(user_id, query, communication_result)
         with self._connect() as connection:
             row = connection.execute(
                 f"SELECT COUNT(*) FROM job_postings {where_sql}", parameters
             ).fetchone()
         return int(row[0]) if row else 0
 
-    def get(self, snapshot_id: int) -> StoredJob:
+    def get(self, snapshot_id: int, *, user_id: int = 1) -> StoredJob:
         self.initialize()
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
-                "SELECT * FROM job_postings WHERE id = ?", (snapshot_id,)
+                "SELECT * FROM job_postings WHERE id = ? AND user_id = ?",
+                (snapshot_id, user_id),
             ).fetchone()
         if row is None:
             raise KeyError(snapshot_id)
         return self._from_row(row)
 
-    def create(self, job: CapturedJob) -> StoredJob:
+    def create(self, job: CapturedJob, *, user_id: int = 1) -> StoredJob:
         self.initialize()
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO job_postings (
-                    platform, platform_job_id, url, title, company_name, company_size,
+                    user_id, platform, platform_job_id, url, title, company_name, company_size,
                     location, work_address, salary_text, experience, education, description,
                     skills_json, recruiter_name, recruiter_title, captured_at,
                     has_communicated, has_interview, generated_greeting,
                     resume_variant, generated_resume_id, resume_optimization,
                     source, content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
                 """,
                 (
+                    user_id,
                     job.platform,
                     job.platform_job_id,
                     job.url,
@@ -248,20 +262,22 @@ class JobRepository:
                     job.generated_resume_id,
                     job.resume_optimization,
                     job.source,
-                    self._content_hash(job),
+                    self._content_hash(job, user_id),
                 ),
             )
             snapshot_id = int(cursor.lastrowid)
-        return self.get(snapshot_id)
+        return self.get(snapshot_id, user_id=user_id)
 
-    def update_tracking(self, snapshot_id: int, data: dict[str, object]) -> StoredJob:
+    def update_tracking(
+        self, snapshot_id: int, data: dict[str, object], *, user_id: int = 1
+    ) -> StoredJob:
         self.initialize()
         with self._connect() as connection:
             cursor = connection.execute(
                 """UPDATE job_postings SET
                     has_communicated = ?, has_interview = ?, generated_greeting = ?,
                     resume_variant = ?, generated_resume_id = ?, resume_optimization = ?
-                WHERE id = ?""",
+                WHERE id = ? AND user_id = ?""",
                 (
                     int(bool(data["has_communicated"])),
                     int(bool(data["has_interview"])),
@@ -270,22 +286,25 @@ class JobRepository:
                     data.get("generated_resume_id"),
                     data.get("resume_optimization"),
                     snapshot_id,
+                    user_id,
                 ),
             )
         if cursor.rowcount == 0:
             raise KeyError(snapshot_id)
-        return self.get(snapshot_id)
+        return self.get(snapshot_id, user_id=user_id)
 
-    def update_generated_greeting(self, snapshot_id: int, greeting: str) -> StoredJob:
+    def update_generated_greeting(
+        self, snapshot_id: int, greeting: str, *, user_id: int = 1
+    ) -> StoredJob:
         self.initialize()
         with self._connect() as connection:
             cursor = connection.execute(
-                "UPDATE job_postings SET generated_greeting = ? WHERE id = ?",
-                (greeting, snapshot_id),
+                "UPDATE job_postings SET generated_greeting = ? WHERE id = ? AND user_id = ?",
+                (greeting, snapshot_id, user_id),
             )
         if cursor.rowcount == 0:
             raise KeyError(snapshot_id)
-        return self.get(snapshot_id)
+        return self.get(snapshot_id, user_id=user_id)
 
     def list_recent(
         self,
@@ -293,9 +312,11 @@ class JobRepository:
         offset: int = 0,
         query: str | None = None,
         communication_result: str | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[StoredJob]:
         self.initialize()
-        where_sql, parameters = self._filters(query, communication_result)
+        where_sql, parameters = self._filters(user_id, query, communication_result)
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -310,10 +331,10 @@ class JobRepository:
 
     @staticmethod
     def _filters(
-        query: str | None, communication_result: str | None
+        user_id: int, query: str | None, communication_result: str | None
     ) -> tuple[str, tuple[object, ...]]:
-        conditions: list[str] = []
-        parameters: list[object] = []
+        conditions: list[str] = ["user_id = ?"]
+        parameters: list[object] = [user_id]
         normalized = (query or "").strip().lower()
         if normalized:
             pattern = f"%{normalized}%"
@@ -337,16 +358,14 @@ class JobRepository:
         if communication_result in result_filters:
             conditions.append(result_filters[communication_result])
 
-        if not conditions:
-            return "", ()
         return "WHERE " + " AND ".join(conditions), tuple(parameters)
 
-    def delete(self, snapshot_id: int) -> bool:
+    def delete(self, snapshot_id: int, *, user_id: int = 1) -> bool:
         self.initialize()
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM job_postings WHERE id = ?",
-                (snapshot_id,),
+                "DELETE FROM job_postings WHERE id = ? AND user_id = ?",
+                (snapshot_id, user_id),
             )
         return cursor.rowcount > 0
 
@@ -355,23 +374,30 @@ class JobRepository:
 
     @staticmethod
     def _deduplicate_existing(connection: sqlite3.Connection) -> None:
-        """Collapse legacy content versions into the newest stable job snapshot."""
+        """Collapse legacy content versions into the newest stable job snapshot.
+
+        Grouping includes user_id so one user's snapshot can never absorb or
+        delete another user's row for the same external posting.
+        """
         connection.execute(
             """UPDATE job_postings AS current SET
                 has_communicated = (
                     SELECT MAX(other.has_communicated) FROM job_postings AS other
-                    WHERE other.platform = current.platform
+                    WHERE other.user_id = current.user_id
+                      AND other.platform = current.platform
                       AND other.platform_job_id = current.platform_job_id
                 ),
                 has_interview = (
                     SELECT MAX(other.has_interview) FROM job_postings AS other
-                    WHERE other.platform = current.platform
+                    WHERE other.user_id = current.user_id
+                      AND other.platform = current.platform
                       AND other.platform_job_id = current.platform_job_id
                 ),
                 generated_greeting = COALESCE(
                     current.generated_greeting,
                     (SELECT other.generated_greeting FROM job_postings AS other
-                     WHERE other.platform = current.platform
+                     WHERE other.user_id = current.user_id
+                       AND other.platform = current.platform
                        AND other.platform_job_id = current.platform_job_id
                        AND other.generated_greeting IS NOT NULL
                      ORDER BY other.id DESC LIMIT 1)
@@ -380,13 +406,17 @@ class JobRepository:
         connection.execute(
             """DELETE FROM job_postings
             WHERE id NOT IN (
-                SELECT MAX(id) FROM job_postings GROUP BY platform, platform_job_id
+                SELECT MAX(id) FROM job_postings GROUP BY user_id, platform, platform_job_id
             )"""
         )
 
     @staticmethod
-    def _content_hash(job: CapturedJob) -> str:
-        content = "\n".join([job.title, job.company_name, job.description, "|".join(job.skills)])
+    def _content_hash(job: CapturedJob, user_id: int = 1) -> str:
+        # user_id 参与哈希：表内遗留的 UNIQUE(platform, platform_job_id, content_hash)
+        # 约束仍然生效，带上用户维度才能让不同用户保存同一职位而不互相冲突。
+        content = "\n".join(
+            [str(user_id), job.title, job.company_name, job.description, "|".join(job.skills)]
+        )
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     @staticmethod

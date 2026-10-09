@@ -2,10 +2,11 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ..domain.models import DeliveryRecord, DeliveryRecordInput
 from ..domain.salary import normalize_salary_text, prefer_salary_text
-from ..database import db_connect
+from ..database import db_connect, table_columns, table_exists
 
 
 class DeliveryRepository:
@@ -15,10 +16,15 @@ class DeliveryRepository:
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
-            connection.execute(
-                """
+            self._upgrade_legacy_table(connection)
+            connection.execute(self._create_table_sql())
+
+    @staticmethod
+    def _create_table_sql() -> str:
+        return """
                 CREATE TABLE IF NOT EXISTS delivery_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
                     platform TEXT NOT NULL,
                     platform_job_id TEXT NOT NULL,
                     title TEXT NOT NULL,
@@ -35,19 +41,46 @@ class DeliveryRepository:
                     metadata_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    UNIQUE(platform, platform_job_id)
+                    UNIQUE(user_id, platform, platform_job_id)
                 )
                 """
-            )
 
-    def upsert(self, delivery: DeliveryRecordInput) -> DeliveryRecord:
+    def _upgrade_legacy_table(self, connection: Any) -> None:
+        """Rebuild pre-isolation tables whose UNIQUE constraint ignored user_id.
+
+        A legacy UNIQUE(platform, platform_job_id) would stop a second user from
+        recording their own delivery for the same posting, so the table has to be
+        recreated rather than merely extended with a column.
+        """
+        if not table_exists(connection, "delivery_records"):
+            return
+        if "user_id" in table_columns(connection, "delivery_records"):
+            return
+        connection.execute("ALTER TABLE delivery_records RENAME TO delivery_records_legacy")
+        connection.execute(self._create_table_sql())
+        connection.execute(
+            """
+            INSERT INTO delivery_records (
+                id, user_id, platform, platform_job_id, title, company_name, salary_text,
+                location, recruiter_name, status, decision, reason, greeting_text, detail,
+                applied_at, metadata_json, created_at, updated_at
+            )
+            SELECT id, 1, platform, platform_job_id, title, company_name, salary_text,
+                location, recruiter_name, status, decision, reason, greeting_text, detail,
+                applied_at, metadata_json, created_at, updated_at
+            FROM delivery_records_legacy
+            """
+        )
+        connection.execute("DROP TABLE delivery_records_legacy")
+
+    def upsert(self, delivery: DeliveryRecordInput, *, user_id: int = 1) -> DeliveryRecord:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             existing = connection.execute(
                 """SELECT salary_text FROM delivery_records
-                WHERE platform = ? AND platform_job_id = ?""",
-                (delivery.platform, delivery.platform_job_id),
+                WHERE platform = ? AND platform_job_id = ? AND user_id = ?""",
+                (delivery.platform, delivery.platform_job_id, user_id),
             ).fetchone()
             salary_text = prefer_salary_text(
                 existing[0] if existing is not None else None,
@@ -56,12 +89,12 @@ class DeliveryRepository:
             connection.execute(
                 """
                 INSERT INTO delivery_records (
-                    platform, platform_job_id, title, company_name, salary_text,
+                    user_id, platform, platform_job_id, title, company_name, salary_text,
                     location, recruiter_name, status, decision, reason,
                     greeting_text, detail, applied_at, metadata_json,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(platform, platform_job_id) DO UPDATE SET
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, platform, platform_job_id) DO UPDATE SET
                     title = excluded.title,
                     company_name = excluded.company_name,
                     salary_text = excluded.salary_text,
@@ -77,6 +110,7 @@ class DeliveryRepository:
                     updated_at = excluded.updated_at
                 """,
                 (
+                    user_id,
                     delivery.platform,
                     delivery.platform_job_id,
                     delivery.title,
@@ -99,31 +133,34 @@ class DeliveryRepository:
             row = connection.execute(
                 """
                 SELECT * FROM delivery_records
-                WHERE platform = ? AND platform_job_id = ?
+                WHERE platform = ? AND platform_job_id = ? AND user_id = ?
                 """,
-                (delivery.platform, delivery.platform_job_id),
+                (delivery.platform, delivery.platform_job_id, user_id),
             ).fetchone()
         if row is None:
             raise RuntimeError("delivery record was not persisted")
         return self._from_row(row)
 
-    def count(self) -> int:
+    def count(self, *, user_id: int = 1) -> int:
         self.initialize()
         with self._connect() as connection:
-            row = connection.execute("SELECT COUNT(*) FROM delivery_records").fetchone()
+            row = connection.execute(
+                "SELECT COUNT(*) FROM delivery_records WHERE user_id = ?", (user_id,)
+            ).fetchone()
         return int(row[0]) if row else 0
 
-    def list_recent(self, limit: int = 100) -> list[DeliveryRecord]:
+    def list_recent(self, limit: int = 100, *, user_id: int = 1) -> list[DeliveryRecord]:
         self.initialize()
         with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
                 SELECT * FROM delivery_records
+                WHERE user_id = ?
                 ORDER BY applied_at DESC, id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (user_id, limit),
             ).fetchall()
         return [self._from_row(row) for row in rows]
 
