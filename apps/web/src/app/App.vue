@@ -5,7 +5,11 @@
       <aside class="sidebar">
         <div class="brand">
           <span class="brand-mark">J</span>
-          <div><strong>Job Search</strong><span>Assistant</span></div>
+          <div>
+            <strong>Job Search</strong>
+            <span>Assistant</span>
+            <small class="brand-version">Web {{ appVersion }}</small>
+          </div>
         </div>
         <nav aria-label="主要导航">
           <a-button
@@ -52,6 +56,8 @@ const service = reactive({ online: false, text: '正在连接本地服务' })
 const isAdmin = ref(false)
 const username = ref('')
 const signingOut = ref(false)
+const rawAppVersion = String(import.meta.env.VITE_APP_VERSION || 'dev')
+const appVersion = rawAppVersion.startsWith('v') ? rawAppVersion : `v${rawAppVersion}`
 let authWatchTimer: number | undefined
 
 provide('refreshVersion', refreshVersion)

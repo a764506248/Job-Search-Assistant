@@ -26,7 +26,8 @@ button { color: inherit; }
 .brand-mark { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: #d8f2e6; color: var(--brand-deep); font: 800 21px/1 Georgia, serif; }
 .brand div { display: grid; line-height: 1.1; }
 .brand strong { font-size: 14px; letter-spacing: .02em; }
-.brand span:last-child { color: #9eb5aa; font-size: 12px; margin-top: 4px; }
+.brand div > span { color: #9eb5aa; font-size: 12px; margin-top: 4px; }
+.brand-version { margin-top: 7px; color: #6f8e80; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
 nav { display: grid; gap: 6px; }
 .nav-item { width: 100%; border: 0; border-radius: 10px; background: transparent; color: #adc1b8; padding: 11px 12px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .nav-item:hover:not(:disabled), .nav-item.active { background: rgba(218, 243, 231, .11); color: #fff; }
