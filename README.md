@@ -109,7 +109,7 @@ flowchart LR
 
 ## Chrome 扩展：统一协议预览版
 
-当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
+当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。推送 `v*` 版本标签时，同一工作流还会创建对应的 GitHub Release，并把 `job-search-assistant-chrome-mv3.zip` 上传到 Release Assets，供普通用户长期下载。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压 ZIP 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
 
 先构建并在 Chrome 中加载产物：
 
@@ -129,7 +129,9 @@ npm run build:extension
 
 “岗位采集间隔”控制扩展读取相邻两个岗位之间的等待时间，可设置为 `0–30` 秒，默认 `2` 秒。建议真实采集使用 `2–5` 秒；间隔越长，单批任务允许的执行时间也会同步增加。已经保存到本地的同一 BOSS 岗位会按平台岗位 ID 去重，不会重复新增快照。
 
-如果不需要本地构建，也可以进入 GitHub 仓库的 **Actions → Build Chrome Extension → Artifacts**，下载 `job-search-assistant-chrome-mv3`，解压 ZIP 后选择解压目录加载。
+如果不需要本地构建，普通用户应进入 [GitHub Releases](https://github.com/a764506248/Job-Search-Assistant/releases/latest)，在最新版本底部的 **Assets** 中下载 `job-search-assistant-chrome-mv3.zip`；也可以使用[最新版本直接下载链接](https://github.com/a764506248/Job-Search-Assistant/releases/latest/download/job-search-assistant-chrome-mv3.zip)。下载后解压 ZIP，再在 Chrome 中选择解压目录加载。
+
+开发测试构建仍可从仓库的 **Actions → Build Chrome Extension → 对应运行记录 → Artifacts** 下载 `job-search-assistant-chrome-mv3`。Actions Artifact 需要登录 GitHub 且默认只保留 30 天，不应作为面向普通用户的长期下载地址。
 
 控制台可以拖拽到页面其他位置；点击标题栏的 `−` 可折叠。配置保存在 Chrome 本地扩展存储中，重新打开 BOSS 页面后仍然生效。
 

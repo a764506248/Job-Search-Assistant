@@ -160,11 +160,13 @@ http://host.docker.internal:端口
 
 ## 4. 统一 Chrome 扩展
 
-### 4.1 从 GitHub Actions 下载
+### 4.1 从 GitHub Releases 下载
 
-当 push 包含 `apps/extension/**` 下的文件变更时，仓库会触发 `Build Chrome Extension` 工作流，构建 `@job-search-assistant/extension` 并上传品牌化 artifact：`job-search-assistant-chrome-mv3`。其他目录的修改不会触发扩展构建；也可以通过 `workflow_dispatch` 手动运行。下载 artifact 后，再解压其中的 `job-search-assistant-chrome-mv3.zip`；Chrome 应加载 ZIP 的解压目录，而不是 ZIP 文件本身。
+普通用户进入 [GitHub Releases](https://github.com/a764506248/Job-Search-Assistant/releases/latest)，展开最新版本底部的 **Assets**，下载 `job-search-assistant-chrome-mv3.zip`。也可以使用[最新版本直接下载链接](https://github.com/a764506248/Job-Search-Assistant/releases/latest/download/job-search-assistant-chrome-mv3.zip)。下载后解压 ZIP；Chrome 应加载 ZIP 的解压目录，而不是 ZIP 文件本身。
 
-下载路径：GitHub 仓库 **Actions → Build Chrome Extension → 对应运行记录 → Artifacts**。Actions artifact 默认保留 30 天，适合测试和阶段性交付；正式长期发布可在后续增加基于版本标签的 GitHub Release。
+推送 `v*` 版本标签时，`Build Chrome Extension` 工作流会构建扩展、创建同名 GitHub Release，并自动上传 ZIP 到 Release Assets。如果同名 Release 已存在，重新运行工作流会覆盖其中的扩展 ZIP，便于修复失败或重新发布。
+
+开发测试构建仍可从 GitHub 仓库 **Actions → Build Chrome Extension → 对应运行记录 → Artifacts** 下载 `job-search-assistant-chrome-mv3`。Actions Artifact 需要登录 GitHub 且默认保留 30 天，只适合测试和阶段性交付。
 
 ### 4.2 本地构建
 
