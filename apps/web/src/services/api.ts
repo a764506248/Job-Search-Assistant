@@ -53,6 +53,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const token = localStorage.getItem('jsa_access_token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(path, { headers })
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('jsa_access_token')
+      unauthorizedHandler?.()
+    }
+    throw new Error(`图片读取失败（${response.status}）`)
+  }
+  return response.blob()
+}
+
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
@@ -122,6 +137,7 @@ export const api = {
     return request<ResumeImportResult>('/v1/resumes/import', { method: 'POST', body })
   },
   confirmResume: (id: number) => request<ResumeConfirmationResult>(`/v1/resumes/${id}/confirm`, { method: 'POST' }),
+  resumePreviewImage: (id: number) => requestBlob(`/v1/resumes/${id}/preview-image`),
   setDefaultResumeImage: (id: number) => request<LibraryRecord>(`/v1/resumes/${id}/default-image`, { method: 'PUT' }),
   templates: () => request<{ items: ResumeTemplate[]; sampleData: Record<string, any> }>('/v1/resume-templates'),
 }

@@ -33,7 +33,10 @@
       <div v-else-if="!records.length" class="library-empty">还没有数据，请使用左侧表单添加第一条记录。</div>
       <div v-else class="record-grid">
         <article v-for="record in records" :key="record.id" class="record-card">
-          <div v-if="kind === 'resumes' && record.data.previewImageFile" class="resume-image-preview"><img :src="`/v1/resumes/${record.id}/preview-image`" :alt="`${record.name} 第一页预览`" /></div>
+          <div v-if="kind === 'resumes' && record.data.previewImageFile" class="resume-image-preview">
+            <img v-if="previewUrls[record.id]" :src="previewUrls[record.id]" :alt="`${record.name} 第一页预览`" />
+            <span v-else>正在读取第一页预览…</span>
+          </div>
           <div v-if="kind === 'resumes'" class="resume-confirmation-status" :class="record.data.confirmationStatus === 'pending' ? 'is-pending' : 'is-confirmed'">
             {{ record.data.confirmationStatus === 'pending' ? '待确认识别结果' : '已确认，可用于投递' }}
           </div>
@@ -67,7 +70,7 @@
 
 <script setup lang="ts">
 import { Modal, message } from 'ant-design-vue'
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref } from 'vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
 import type { LibraryRecord } from '../../types'
@@ -104,7 +107,27 @@ const editingId = ref<number | null>(null)
 const testingId = ref<number | null>(null)
 const confirmingId = ref<number | null>(null)
 const modelStatuses = reactive<Record<number, { ok: boolean; text: string }>>({})
+const previewUrls = reactive<Record<number, string>>({})
 const form = reactive<{ name: string; data: Record<string, any> }>({ name: '', data: {} })
+
+function clearPreviewUrls() {
+  Object.entries(previewUrls).forEach(([id, url]) => {
+    URL.revokeObjectURL(url)
+    delete previewUrls[Number(id)]
+  })
+}
+
+async function loadResumePreviews(items: LibraryRecord[]) {
+  clearPreviewUrls()
+  if (props.kind !== 'resumes') return
+  await Promise.all(items.filter(record => record.data.previewImageFile).map(async (record) => {
+    try {
+      previewUrls[record.id] = URL.createObjectURL(await api.resumePreviewImage(record.id))
+    } catch (error) {
+      message.error(`${record.name}：${(error as Error).message}`)
+    }
+  }))
+}
 
 function defaults() {
   return Object.fromEntries(props.fields.map((field) => [field.key, field.defaultValue || '']))
@@ -118,7 +141,10 @@ function resetForm() {
 
 async function reload() {
   loading.value = true
-  try { records.value = (await api.library(props.kind)).items }
+  try {
+    records.value = (await api.library(props.kind)).items
+    await loadResumePreviews(records.value)
+  }
   catch (error) { message.error((error as Error).message) }
   finally { loading.value = false }
 }
@@ -200,5 +226,6 @@ async function confirmResume(record: LibraryRecord) {
 
 resetForm()
 useRefresh(reload)
+onBeforeUnmount(clearPreviewUrls)
 defineExpose({ reload })
 </script>
