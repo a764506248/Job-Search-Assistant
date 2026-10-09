@@ -114,6 +114,24 @@ def test_runner_claim_is_atomic_and_action_is_idempotent(tmp_path) -> None:
     assert repository.report(run["id"])["actions"][0]["attempt_count"] == 1
 
 
+def test_stale_claimed_run_becomes_interrupted_and_releasable(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    run = repository.create_run({"keywords": ["AI Agent"]}, 1)
+    repository.transition(run["id"], "validating")
+    repository.transition(run["id"], "ready")
+    repository.transition(run["id"], "running")
+    assert repository.claim_next_run("runner-a") is not None
+
+    interrupted = repository.interrupt_stale_runs(max_age_seconds=-1)
+
+    recovered = repository.get_run(run["id"])
+    assert interrupted == [run["id"]]
+    assert recovered["status"] == "interrupted"
+    assert recovered["runner_id"] is None
+    assert "心跳超时" in recovered["stop_reason"]
+    assert repository.list_events(run["id"])[-1]["payload"]["to"] == "interrupted"
+
+
 def test_runner_heartbeat_reports_worker_online(tmp_path) -> None:
     repository = AutomationRepository(tmp_path / "jobs.sqlite3")
 

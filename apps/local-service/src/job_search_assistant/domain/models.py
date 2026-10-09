@@ -180,7 +180,7 @@ class AutomationHeartbeatRequest(ApiModel):
 
 
 class AutomationRunnerFinishRequest(AutomationHeartbeatRequest):
-    status: Literal["completed", "failed", "blocked", "cancelled"]
+    status: Literal["completed", "failed", "blocked", "cancelled", "interrupted"]
     reason: str | None = Field(default=None, max_length=2000)
 
 

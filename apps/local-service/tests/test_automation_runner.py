@@ -1,4 +1,7 @@
+import urllib.error
 from typing import Any
+
+import pytest
 
 from job_search_assistant.automation.runner import execute_run, run_loop, wait_until_runnable
 
@@ -29,6 +32,27 @@ def test_runner_registers_heartbeat_before_claiming() -> None:
         "/v1/automation/runner/heartbeat",
         "/v1/automation/runner/claim",
     ]
+
+
+def test_runner_marks_claimed_run_interrupted_after_api_failure() -> None:
+    class FailingApi(FakeApi):
+        def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append((path, body))
+            if path == "/v1/automation/runner/claim":
+                claimed, self.run = self.run, None
+                return {"run": claimed, "approvalToken": "approval"}
+            if path.endswith("/browser-action"):
+                raise urllib.error.HTTPError(path, 500, "server error", {}, None)
+            return {}
+
+    api = FailingApi(planned_run())
+
+    with pytest.raises(SystemExit):
+        run_loop(api, "compose-runner", once=True)
+
+    finish = next(body for path, body in api.calls if path.endswith("/runner-finish"))
+    assert finish["status"] == "interrupted"
+    assert "500" in finish["reason"]
 
 
 def test_runner_blocks_empty_plan_without_browser_action() -> None:

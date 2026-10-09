@@ -77,6 +77,7 @@ def browser_action(
 ) -> dict[str, Any]:
     wait_until_runnable(api, run_id, runner_id)
     api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
+    api.post(f"/v1/automation/runs/{run_id}/heartbeat", {"runnerId": runner_id})
     return api.post(
         f"/v1/automation/runs/{run_id}/browser-action",
         {
@@ -321,16 +322,32 @@ def run_loop(
     poll_seconds: float = 2.0,
 ) -> None:
     while True:
+        claimed_run_id: int | None = None
         try:
             api.post("/v1/automation/runner/heartbeat", {"runnerId": runner_id})
             claimed = api.post("/v1/automation/runner/claim", {"runnerId": runner_id})
             run = claimed.get("run")
             if run:
+                claimed_run_id = int(run["id"])
                 run["approvalToken"] = claimed.get("approvalToken")
                 execute_run(api, run, runner_id, dry_run)
             elif once:
                 return
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            if claimed_run_id is not None:
+                try:
+                    finish_run(
+                        api,
+                        claimed_run_id,
+                        runner_id,
+                        "interrupted",
+                        f"执行器异常中断：{error}",
+                    )
+                except (urllib.error.URLError, TimeoutError, ValueError) as finish_error:
+                    print(
+                        f"runner could not mark run {claimed_run_id} interrupted: {finish_error}",
+                        flush=True,
+                    )
             print(f"runner error: {error}", flush=True)
             if once:
                 raise SystemExit(1) from error

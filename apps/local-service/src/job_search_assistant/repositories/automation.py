@@ -3,11 +3,10 @@ import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
-from ..database import db_connect
 from typing import Any
 
 from ..automation import AutomationRunStatus, ensure_transition
+from ..database import db_connect
 from ..domain.salary import normalize_salary_text
 
 
@@ -256,6 +255,7 @@ class AutomationRepository:
     def claim_next_run(self, runner_id: str) -> dict[str, Any] | None:
         """Atomically claim the oldest runnable task for one host runner."""
         self.initialize()
+        self.interrupt_stale_runs()
         now = datetime.now(UTC).isoformat()
         with db_connect(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -287,6 +287,49 @@ class AutomationRepository:
         claimed = self.get_run(run_id)
         claimed["approval_token"] = self._approval_token(run_id)
         return claimed
+
+    def interrupt_stale_runs(self, max_age_seconds: int = 180) -> list[int]:
+        """Release runs whose owning worker stopped updating the run heartbeat."""
+        self.initialize()
+        now = datetime.now(UTC)
+        cutoff = (now - timedelta(seconds=max_age_seconds)).isoformat()
+        interrupted: list[int] = []
+        reason = "执行器任务心跳超时，任务已中断，可重新执行"
+        with db_connect(self.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT id, status, runner_id FROM automation_runs
+                WHERE status IN ('running', 'paused', 'stopping')
+                AND runner_id IS NOT NULL
+                AND heartbeat_at IS NOT NULL
+                AND heartbeat_at < ?""",
+                (cutoff,),
+            ).fetchall()
+            for row in rows:
+                run_id = int(row["id"])
+                updated = connection.execute(
+                    """UPDATE automation_runs
+                    SET status = 'interrupted', runner_id = NULL,
+                        stop_reason = ?, updated_at = ?
+                    WHERE id = ? AND status IN ('running', 'paused', 'stopping')
+                    AND runner_id = ? AND heartbeat_at < ?""",
+                    (reason, now.isoformat(), run_id, str(row["runner_id"]), cutoff),
+                )
+                if updated.rowcount != 1:
+                    continue
+                interrupted.append(run_id)
+                self._append_event(
+                    connection,
+                    run_id,
+                    "status-changed",
+                    "warning",
+                    {
+                        "from": str(row["status"]),
+                        "to": "interrupted",
+                        "reason": reason,
+                    },
+                )
+        return interrupted
 
     def runner_heartbeat(self, runner_id: str) -> dict[str, Any]:
         self.initialize()
