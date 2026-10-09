@@ -438,8 +438,9 @@ td small { color: var(--muted); }
 .automation-runs article { padding: 15px 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; cursor: pointer; }
 .automation-runs article.selected { background: var(--brand-soft); }
 .automation-runs article > div:first-child { display: grid; gap: 5px; }
-.automation-runs article span, .automation-events .panel-heading span { color: var(--muted); font-size: 11px; }
-.automation-actions { display: flex; gap: 5px; }
+.automation-runs article > div:first-child > span,
+.automation-event-controls > span:not(.automation-retry-action) { color: var(--muted); font-size: 11px; }
+.automation-actions { display: flex; align-items: center; align-self: center; flex: 0 0 auto; gap: 5px; }
 .automation-blocker { margin: 14px 18px 0; padding: 10px; border-radius: 8px; background: #fff1f1; color: var(--danger); font-size: 12px; }
 .automation-blocker.neutral { background: #f2f7f4; color: var(--muted); }
 .automation-event-controls { display: flex; align-items: center; gap: 7px; }

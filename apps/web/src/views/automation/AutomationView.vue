@@ -714,6 +714,10 @@ useRefresh(load)
   box-shadow: 0 2px 0 rgb(10 74 57 / 18%);
 }
 
+.automation-retry-action :deep(.ant-btn-primary > span) {
+  color: inherit;
+}
+
 .automation-retry-action :deep(.ant-btn-primary:not(:disabled):hover),
 .automation-retry-action :deep(.ant-btn-primary:not(:disabled):focus-visible) {
   border-color: #0f5745;
@@ -723,8 +727,8 @@ useRefresh(load)
 
 .automation-retry-action :deep(.ant-btn-primary:disabled),
 .automation-retry-action :deep(.ant-btn-primary.ant-btn-loading) {
-  border-color: #75aa9b;
-  background: #75aa9b;
+  border-color: #3f7f6c;
+  background: #3f7f6c;
   color: #fff;
   opacity: 1;
   box-shadow: none;
