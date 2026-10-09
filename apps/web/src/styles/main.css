@@ -609,6 +609,10 @@ td small { color: var(--muted); }
 .range-switch { display: flex; gap: 8px; }
 .metrics-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .metrics-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.metrics-split > .panel { min-width: 0; display: flex; flex-direction: column; }
+.metrics-split .breakdown-list { width: 100%; padding: 4px 22px 22px; }
+.metrics-split .empty-state { flex: 1; display: grid; align-content: center; }
+.metrics-recent-panel .empty-state { padding-block: 24px 28px; }
 .metrics-page .table-panel table { min-width: 0; }
 /* 注意：工作台根节点同时带 .view.active-view，其 display 声明特异性更高，
    因此这里必须用 .view.page-stack 才能让栅格间距真正生效。 */
@@ -621,7 +625,7 @@ td small { color: var(--muted); }
 .metrics-page .table-panel tfoot td { border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface-soft); font-weight: 700; }
 .weekday { color: #98a49e; font-size: 12px; }
 .breakdown-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
-.breakdown-list li { display: grid; grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) 38px; align-items: center; gap: 12px; }
+.breakdown-list li { min-width: 0; display: grid; grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) 38px; align-items: center; gap: 12px; }
 .breakdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .breakdown-bar { height: 9px; border-radius: 999px; background: #eef2ef; overflow: hidden; }
 .breakdown-bar i { display: block; height: 100%; border-radius: 999px; background: var(--brand); }

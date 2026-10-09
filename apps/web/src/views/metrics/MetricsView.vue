@@ -70,7 +70,7 @@
         <div class="panel-heading"><div><p class="eyebrow">TOP</p><h2>{{ deliveries.length ? '投递最多的公司' : '采集最多的公司' }}</h2></div></div>
         <ul v-if="topCompanies.length" class="breakdown-list">
           <li v-for="item in topCompanies" :key="item.name">
-            <span class="breakdown-label">{{ item.name }}</span>
+            <span class="breakdown-label" :title="item.name">{{ item.name }}</span>
             <span class="breakdown-bar"><i :style="{ width: breakdownWidth(item.count) }"></i></span>
             <span class="breakdown-count">{{ item.count }}</span>
           </li>
@@ -79,7 +79,7 @@
       </section>
     </div>
 
-    <section class="panel">
+    <section class="panel metrics-recent-panel">
       <div class="panel-heading"><div><p class="eyebrow">RECENT</p><h2>最近投递明细</h2></div></div>
       <div v-if="!recent.length" class="empty-state"><span class="empty-icon">▶</span><h3>还没有投递记录</h3><p>投递明细会自动同步到指标页。</p></div>
       <div v-else class="table-panel">
