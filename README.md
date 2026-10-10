@@ -109,6 +109,8 @@ flowchart LR
 
 ## Chrome 扩展：统一协议预览版
 
+> 第一次安装、不熟悉 Chrome 开发者模式的用户，请直接阅读[《Chrome 插件下载安装指南（新手版）》](docs/CHROME_EXTENSION_INSTALL.md)。该文档从下载 ZIP、解压、加载、配对到验证逐步说明，并列出了常见错误。
+
 当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。推送 `v*` 版本标签时，同一工作流还会创建对应的 GitHub Release，并把 `job-search-assistant-chrome-mv3.zip` 上传到 Release Assets，供普通用户长期下载。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压 ZIP 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
 
 先构建并在 Chrome 中加载产物：

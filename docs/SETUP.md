@@ -160,6 +160,8 @@ http://host.docker.internal:端口
 
 ## 4. 统一 Chrome 扩展
 
+如果是第一次安装 Chrome 插件，请优先按[《Chrome 插件下载安装指南（新手版）》](CHROME_EXTENSION_INSTALL.md)操作。本节保留开发构建和技术细节。
+
 ### 4.1 从 GitHub Releases 下载
 
 普通用户进入 [GitHub Releases](https://github.com/a764506248/Job-Search-Assistant/releases/latest)，展开最新版本底部的 **Assets**，下载 `job-search-assistant-chrome-mv3.zip`。也可以使用[最新版本直接下载链接](https://github.com/a764506248/Job-Search-Assistant/releases/latest/download/job-search-assistant-chrome-mv3.zip)。下载后解压 ZIP；Chrome 应加载 ZIP 的解压目录，而不是 ZIP 文件本身。
