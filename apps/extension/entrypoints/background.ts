@@ -154,7 +154,11 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       return { requestId: envelope.requestId, ...result }
     }
     catch (error) {
-      if (isMissingMessageReceiver(error) && canReloadAndRetryAction(envelope.action) && tab.url) {
+      if (
+        (isMissingMessageReceiver(error) || isClosedMessageChannel(error))
+        && canReloadAndRetryAction(envelope.action)
+        && tab.url
+      ) {
         const recoveryDeadlineAt = Date.now() + Math.max(500, envelope.deadlineMs - 500)
         const result = await reloadContentScriptAndRetryOnce(envelope.action, {
           reloadAndWaitForComplete: () => reloadTabAndWaitForReady(

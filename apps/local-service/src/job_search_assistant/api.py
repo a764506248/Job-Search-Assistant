@@ -172,6 +172,17 @@ def browser_protocol_error_message(error: BrowserProtocolError, action: str) -> 
     return message
 
 
+def is_retryable_collection_channel_error(error: object) -> bool:
+    return bool(
+        re.search(
+            r"back/forward cache|message channel (?:is )?closed|"
+            r"receiving end does not exist|could not establish connection",
+            str(error),
+            re.IGNORECASE,
+        )
+    )
+
+
 def create_router(
     job_repository: JobRepository,
     library_repository: LibraryRepository,
@@ -2536,6 +2547,27 @@ def create_router(
                                     deadline_ms=batch_deadline_ms,
                                 )
                             )
+                            if (
+                                collection.status != "success"
+                                and is_retryable_collection_channel_error(
+                                    collection.error or ""
+                                )
+                                and batch_attempt <= COLLECTION_BATCH_RETRY_COUNT
+                            ):
+                                automation_repository.append_event(
+                                    run_id,
+                                    "collection-batch-retrying",
+                                    "warning",
+                                    {
+                                        "phase": "collecting",
+                                        "keyword": keyword,
+                                        "batchNumber": batch_number,
+                                        "attempt": batch_attempt + 1,
+                                        "error": collection.error,
+                                    },
+                                )
+                                collection = None
+                                continue
                             collection_error = None
                             break
                         except BrowserProtocolError as error:

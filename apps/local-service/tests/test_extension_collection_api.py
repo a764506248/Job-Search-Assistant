@@ -309,6 +309,48 @@ class TimeoutOnceHub(FakeConnectedBrowserHub):
         )
 
 
+class BackForwardCacheOnceHub(FakeConnectedBrowserHub):
+    def __init__(self, jobs: list[dict[str, object]]) -> None:
+        super().__init__(jobs)
+        self.failed_once = False
+
+    async def dispatch(
+        self,
+        *,
+        run_id: int,
+        user_id: int,
+        action: str,
+        payload: dict[str, object],
+        deadline_ms: int,
+    ) -> dict[str, object]:
+        if action == "collect_jobs" and not self.failed_once:
+            self.failed_once = True
+            self.calls.append(
+                {
+                    "runId": run_id,
+                    "action": action,
+                    "payload": payload,
+                    "deadlineMs": deadline_ms,
+                }
+            )
+            return {
+                "requestId": f"collect-{run_id}-bfcache",
+                "status": "blocked",
+                "evidence": {},
+                "error": (
+                    "The page keeping the extension port is moved into "
+                    "back/forward cache, so the message channel is closed."
+                ),
+            }
+        return await super().dispatch(
+            run_id=run_id,
+            user_id=user_id,
+            action=action,
+            payload=payload,
+            deadline_ms=deadline_ms,
+        )
+
+
 def collection_client(tmp_path, hub: FakeConnectedBrowserHub) -> TestClient:
     return TestClient(
         create_app(
@@ -798,6 +840,27 @@ def test_collection_retries_a_transient_batch_timeout(tmp_path) -> None:
         event for event in events if event["eventType"] == "collection-batch-retrying"
     )
     assert retry_event["payload"]["attempt"] == 2
+
+
+def test_collection_retries_a_back_forward_cache_channel_closure(tmp_path) -> None:
+    hub = BackForwardCacheOnceHub([captured_job("recovered-job", "恢复公司")])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=1)
+
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
+
+    assert collection["status"] == "ready"
+    assert collection["collectedCount"] == 1
+    assert collection["browserErrors"] == []
+    assert len(collect_calls) == 2
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    retry_event = next(
+        event for event in events if event["eventType"] == "collection-batch-retrying"
+    )
+    assert retry_event["payload"]["attempt"] == 2
+    assert "back/forward cache" in retry_event["payload"]["error"]
 
 
 def test_collection_timeout_without_results_fails_with_chinese_error(tmp_path) -> None:

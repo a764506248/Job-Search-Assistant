@@ -9,6 +9,12 @@ describe('isClosedMessageChannel', () => {
     ))).toBe(true)
   })
 
+  it('recognizes a content script moved into the back-forward cache', () => {
+    expect(isClosedMessageChannel(new Error(
+      'The page keeping the extension port is moved into back/forward cache, so the message channel is closed.',
+    ))).toBe(true)
+  })
+
   it('recognizes a content script that is still loading after navigation', () => {
     const error = 'Could not establish connection. Receiving end does not exist.'
     expect(isClosedMessageChannel(error)).toBe(true)
