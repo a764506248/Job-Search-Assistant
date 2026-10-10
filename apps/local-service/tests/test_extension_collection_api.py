@@ -139,6 +139,9 @@ class FakeConnectedBrowserHub:
     def connected_user_id(self) -> int:
         return 1
 
+    def connected_user_ids(self) -> tuple[int, ...]:
+        return (1,)
+
     async def dispatch(
         self,
         *,

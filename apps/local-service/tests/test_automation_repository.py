@@ -146,6 +146,24 @@ def test_runner_claims_only_runs_owned_by_connected_user(tmp_path) -> None:
     assert repository.get_run(first_user_run["id"])["runner_id"] is None
 
 
+def test_runner_claims_oldest_run_across_connected_users(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    first = repository.create_run({}, 1, user_id=1)
+    second = repository.create_run({}, 1, user_id=2)
+    third = repository.create_run({}, 1, user_id=3)
+    for run in (first, second, third):
+        repository.transition(run["id"], "validating")
+        repository.transition(run["id"], "ready")
+        repository.transition(run["id"], "running")
+
+    claimed = repository.claim_next_run_for_users("runner-a", user_ids=(2, 3))
+
+    assert claimed is not None
+    assert claimed["id"] == second["id"]
+    assert claimed["user_id"] == 2
+    assert repository.get_run(first["id"])["runner_id"] is None
+
+
 def test_stale_claimed_run_becomes_interrupted_and_releasable(tmp_path) -> None:
     repository = AutomationRepository(tmp_path / "jobs.sqlite3")
     run = repository.create_run({"keywords": ["AI Agent"]}, 1)

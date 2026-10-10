@@ -260,6 +260,15 @@ class AutomationRepository:
 
     def claim_next_run(self, runner_id: str, *, user_id: int) -> dict[str, Any] | None:
         """Atomically claim the oldest runnable task owned by the connected user."""
+        return self.claim_next_run_for_users(runner_id, user_ids=(user_id,))
+
+    def claim_next_run_for_users(
+        self, runner_id: str, *, user_ids: tuple[int, ...]
+    ) -> dict[str, Any] | None:
+        """Claim the oldest task whose owner has a connected browser extension."""
+        scoped_user_ids = tuple(sorted({int(item) for item in user_ids if int(item) > 0}))
+        if not scoped_user_ids:
+            return None
         self.initialize()
         self.interrupt_stale_runs()
         now = datetime.now(UTC).isoformat()
@@ -267,15 +276,17 @@ class AutomationRepository:
             connection.execute("BEGIN IMMEDIATE")
             connection.row_factory = sqlite3.Row
             self._upsert_runner(connection, runner_id, now)
-            claim_sql = """SELECT id FROM automation_runs
-                WHERE status = 'running' AND runner_id IS NULL AND user_id = ?
-                ORDER BY id LIMIT 1"""
+            placeholders = ", ".join("?" for _ in scoped_user_ids)
+            claim_sql = f"""SELECT id, user_id FROM automation_runs
+                WHERE status = 'running' AND runner_id IS NULL
+                AND user_id IN ({placeholders}) ORDER BY id LIMIT 1"""
             if getattr(connection, "is_postgres", False):
                 claim_sql += " FOR UPDATE SKIP LOCKED"
-            row = connection.execute(claim_sql, (user_id,)).fetchone()
+            row = connection.execute(claim_sql, scoped_user_ids).fetchone()
             if row is None:
                 return None
             run_id = int(row["id"])
+            user_id = int(row["user_id"])
             updated = connection.execute(
                 """UPDATE automation_runs SET runner_id = ?, heartbeat_at = ?, updated_at = ?
                 WHERE id = ? AND runner_id IS NULL AND user_id = ?""",

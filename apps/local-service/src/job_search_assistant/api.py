@@ -983,7 +983,7 @@ def create_router(
             )
             while True:
                 response = await websocket.receive_json()
-                browser_hub.resolve(response)
+                browser_hub.resolve(response, owner_id)
         except WebSocketDisconnect:
             pass
         finally:
@@ -1297,13 +1297,8 @@ def create_router(
         request: AutomationHeartbeatRequest, http_request: Request,
     ) -> AutomationRunnerClaimResponse:
         require_runner(http_request)
-        extension_user_id = browser_hub.connected_user_id()
-        run = (
-            automation_repository.claim_next_run(
-                request.runner_id, user_id=extension_user_id
-            )
-            if extension_user_id is not None
-            else None
+        run = automation_repository.claim_next_run_for_users(
+            request.runner_id, user_ids=browser_hub.connected_user_ids()
         )
         approval_token = run.pop("approval_token", None) if run else None
         return AutomationRunnerClaimResponse(
