@@ -218,8 +218,9 @@ class AutomationRepository:
             "ready": "collection-finished",
             "no_matches": "analysis-finished",
             "failed": "collection-failed",
+            "cancelled": "collection-cancelled",
         }.get(state, "collection-updated")
-        level = "error" if state == "failed" else "info"
+        level = "error" if state == "failed" else "warning" if state == "cancelled" else "info"
         now = datetime.now(UTC).isoformat()
         with db_connect(self.database_path) as connection:
             connection.execute(

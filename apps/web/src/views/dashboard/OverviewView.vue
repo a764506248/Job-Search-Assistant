@@ -5,6 +5,15 @@
       <div class="privacy-stamp"><span>LOCAL</span><small>不上传产品服务器</small></div>
     </div>
 
+    <section class="next-action-card" :class="{ ready: nextStep.ready }">
+      <div>
+        <span>{{ nextStep.ready ? '下一步' : '首次使用还差一步' }}</span>
+        <h2>{{ nextStep.title }}</h2>
+        <p>{{ nextStep.description }}</p>
+      </div>
+      <a-button type="primary" @click="router.push(nextStep.path)">{{ nextStep.action }} →</a-button>
+    </section>
+
     <div class="metric-grid" aria-label="数据概览">
       <article class="metric-card">
         <span>职位快照</span>
@@ -102,14 +111,42 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { api } from '../../services/api'
 import { useMetrics, isSuccessStatus, deliveryStatusText } from '../../composables/useMetrics'
 import { useRefresh } from '../../composables/useRefresh'
 import { formatSalary, formatTime } from '../../utils/format'
+import type { SetupStatus } from '../../types'
 
 const router = useRouter()
 const { loading, jobs, summary, daily, recentDeliveries, load } = useMetrics()
+const setup = ref<SetupStatus>()
+
+const nextStep = computed(() => {
+  const blocker = setup.value?.checks.find(check => check.blocking && check.status !== 'ready')
+  if (blocker) return {
+    ready: false,
+    title: blocker.label,
+    description: blocker.message,
+    action: blocker.actionLabel || '立即处理',
+    path: blocker.actionPath || '/setup',
+  }
+  if (!summary.value.deliveredTotal) return {
+    ready: true,
+    title: '完成第一次安全试投',
+    description: '建议先分析少量职位，只确认并投递 1 个，检查身份、企业、问候语和简历是否正确。',
+    action: '开始试投',
+    path: '/automation',
+  }
+  return {
+    ready: true,
+    title: '继续处理今天的求职计划',
+    description: '创建任务后会先采集和分析，只有你确认的企业才会进入投递。',
+    action: '创建任务',
+    path: '/automation',
+  }
+})
 
 const week = computed(() => daily(7))
 const weekHasData = computed(() =>
@@ -132,5 +169,43 @@ function statusText(status: string) {
   return deliveryStatusText[status] || status
 }
 
-useRefresh(load)
+async function loadOverview() {
+  const [, setupResult] = await Promise.allSettled([load(), api.setupStatus()])
+  if (setupResult.status === 'fulfilled') setup.value = setupResult.value
+}
+
+useRefresh(loadOverview)
 </script>
+
+<style scoped>
+.next-action-card {
+  padding: 20px 24px;
+  border: 1px solid #edc9a0;
+  border-radius: 14px;
+  background: #fff8ed;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.next-action-card.ready {
+  border-color: #b4dccc;
+  background: #f3faf7;
+}
+
+.next-action-card span {
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.next-action-card h2 { margin: 5px 0; }
+.next-action-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+.next-action-card .ant-btn { flex: 0 0 auto; }
+
+@media (max-width: 660px) {
+  .next-action-card { align-items: stretch; flex-direction: column; }
+}
+</style>

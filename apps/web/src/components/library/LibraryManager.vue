@@ -31,14 +31,27 @@
       <div class="section-title"><div><p class="eyebrow">{{ listEyebrow }}</p><h2>{{ listTitle }}</h2></div><span class="library-count">{{ records.length }} 条记录</span></div>
       <div v-if="loading" class="library-empty">正在读取本地数据…</div>
       <div v-else-if="!records.length" class="library-empty">还没有数据，请使用左侧表单添加第一条记录。</div>
-      <div v-else class="record-grid">
-        <article v-for="record in records" :key="record.id" class="record-card">
-          <div v-if="kind === 'resumes' && record.data.previewImageFile" class="resume-image-preview">
-            <img v-if="previewUrls[record.id]" :src="previewUrls[record.id]" :alt="`${record.name} 第一页预览`" />
-            <span v-else>正在读取第一页预览…</span>
-          </div>
-          <div v-if="kind === 'resumes'" class="resume-confirmation-status" :class="record.data.confirmationStatus === 'pending' ? 'is-pending' : 'is-confirmed'">
-            {{ record.data.confirmationStatus === 'pending' ? '待确认识别结果' : '已确认，可用于投递' }}
+      <div v-else class="record-grid" :class="{ 'resume-record-list': kind === 'resumes' }">
+        <article v-for="record in records" :key="record.id" class="record-card" :class="{ 'resume-record-card': kind === 'resumes' }">
+          <div v-if="kind === 'resumes'" class="resume-record-summary">
+            <div class="resume-image-preview" :class="{ 'has-preview': record.data.previewImageFile }">
+              <img v-if="record.data.previewImageFile && previewUrls[record.id]" :src="previewUrls[record.id]" :alt="`${record.name} 第一页预览`" />
+              <span v-else-if="record.data.previewImageFile" class="resume-preview-loading">读取中…</span>
+              <span v-else class="resume-file-placeholder" aria-hidden="true"><strong>{{ String(record.data.format || 'PDF').slice(0, 4).toUpperCase() }}</strong></span>
+            </div>
+            <div class="resume-record-copy">
+              <div class="resume-confirmation-status" :class="record.data.confirmationStatus === 'pending' ? 'is-pending' : 'is-confirmed'">
+                {{ record.data.confirmationStatus === 'pending' ? '待确认识别结果' : '已确认，可用于投递' }}
+              </div>
+              <h3>{{ record.name }}</h3>
+              <p>{{ display(record) }}</p>
+            </div>
+            <div class="record-actions resume-record-actions">
+              <a-button v-if="record.data.confirmationStatus === 'pending'" size="small" type="primary" :loading="confirmingId === record.id" @click="confirmResume(record)">确认并写入知识库</a-button>
+              <a-button v-if="record.data.previewImageFile && record.data.confirmationStatus !== 'pending'" size="small" :type="record.data.isDefaultImage ? 'primary' : 'default'" :disabled="Boolean(record.data.isDefaultImage)" @click="setDefaultImage(record)">{{ record.data.isDefaultImage ? '默认投递图片' : '设为默认图片' }}</a-button>
+              <a-button size="small" @click="edit(record)">编辑</a-button>
+              <a-button size="small" danger @click="confirmDelete(record)">删除</a-button>
+            </div>
           </div>
           <div v-if="kind === 'resumes' && record.data.confirmationStatus === 'pending'" class="resume-confirmation-preview">
             <div><span>识别姓名</span><strong>{{ record.data.stagedProfile?.displayName || '未识别' }}</strong></div>
@@ -50,7 +63,7 @@
               <pre>{{ String(record.data.rawText || '').slice(0, 1200) }}</pre>
             </details>
           </div>
-          <div class="record-card-head">
+          <div v-if="kind !== 'resumes'" class="record-card-head">
             <div><h3>{{ record.name }}</h3><p>{{ display(record) }}</p></div>
             <div class="record-actions">
               <a-button v-if="kind === 'resumes' && record.data.confirmationStatus === 'pending'" size="small" type="primary" :loading="confirmingId === record.id" @click="confirmResume(record)">确认并写入知识库</a-button>

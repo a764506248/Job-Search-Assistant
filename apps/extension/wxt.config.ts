@@ -4,8 +4,8 @@ export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   manifest: {
     name: 'Job Search Assistant',
-    version: '0.4.13',
-    version_name: '0.4.13-bfcache-collection-recovery',
+    version: '0.4.15',
+    version_name: '0.4.15-setup-and-collection-controls',
     description: '连接本地 Job Search Assistant，采集 BOSS 职位并安全执行已确认动作',
     permissions: ['storage', 'tabs'],
     host_permissions: ['https://www.zhipin.com/*', 'http://127.0.0.1/*', 'http://*/*', 'https://*/*'],

@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -134,7 +135,7 @@ from .resume_pdf import build_resume_pdf
 from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL_ID
 
 logger = logging.getLogger("job_search_assistant.client")
-MIN_COLLECTION_EXTENSION_VERSION = (0, 4, 11)
+MIN_COLLECTION_EXTENSION_VERSION = (0, 4, 15)
 COLLECTION_BATCH_SIZE = 5
 COLLECTION_BATCH_DEADLINE_MS = 60_000
 COLLECTION_BATCH_RETRY_COUNT = 1
@@ -153,6 +154,11 @@ def extension_supports_collection(version: object) -> bool:
     parts = [int(value) for value in re.findall(r"\d+", str(version))[:3]]
     parts.extend([0] * (3 - len(parts)))
     return tuple(parts) >= MIN_COLLECTION_EXTENSION_VERSION
+
+
+def normalized_person_name(value: object) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"[\s·•._-]+", "", normalized).casefold()
 
 
 def browser_protocol_error_message(error: BrowserProtocolError, action: str) -> str:
@@ -206,6 +212,16 @@ def create_router(
     collection_lock = asyncio.Lock()
     scheduled_collection_run_ids: set[int] = set()
     collection_schedule_lock = Lock()
+    collection_tasks: dict[int, asyncio.Task[None]] = {}
+
+    class CollectionCancelled(RuntimeError):
+        """Raised when a user stops a draft run during collection or analysis."""
+
+    def ensure_collection_active(run_id: int) -> None:
+        run = automation_run(run_id)
+        collection = run.config_snapshot.get("collection", {})
+        if isinstance(collection, dict) and collection.get("status") == "cancelled":
+            raise CollectionCancelled(f"collection cancelled for run {run_id}")
 
     def current_user(request: Request) -> dict | None:
         authorization = request.headers.get("Authorization", "")
@@ -637,7 +653,7 @@ def create_router(
                     if unified_extension_ready
                     else (
                         f"当前扩展 v{extension_version} 不支持当前自动投递协议，"
-                        "请重新加载 v0.4.11 或更高版本"
+                        "请重新加载 v0.4.15 或更高版本"
                         if browser_connected
                         else "统一 Chrome 扩展未连接；无需安装 Kimi WebBridge"
                     )
@@ -2117,6 +2133,8 @@ def create_router(
         if collection_state == "ready":
             return run
         if collection_is_scheduled(run_id):
+            if collection_state == "cancelled":
+                raise HTTPException(status_code=409, detail="采集任务正在停止，请稍候再重新采集")
             return run
         previous_attempt_id = (
             int(collection.get("attemptId", 0) or 0)
@@ -2162,10 +2180,42 @@ def create_router(
         schedule_automation_collection(run_id, background_tasks)
         return queued
 
+    @router.post("/automation/runs/{run_id}/collection/stop", response_model=AutomationRun)
+    async def stop_automation_collection(run_id: int, http_request: Request) -> AutomationRun:
+        run, _user_id = require_owned_run(run_id, http_request)
+        if run.status != "draft":
+            raise HTTPException(status_code=409, detail="当前任务已进入投递阶段，不能中断采集")
+        collection = run.config_snapshot.get("collection", {})
+        state = str(collection.get("status", "pending")) if isinstance(collection, dict) else "pending"
+        if state == "cancelled":
+            return run
+        if state not in {"pending", "collecting"}:
+            raise HTTPException(status_code=409, detail="当前任务没有正在执行的采集")
+        stopped = automation_repository.update_collection(
+            run_id,
+            "cancelled",
+            details={
+                "phase": "cancelled",
+                "currentKeyword": None,
+                "cancelledAt": datetime.now(UTC).isoformat(),
+                "message": "用户已中断本次职位采集",
+                "error": None,
+            },
+        )
+        active_task = collection_tasks.get(run_id)
+        if active_task is not None and active_task is not asyncio.current_task():
+            active_task.cancel()
+        return AutomationRun.model_validate(stopped)
+
     async def run_automation_collection_safely(run_id: int) -> None:
         """Execute an automatically queued pipeline and persist every failure."""
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            collection_tasks[run_id] = current_task
         try:
             await collect_and_analyze_automation_jobs(run_id)
+        except CollectionCancelled:
+            logger.info("automation collection cancelled run=%s", run_id)
         except HTTPException as error:
             logger.warning(
                 "automation collection failed run=%s status=%s: %s",
@@ -2200,6 +2250,8 @@ def create_router(
             except (HTTPException, KeyError, ValueError):
                 logger.exception("failed to persist collection crash run=%s", run_id)
         finally:
+            if collection_tasks.get(run_id) is current_task:
+                collection_tasks.pop(run_id, None)
             with collection_schedule_lock:
                 scheduled_collection_run_ids.discard(run_id)
 
@@ -2284,7 +2336,7 @@ def create_router(
             version = browser_state.get("extensionVersion") or "未知"
             reason = (
                 f"当前扩展 v{version} 不支持当前自动投递协议，"
-                        "请重新加载 v0.4.11 或更高版本"
+                        "请重新加载 v0.4.15 或更高版本"
             )
             automation_repository.update_collection(
                 run_id,
@@ -2338,6 +2390,7 @@ def create_router(
         exhausted_without_new_jobs = False
 
         async with collection_lock:
+            ensure_collection_active(run_id)
             try:
                 session = BrowserActionResponse.model_validate(
                     await browser_hub.dispatch(
@@ -2367,6 +2420,7 @@ def create_router(
                 )
                 raise HTTPException(status_code=409, detail=reason) from error
 
+            ensure_collection_active(run_id)
             logged_in = session.evidence.get("loggedIn")
             if session.status != "success" or logged_in is not True:
                 if logged_in is False:
@@ -2393,6 +2447,50 @@ def create_router(
                 )
                 raise HTTPException(status_code=409, detail=reason)
 
+            profile = library_repository.get_profile(user_id=user_id)
+            profile_name = str(profile.get("displayName", "")).strip()
+            boss_account_name = str(session.evidence.get("accountName", "")).strip()
+            if (
+                profile_name
+                and boss_account_name
+                and normalized_person_name(profile_name)
+                != normalized_person_name(boss_account_name)
+            ):
+                reason = (
+                    f"身份不一致：当前个人档案是“{profile_name}”，"
+                    f"BOSS 页面登录的是“{boss_account_name}”。"
+                    "为避免使用错误简历和问候语，系统已阻止本次任务。"
+                )
+                automation_repository.update_collection(
+                    run_id,
+                    "failed",
+                    planned_jobs=[],
+                    details={
+                        "phase": "failed",
+                        "source": "extension",
+                        "attemptId": attempt_id,
+                        "currentKeyword": None,
+                        "collectedCount": 0,
+                        "approvedCount": 0,
+                        "profileName": profile_name,
+                        "bossAccountName": boss_account_name,
+                        "identityVerified": False,
+                        "error": reason,
+                        "failedAt": datetime.now(UTC).isoformat(),
+                    },
+                )
+                automation_repository.append_event(
+                    run_id,
+                    "identity-mismatch",
+                    "error",
+                    {
+                        "profileName": profile_name,
+                        "bossAccountName": boss_account_name,
+                        "message": reason,
+                    },
+                )
+                raise HTTPException(status_code=409, detail=reason)
+
             save_extension_browser_probe(boss_logged_in=True)
             automation_repository.update_collection(
                 run_id,
@@ -2406,6 +2504,9 @@ def create_router(
                     "candidateLimit": candidate_limit,
                     "collectionIntervalMs": collection_interval_ms,
                     "collectionFilters": collection_filters,
+                    "profileName": profile_name or None,
+                    "bossAccountName": boss_account_name or None,
+                    "identityVerified": bool(profile_name and boss_account_name),
                     "existingExcludedCount": len(historical_job_ids),
                     "collectedCount": 0,
                     "analyzedCount": 0,
@@ -2437,6 +2538,7 @@ def create_router(
             )
             halt_collection = False
             for keyword in keywords:
+                ensure_collection_active(run_id)
                 if len(captured) >= candidate_limit or halt_collection:
                     break
                 automation_repository.update_collection(
@@ -2497,6 +2599,7 @@ def create_router(
 
                 batch_number = 0
                 while len(captured) < candidate_limit:
+                    ensure_collection_active(run_id)
                     batch_number += 1
                     remaining = candidate_limit - len(captured)
                     batch_limit = min(COLLECTION_BATCH_SIZE, remaining)
@@ -2533,6 +2636,7 @@ def create_router(
                     collection: BrowserActionResponse | None = None
                     collection_error: BrowserProtocolError | None = None
                     for batch_attempt in range(1, COLLECTION_BATCH_RETRY_COUNT + 2):
+                        ensure_collection_active(run_id)
                         try:
                             collection = BrowserActionResponse.model_validate(
                                 await browser_hub.dispatch(
@@ -2547,6 +2651,7 @@ def create_router(
                                     deadline_ms=batch_deadline_ms,
                                 )
                             )
+                            ensure_collection_active(run_id)
                             if (
                                 collection.status != "success"
                                 and is_retryable_collection_channel_error(
@@ -2873,6 +2978,7 @@ def create_router(
                 },
             )
             for job in captured.values():
+                ensure_collection_active(run_id)
                 analyzed_count += 1
                 try:
                     result = await run_in_threadpool(
@@ -2959,6 +3065,7 @@ def create_router(
                 if len(planned_jobs) >= target_count:
                     break
 
+            ensure_collection_active(run_id)
             details = {
                 "source": "extension",
                 "attemptId": attempt_id,

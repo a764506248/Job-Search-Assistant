@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from job_search_assistant.automation.browser_protocol import BrowserProtocolError
 from job_search_assistant.main import create_app
+from job_search_assistant.repositories.automation import AutomationRepository
 
 
 class DeterministicEmbedder:
@@ -116,13 +117,15 @@ class FakeConnectedBrowserHub:
     def __init__(
         self,
         jobs: list[dict[str, object]] | None = None,
-        version: str = "0.4.11-test",
+        version: str = "0.4.15-test",
         *,
         logged_in: bool = True,
+        account_name: str | None = None,
     ) -> None:
         self.jobs = jobs or []
         self.version = version
         self.logged_in = logged_in
+        self.account_name = account_name
         self.calls: list[dict[str, Any]] = []
 
     def status(self, user_id: int) -> dict[str, object]:
@@ -161,6 +164,7 @@ class FakeConnectedBrowserHub:
                     "bossDomain": True,
                     "documentReady": True,
                     "loggedIn": self.logged_in,
+                    "accountName": self.account_name,
                 },
             }
         if action == "navigate_search":
@@ -906,6 +910,30 @@ def test_collection_stops_before_navigation_when_boss_is_logged_out(tmp_path) ->
     assert checks["boss-login"]["blocking"] is True
 
 
+def test_collection_blocks_mismatched_profile_and_boss_identity(tmp_path) -> None:
+    hub = FakeConnectedBrowserHub(
+        [captured_job("fresh-job-1", "甲科技")],
+        account_name="汤金鑫",
+    )
+    client = collection_client(tmp_path, hub)
+    profile = client.get("/v1/profile").json()["data"]
+    profile["displayName"] = "夏凯燕"
+    assert client.put("/v1/profile", json={"data": profile}).status_code == 200
+
+    created = create_pending_run(client, target_count=1)
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+
+    assert collection["status"] == "failed"
+    assert collection["identityVerified"] is False
+    assert collection["profileName"] == "夏凯燕"
+    assert collection["bossAccountName"] == "汤金鑫"
+    assert "身份不一致" in collection["error"]
+    assert [call["action"] for call in hub.calls] == ["session_status"]
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    assert any(event["eventType"] == "identity-mismatch" for event in events)
+
+
 def test_outdated_extension_is_blocked_before_collection_dispatch(tmp_path) -> None:
     hub = FakeConnectedBrowserHub(
         [captured_job("fresh-job-1", "甲科技")],
@@ -920,7 +948,7 @@ def test_outdated_extension_is_blocked_before_collection_dispatch(tmp_path) -> N
 
     assert failed["configSnapshot"]["collection"]["status"] == "failed"
     assert failed["configSnapshot"]["collection"]["phase"] == "failed"
-    assert "v0.4.11" in failed["configSnapshot"]["collection"]["error"]
+    assert "v0.4.15" in failed["configSnapshot"]["collection"]["error"]
     assert response.status_code == 202
     assert retried["configSnapshot"]["collection"]["status"] == "failed"
     assert hub.calls == []
@@ -929,4 +957,26 @@ def test_outdated_extension_is_blocked_before_collection_dispatch(tmp_path) -> N
     }
     assert checks["kimi-webbridge"]["status"] == "blocked"
     assert "v0.4.5" in checks["kimi-webbridge"]["message"]
-    assert "v0.4.11" in checks["kimi-webbridge"]["message"]
+    assert "v0.4.15" in checks["kimi-webbridge"]["message"]
+
+
+def test_user_can_stop_collection_and_it_is_not_recovered_automatically(tmp_path) -> None:
+    hub = FakeConnectedBrowserHub([captured_job("fresh-job-1", "甲科技")])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=1)
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    repository.update_collection(
+        created["id"],
+        "collecting",
+        details={"phase": "collecting", "currentKeyword": "AI Agent"},
+    )
+
+    stopped = client.post(f"/v1/automation/runs/{created['id']}/collection/stop")
+    persisted = client.get(f"/v1/automation/runs/{created['id']}").json()
+
+    assert stopped.status_code == 200
+    assert stopped.json()["configSnapshot"]["collection"]["status"] == "cancelled"
+    assert persisted["configSnapshot"]["collection"]["phase"] == "cancelled"
+    assert persisted["configSnapshot"]["collection"]["message"] == "用户已中断本次职位采集"
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    assert events[-1]["eventType"] == "collection-cancelled"

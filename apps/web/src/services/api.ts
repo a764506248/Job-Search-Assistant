@@ -95,6 +95,7 @@ export const api = {
   deliveries: (limit = 500) => request<{ total: number; items: DeliveryRecord[] }>(`/v1/deliveries?limit=${limit}`),
   createAutomationRun: (targetCount: number, config: AutomationCollectionConfig) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config })),
   collectAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collect`, { method: 'POST' }),
+  stopAutomationCollection: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collection/stop`, { method: 'POST' }),
   automationEvents: (id: number) => request<{ items: AutomationEvent[] }>(`/v1/automation/runs/${id}/events`),
   automationReport: (id: number) => request<AutomationReport>(`/v1/automation/runs/${id}/report`),
   retryAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/retry`, { method: 'POST' }),

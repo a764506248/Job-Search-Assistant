@@ -105,7 +105,7 @@ class RecordingBrowserHub:
             "connected": True,
             "paired": True,
             "protocolVersion": "1.0",
-            "extensionVersion": "0.4.11-test",
+            "extensionVersion": "0.4.15-test",
         }
 
     def connected_user_id(self) -> int:

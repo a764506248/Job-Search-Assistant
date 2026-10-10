@@ -117,8 +117,12 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
     return success(envelope, { extensionAlive: true, protocolVersion: BROWSER_PROTOCOL_VERSION })
   }
   const tabs = await browser.tabs.query({ url: ['https://zhipin.com/*', 'https://*.zhipin.com/*'] })
-  const tab = tabs.find(item => item.active) ?? tabs[0]
-  if (!tab?.id) return failure(envelope, '没有找到已登录的 BOSS 页面')
+  let tab = tabs.find(item => item.active) ?? tabs[0]
+  if (!tab?.id && ['session_status', 'navigate_search'].includes(envelope.action)) {
+    tab = await browser.tabs.create({ url: 'https://www.zhipin.com/', active: true })
+    if (tab.id) await waitForTabReady(tab.id, 'https://www.zhipin.com/')
+  }
+  if (!tab?.id) return failure(envelope, '没有找到可操作的 BOSS 页面')
   try {
     if (envelope.action === 'navigate_search') {
       const query = String(envelope.payload.query ?? '').trim()

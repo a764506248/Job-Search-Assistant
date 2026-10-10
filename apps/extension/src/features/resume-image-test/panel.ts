@@ -83,7 +83,7 @@ export function mountBrowserControlPanel(doc: Document): void {
   if (doc.getElementById(HOST_ID)) return
   const host = doc.createElement('div')
   host.id = HOST_ID
-  host.dataset.version = '0.4.11'
+  host.dataset.version = '0.4.15'
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
     <style>
@@ -114,7 +114,7 @@ export function mountBrowserControlPanel(doc: Document): void {
     </style>
     <section class="panel">
       <header class="top">
-        <div class="brand"><strong>自动投递控制台</strong><span>JOB SEARCH ASSISTANT · v0.4.11</span></div>
+        <div class="brand"><strong>自动投递控制台</strong><span>JOB SEARCH ASSISTANT · v0.4.15</span></div>
         <button class="toggle" title="折叠" aria-label="折叠">−</button>
       </header>
       <div class="body">

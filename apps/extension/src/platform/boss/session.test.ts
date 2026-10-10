@@ -27,6 +27,19 @@ describe('readBossSessionStatus', () => {
     }).loggedIn).toBe(false)
   })
 
+  it('reads the visible BOSS account name for identity protection', () => {
+    document.body.innerHTML = `
+      <nav><a href="/web/geek/chat">消息</a></nav>
+      <div class="user-nav"><span class="name">汤金鑫</span></div>
+    `
+
+    expect(readBossSessionStatus(document, {
+      href: 'https://www.zhipin.com/web/geek/jobs',
+      hostname: 'www.zhipin.com',
+      pathname: '/web/geek/jobs',
+    })).toMatchObject({ loggedIn: true, accountName: '汤金鑫' })
+  })
+
   it('requires a real BOSS domain and a signed-in navigation signal', () => {
     expect(readBossSessionStatus(document, {
       href: 'https://example.com/web/geek/jobs',

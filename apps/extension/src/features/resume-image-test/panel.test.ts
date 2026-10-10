@@ -42,7 +42,7 @@ describe('browser control panel', () => {
     const hosts = document.querySelectorAll('#job-search-assistant-control-host')
     expect(hosts).toHaveLength(1)
     expect(hosts[0]?.shadowRoot?.textContent).toContain('自动投递控制台')
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.4.11')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.4.15')
     expect(hosts[0]?.shadowRoot?.textContent).toContain('自动发送')
     expect(hosts[0]?.shadowRoot?.textContent).not.toContain('仅加载图片预览')
   })

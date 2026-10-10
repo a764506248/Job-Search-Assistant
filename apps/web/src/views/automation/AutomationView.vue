@@ -2,8 +2,8 @@
   <div class="view active-view automation-view">
     <section class="automation-command panel">
       <div><p class="eyebrow">ONE-CLICK AUTOMATION</p><h2>自动投递任务</h2><p>启动一次，系统会自动完成扩展采集和本地分析；准备流程只在企业清单确认处暂停，确认后自动进入投递。</p></div>
-      <label>每日目标<input v-model.number="targetCount" type="number" min="1" max="500" /></label>
-      <label>候选采集上限<input v-model.number="candidateLimit" type="number" :min="targetCount" max="500" /></label>
+      <label>计划投递数<input v-model.number="targetCount" type="number" min="1" max="100" /><small>首次建议只投 1 个</small></label>
+      <label>最多分析职位数<input v-model.number="candidateLimit" type="number" :min="targetCount" max="500" /><small>筛选后通过数可能少于此数</small></label>
       <a-button type="primary" :disabled="launchDisabled" :loading="creating" @click="createRun">{{ launchButtonText }}</a-button>
     </section>
     <section class="automation-collection-settings panel" aria-label="本次采集筛选">
@@ -34,7 +34,7 @@
       </template>
     </section>
     <section class="automation-readiness panel">
-      <div :class="{ ready: runnerReady }"><strong>执行器</strong><span>{{ runnerReady ? 'Docker 内置执行器在线' : '未在线，请重新启动 Docker 服务' }}</span></div>
+      <div :class="{ ready: runnerReady }"><strong>自动执行服务</strong><span>{{ runnerReady ? '服务在线，可处理已确认任务' : '未在线，请重新启动 Docker 服务' }}</span></div>
       <div :class="{ ready: browserReady }"><strong>浏览器扩展</strong><span>{{ browserStatusText }}</span></div>
       <div :class="{ ready: setupReady }"><strong>启动检查</strong><span>{{ setupStatusText }}</span></div>
     </section>
@@ -80,8 +80,9 @@
               <span>通过 {{ collection?.approvedCount || 0 }}</span>
               <span v-if="collection?.existingExcludedCount">本地去重 {{ collection.existingExcludedCount }}</span>
             </div>
+            <a-button danger :loading="stoppingCollectionRunId === selected.id" @click="stopSelectedCollection">中断采集</a-button>
           </div>
-          <div v-else-if="isNoMatches || collectionStatus === 'failed'" :class="isNoMatches ? 'automation-no-matches' : 'library-empty'">
+          <div v-else-if="isNoMatches || ['failed', 'cancelled'].includes(collectionStatus)" :class="isNoMatches ? 'automation-no-matches' : 'library-empty'">
             <template v-if="isNoMatches">
               <div class="automation-no-matches-heading">
                 <div>
@@ -115,16 +116,21 @@
               <p v-else class="automation-review-unavailable">该历史任务未保存逐岗位分析明细，统计结果仍可正常查看。</p>
             </template>
             <template v-else>
-              <strong>职位采集失败</strong>
-              <p>{{ collectionError }}</p>
+              <strong>{{ collectionStatus === 'cancelled' ? '职位采集已中断' : '职位采集失败' }}</strong>
+              <p>{{ collectionStatus === 'cancelled' ? '本次采集已停止，已采集的数据不会进入投递清单。' : collectionError }}</p>
               <a-button type="primary" :disabled="!browserReady" :loading="collectingRunId === selected.id" @click="collectSelectedRun">重新采集</a-button>
             </template>
           </div>
           <div v-else-if="collectionStatus !== 'ready'" class="library-empty">
             <strong>自动流程正在排队</strong>
             <p>{{ browserReady ? '系统会自动调用 Chrome 扩展采集职位，随后直接进入本地分析，无需再次点击。' : '等待 Chrome 扩展恢复连接；连接后页面会自动续跑。' }}</p>
+            <a-button v-if="collectionStatus === 'pending'" danger :loading="stoppingCollectionRunId === selected.id" @click="stopSelectedCollection">取消排队</a-button>
           </div>
           <template v-else>
+            <div v-if="collection?.profileName || collection?.bossAccountName" class="automation-identity-guard" :class="{ verified: collection.identityVerified }">
+              <strong>{{ collection.identityVerified ? '身份核对通过' : '身份尚未自动确认' }}</strong>
+              <span>个人档案：{{ collection.profileName || '未填写姓名' }} · BOSS 登录：{{ collection.bossAccountName || '未识别' }}</span>
+            </div>
             <div v-if="collectionTargetShortfall" class="automation-collection-warning">
               <div>
                 <strong>本次未达到投递目标</strong>
@@ -208,8 +214,8 @@ import { useRefresh } from '../../composables/useRefresh'
 import { formatSalary, formatTime } from '../../utils/format'
 import type { AutomationCollectionFilters, AutomationCollectionState, AutomationCollectionStatus, AutomationEvent, AutomationReport, AutomationReviewedJob, AutomationReviewOutcome, AutomationRun, BrowserProtocolStatus, PlannedAutomationJob, SetupStatus } from '../../types'
 
-const targetCount = ref(20)
-const candidateLimit = ref(100)
+const targetCount = ref(1)
+const candidateLimit = ref(10)
 const searchKeywordsInput = ref('')
 const collectionCityCode = ref('')
 const collectionIntervalSeconds = ref(2)
@@ -223,6 +229,7 @@ const collectionFilters = ref<AutomationCollectionFilters>({
 })
 const creating = ref(false)
 const collectingRunId = ref<number>()
+const stoppingCollectionRunId = ref<number>()
 const starting = ref(false)
 const retryingRunId = ref<number>()
 const runs = ref<AutomationRun[]>([])
@@ -244,7 +251,7 @@ const COLLECTION_RECOVERY_BASE_DELAY_MS = 5_000
 const COLLECTION_STALE_AFTER_MS = 35_000
 
 const names: Record<string, string> = { draft: '待启动', validating: '校验中', ready: '已就绪', running: '运行中', paused: '已暂停', stopping: '停止中', interrupted: '已中断', completed: '已完成', failed: '失败', blocked: '被阻止', cancelled: '已取消' }
-const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'retry-created': '投递重试已创建', 'collection-queued': '自动流程已排队', 'collection-started': '开始采集职位', 'collection-stage-changed': '自动流程阶段变化', 'collection-keyword': '正在采集关键词', 'collection-batch-finished': '采集批次完成', 'analysis-started': '开始本地分析', 'analysis-finished': '本地分析完成', 'collection-finished': '职位采集完成', 'collection-failed': '职位采集失败', 'plan-confirmed': '投递清单已确认', 'status-changed': '状态变化', 'status-corrected': '状态已修正', 'runner-awaiting-host': '等待执行器', 'runner-claimed': '执行器已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
+const eventNames: Record<string, string> = { 'run-created': '任务已创建', 'retry-created': '投递重试已创建', 'collection-queued': '自动流程已排队', 'collection-started': '开始采集职位', 'collection-stage-changed': '自动流程阶段变化', 'collection-keyword': '正在采集关键词', 'collection-batch-finished': '采集批次完成', 'analysis-started': '开始本地分析', 'analysis-finished': '本地分析完成', 'collection-finished': '职位采集完成', 'collection-failed': '职位采集失败', 'identity-mismatch': '身份不一致，已阻止任务', 'plan-confirmed': '投递清单已确认', 'status-changed': '状态变化', 'status-corrected': '状态已修正', 'runner-awaiting-host': '等待自动执行服务', 'runner-claimed': '自动执行服务已认领', 'job-finished': '岗位处理完成', 'action-claimed': '浏览器动作开始', 'action-finished': '浏览器动作结束' }
 const reviewOutcomeNames: Record<AutomationReviewOutcome, string> = {
   approved: '符合规则',
   rule_rejected: '规则未通过',
@@ -276,7 +283,7 @@ const setupStatusText = computed(() => {
 })
 const browserStatusText = computed(() => {
   if (!browser.value?.connected) return '未连接，请前往安装向导重新配对'
-  if (!browserReady.value) return `已连接 v${browser.value.extensionVersion || '-'}，请重新加载 v0.4.11 或更高版本`
+  if (!browserReady.value) return `已连接 v${browser.value.extensionVersion || '-'}，请重新加载 v0.4.15 或更高版本`
   return `已连接 · v${browser.value.extensionVersion}`
 })
 const actionSuccessCount = computed(() => report.value?.actions.filter(item => item.status === 'succeeded').length ?? 0)
@@ -312,12 +319,12 @@ const activeDeliveryRun = computed(() => runs.value.find(run => ['running', 'pau
 const launchDisabled = computed(() => !browserReady.value || creating.value || activePipelineRun.value !== undefined || activeDeliveryRun.value !== undefined)
 const launchButtonText = computed(() => {
   if (creating.value) return '正在启动自动流程…'
-  if (activePipelineRun.value && !browserReady.value) return `任务 #${activePipelineRun.value.id} 等待扩展 v0.4.11`
+  if (activePipelineRun.value && !browserReady.value) return `任务 #${activePipelineRun.value.id} 等待扩展 v0.4.15`
   if (activePipelineRun.value) return collectionFor(activePipelineRun.value)?.status === 'ready'
     ? `任务 #${activePipelineRun.value.id} 等待确认企业`
     : `任务 #${activePipelineRun.value.id} 自动流程运行中`
   if (activeDeliveryRun.value) return `任务 #${activeDeliveryRun.value.id} 正在投递`
-  return '启动自动流程'
+  return targetCount.value === 1 ? '开始首次安全试投' : '启动自动流程'
 })
 const pipelineStep = computed(() => {
   if (!selected.value) return 0
@@ -354,7 +361,7 @@ const runStatusName = (run: AutomationRun) => {
   if (run.status !== 'draft') return statusName(run.status)
   const state = collectionFor(run)
   if (isNoMatchesState(state)) return '分析完成，暂无匹配'
-  return ({ pending: '自动流程排队中', collecting: state?.phase === 'analyzing' ? '本地分析中' : '扩展采集中', ready: '待确认企业', no_matches: '分析完成，暂无匹配', failed: '自动流程失败' }[state?.status || 'pending'])
+  return ({ pending: '自动流程排队中', collecting: state?.phase === 'analyzing' ? '本地分析中' : '扩展采集中', ready: '待确认企业', no_matches: '分析完成，暂无匹配', failed: '自动流程失败', cancelled: '采集已中断' }[state?.status || 'pending'])
 }
 const collectionSummary = (run: AutomationRun) => {
   const state = collectionFor(run)
@@ -363,6 +370,7 @@ const collectionSummary = (run: AutomationRun) => {
   if (state?.status === 'collecting') return state.currentKeyword ? `扩展正在采集：${state.currentKeyword}` : '扩展正在采集职位'
   if (state?.status === 'ready') return `自动准备完成，等待确认 ${plannedCount(run)} 个岗位`
   if (state?.status === 'failed') return state.message || state.reason || state.error || '自动流程失败，可重试'
+  if (state?.status === 'cancelled') return '职位采集已由用户中断，可重新采集'
   return '自动流程正在排队'
 }
 const collectionCount = (run: AutomationRun) => collectionFor(run)?.collectedCount ?? 0
@@ -423,6 +431,7 @@ const eventText = (event: AutomationEvent) => {
   if (event.eventType === 'analysis-finished') return `采集 ${event.payload.collectedCount ?? '-'} 个职位，分析 ${event.payload.analyzedCount ?? '-'} 个，通过 ${event.payload.approvedCount ?? '-'}，未通过 ${event.payload.rejectedCount ?? '-'}`
   if (event.eventType === 'collection-finished') return `采集 ${event.payload.collectedCount ?? '-'} 个职位，生成 ${event.payload.approvedCount ?? event.payload.plannedCount ?? '-'} 个待确认岗位`
   if (event.eventType === 'collection-failed') return event.payload.message || event.payload.reason || event.payload.error || 'Chrome 扩展职位采集失败'
+  if (event.eventType === 'collection-cancelled') return event.payload.message || '用户已中断本次职位采集'
   if (event.payload.message || event.payload.reason) return event.payload.message || event.payload.reason
   if (event.eventType === 'status-changed') return `${statusName(event.payload.from)} → ${statusName(event.payload.to)}`
   if (event.eventType === 'run-created') return `目标 ${event.payload.target} 个岗位`
@@ -554,6 +563,21 @@ async function collectSelectedRun() {
   recoveryStates.delete(selected.value.id)
   await collectRun(selected.value)
 }
+async function stopSelectedCollection() {
+  if (!selected.value || !['pending', 'collecting'].includes(collectionStatus.value)) return
+  const runId = selected.value.id
+  stoppingCollectionRunId.value = runId
+  recoveryStates.delete(runId)
+  try {
+    applySelectedRun(await api.stopAutomationCollection(runId))
+    await Promise.allSettled([load(), loadEvents(runId)])
+    message.success('职位采集已中断')
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    stoppingCollectionRunId.value = undefined
+  }
+}
 async function control(run: AutomationRun, action: 'start' | 'pause' | 'resume' | 'stop') { try { selected.value = await api.controlAutomationRun(run.id, action); await load(); await loadEvents(run.id) } catch (error) { message.error((error as Error).message) } }
 function retryRun(run: AutomationRun) {
   Modal.confirm({
@@ -583,14 +607,28 @@ function toggleAllJobs() { selectedJobIds.value = allJobsSelected.value ? [] : p
 async function confirmAndStart() {
   if (!selected.value || collectionStatus.value !== 'ready') return message.warning('请先等待 Chrome 扩展完成职位采集')
   if (!selectedJobIds.value.length) return message.warning('请至少选择一个待投岗位')
-  starting.value = true
-  try {
-    const runId = selected.value.id
-    selected.value = await api.controlAutomationRun(runId, 'start', selectedJobIds.value)
-    message.success(`已确认 ${selectedJobIds.value.length} 个岗位，执行器即将开始处理`)
-    await load()
-    await loadEvents(runId)
-  } catch (error) { message.error((error as Error).message) } finally { starting.value = false }
+  const runId = selected.value.id
+  const selectedCount = selectedJobIds.value.length
+  Modal.confirm({
+    title: `确认投递 ${selectedCount} 个岗位？`,
+    content: `个人档案：${collection.value?.profileName || '未填写姓名'}；BOSS 登录：${collection.value?.bossAccountName || '未自动识别'}。请确认企业、职位、问候语和登录身份均正确。`,
+    okText: '身份与内容正确，开始投递',
+    cancelText: '返回检查',
+    async onOk() {
+      starting.value = true
+      try {
+        selected.value = await api.controlAutomationRun(runId, 'start', selectedJobIds.value)
+        message.success(`已确认 ${selectedCount} 个岗位，自动执行服务即将开始处理`)
+        await load()
+        await loadEvents(runId)
+      } catch (error) {
+        message.error((error as Error).message)
+        throw error
+      } finally {
+        starting.value = false
+      }
+    },
+  })
 }
 async function loadEvents(id: number) {
   report.value = await api.automationReport(id)
@@ -618,6 +656,39 @@ useRefresh(load)
 </script>
 
 <style scoped>
+.automation-command label small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.automation-identity-guard {
+  margin-bottom: 10px;
+  padding: 11px 12px;
+  border: 1px solid #e4c58d;
+  border-radius: 9px;
+  background: #fff8eb;
+  display: grid;
+  gap: 4px;
+}
+
+.automation-identity-guard.verified {
+  border-color: #add9ca;
+  background: #f3faf7;
+}
+
+.automation-identity-guard strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.automation-identity-guard span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .automation-collection-settings {
   margin-top: 12px;
   padding: 16px 18px;

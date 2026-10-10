@@ -77,7 +77,7 @@ export interface AutomationRun {
   updatedAt: string
 }
 
-export type AutomationCollectionStatus = 'pending' | 'collecting' | 'ready' | 'no_matches' | 'failed'
+export type AutomationCollectionStatus = 'pending' | 'collecting' | 'ready' | 'no_matches' | 'failed' | 'cancelled'
 
 export type AutomationCollectionPhase =
   | 'queued'
@@ -86,6 +86,7 @@ export type AutomationCollectionPhase =
   | 'analyzing'
   | 'analysis_completed'
   | 'awaiting_confirmation'
+  | 'cancelled'
   | 'failed'
 
 export type AutomationReviewOutcome = 'approved' | 'rule_rejected' | 'duplicate' | 'material_error' | 'analysis_error'
@@ -111,12 +112,16 @@ export interface AutomationCollectionState {
   startedAt?: string
   completedAt?: string
   failedAt?: string
+  cancelledAt?: string
   updatedAt?: string
   currentKeyword?: string
   requestedTarget?: number
   candidateLimit?: number
   collectionIntervalMs?: number
   collectionFilters?: AutomationCollectionFilters
+  profileName?: string
+  bossAccountName?: string
+  identityVerified?: boolean
   existingExcludedCount?: number
   collectedCount?: number
   analyzedCount?: number
