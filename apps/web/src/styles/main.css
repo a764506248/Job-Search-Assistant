@@ -547,7 +547,7 @@ td small { color: var(--muted); }
 .account-name { color: var(--muted); font-size: 13px; }
 
 /* 近 7 天趋势 */
-.trend-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 0 0 14px; padding: 0 22px; color: var(--muted); font-size: 12px; }
+.trend-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 0 0 14px; padding: 14px 22px 0; color: var(--muted); font-size: 12px; }
 .trend-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .trend-legend .dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 .dot-capture { background: #9ccdb9; }
