@@ -31,7 +31,7 @@ curl http://127.0.0.1/v1/health
 ## 回滚
 
 ```bash
-JSA_IMAGE_TAG=v0.3.0 docker compose -f docker-compose.server.yml up -d
+JSA_IMAGE_TAG=v0.4.13 docker compose -f docker-compose.server.yml up -d
 ```
 
 回滚只切换镜像版本，不删除 `deploy-data`。发布前仍应自行备份该目录，并确认服务器防火墙不开放 Portainer 的 9443 端口。

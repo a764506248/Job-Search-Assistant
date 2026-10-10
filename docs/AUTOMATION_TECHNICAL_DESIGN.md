@@ -69,6 +69,8 @@ draft → validating → ready → running ↔ paused
 
 `POST /v1/automation/runs` 创建 `draft` 草稿后会立即把采集流水线排入后台，HTTP 响应不需要等待整批职位完成。流水线通过扩展依次执行 `navigate_search` 和 `collect_jobs`，再由 Local Service 保存 JD、执行规则、本地资料匹配、模型分析与问候语生成，并把通过决策的企业写入 `plannedJobs`。采集期间的 `collection.status` 与 `collection.phase` 持久化到 SQLite，页面刷新后可以继续显示或重新排队未完成任务。`POST /v1/automation/runs/{runId}/collect` 作为幂等的失败重试/中断恢复入口。
 
+采集前必须存在一个已登录且能显示职位列表的 BOSS 搜索标签页，并在采集完成前保持打开。`pending/queued` 包含等待扩展执行 `session_status` 的短暂阶段，登录检查超时为 30 秒；失败后必须把 `collection.status` 持久化为 `failed`，前端不得继续显示为排队。采集以 5 个岗位为一批，循环到候选上限或扩展明确返回 `exhausted=true`。BFCache 或页面导航导致消息通道关闭时，`0.4.13` 扩展会对 `session_status`、`capture_job`、`collect_jobs` 和 `validate_identity` 等只读动作重载页面并重试一次；Local Service 对采集返回中的同类临时通道错误再提供一层批次重试保护。
+
 控制台必须展示该次新采集生成的 `plannedJobs`，至少包含企业、岗位和问候语，并允许用户取消勾选。历史职位快照不能被静默当成本次任务计划。用户点击“确认企业并开始投递”时，`POST /v1/automation/runs/{runId}/start` 携带 `selectedJobIds`；服务端校验这些岗位属于原始计划，将所选子集重新冻结到 `configSnapshot.plannedJobs`，同步修正 `targetCount`，写入 `plan-confirmed` 审计事件，然后才进入校验和运行状态。这是 runner 启动前的人工安全门；采集未完成、空清单、重复 ID 或计划外岗位均拒绝启动。真实发送阶段仍执行扩展的目标身份复核；问候语不再逐条确认，简历图片保留可见预览确认。
 
 ## 5. 浏览器动作协议
@@ -81,7 +83,7 @@ draft → validating → ready → running ↔ paused
 4. 服务返回随机令牌，扩展保存在 `chrome.storage.local`；
 5. 验证码立即失效，令牌只用于本机连接。
 
-服务重启后内存令牌失效，需要重新配对。这样不会把长期浏览器凭据写入 SQLite。
+配对令牌及其用户归属以摘要形式持久化，普通服务重启后扩展可自动重连。用户被停用、令牌文件失效或服务检测到旧版无用户归属令牌时，连接会被拒绝并要求重新配对。
 
 ### 5.2 信封
 
