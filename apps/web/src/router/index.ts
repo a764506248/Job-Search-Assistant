@@ -5,7 +5,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/auth/LoginView.vue'), meta: { title: '登录' } },
-    { path: '/', name: 'overview', component: () => import('../views/dashboard/OverviewView.vue'), meta: { title: '工作台' } },
+    { path: '/', redirect: '/automation' },
+    { path: '/overview', name: 'overview', component: () => import('../views/dashboard/OverviewView.vue'), meta: { title: '工作台' } },
     { path: '/metrics', name: 'metrics', component: () => import('../views/metrics/MetricsView.vue'), meta: { title: '数据指标' } },
     { path: '/setup', name: 'setup', component: () => import('../views/setup/SetupView.vue'), meta: { title: '安装向导' } },
     { path: '/automation', name: 'automation', component: () => import('../views/automation/AutomationView.vue'), meta: { title: '自动投递' } },
@@ -18,7 +19,7 @@ const router = createRouter({
     { path: '/rules', name: 'rules', component: () => import('../views/library/RulesView.vue'), meta: { title: '匹配规则' } },
     { path: '/models', name: 'models', component: () => import('../views/library/ModelsView.vue'), meta: { title: '模型配置' } },
     { path: '/admin/users', name: 'admin-users', component: () => import('../views/admin/AdminUsersView.vue'), meta: { title: '用户管理', adminOnly: true } },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
+    { path: '/:pathMatch(.*)*', redirect: '/automation' },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
@@ -28,7 +29,7 @@ router.beforeEach(async (to) => {
   if (!localStorage.getItem('jsa_access_token')) return { name: 'login' }
   try {
     const result = await api.me()
-    if (to.meta.adminOnly && !result.user.isAdmin) return { name: 'overview' }
+    if (to.meta.adminOnly && !result.user.isAdmin) return { name: 'automation' }
     return true
   } catch {
     return { name: 'login' }
@@ -36,7 +37,7 @@ router.beforeEach(async (to) => {
 })
 
 router.afterEach((route) => {
-  document.title = `${String(route.meta.title || '工作台')} · Job Search Assistant`
+  document.title = `${String(route.meta.title || '自动投递')} · Job Search Assistant`
 })
 
 export default router

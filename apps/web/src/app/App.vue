@@ -63,16 +63,12 @@ let authWatchTimer: number | undefined
 provide('refreshVersion', refreshVersion)
 
 const navigation = [
-  { name: 'overview', path: '/', label: '工作台', icon: '⌂' },
-  { name: 'metrics', path: '/metrics', label: '数据指标', icon: '▦' },
   { name: 'setup', path: '/setup', label: '安装向导', icon: '✓' },
   { name: 'automation', path: '/automation', label: '自动投递', icon: '▶' },
   { name: 'jobs', path: '/jobs', label: '职位快照', icon: '▤' },
-  { name: 'analysis', path: '/analysis', label: '职位分析', icon: '◈' },
   { name: 'profile', path: '/profile', label: '个人档案', icon: '◎' },
   { name: 'projects', path: '/projects', label: '项目库', icon: '◇' },
   { name: 'resumes', path: '/resumes', label: '简历库', icon: '▧' },
-  { name: 'templates', path: '/templates', label: '简历模板', icon: '▥' },
   { name: 'rules', path: '/rules', label: '匹配规则', icon: '⌁' },
   { name: 'models', path: '/models', label: '模型配置', icon: '✦' },
 ]
@@ -80,7 +76,7 @@ const navigation = [
 const adminNavigation = { name: 'admin-users', path: '/admin/users', label: '用户管理', icon: '♙' }
 const visibleNavigation = computed(() => isAdmin.value ? [...navigation, adminNavigation] : navigation)
 
-const pageTitle = computed(() => String(route.meta.title || '工作台'))
+const pageTitle = computed(() => String(route.meta.title || '自动投递'))
 
 onMounted(async () => {
   const redirectIfTokenMissing = () => {
