@@ -35,6 +35,19 @@ def test_repository_upserts_changed_content_into_stable_job_snapshot(tmp_path) -
     assert repository.count() == 0
 
 
+def test_repository_deduplicates_jobs_only_within_the_same_user(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+
+    assert repository.save_many([make_job()], user_id=1) == ["job-123"]
+    assert repository.save_many([make_job()], user_id=1) == []
+    assert repository.save_many([make_job()], user_id=2) == ["job-123"]
+
+    assert repository.list_platform_job_ids("boss", user_id=1) == ["job-123"]
+    assert repository.list_platform_job_ids("boss", user_id=2) == ["job-123"]
+    assert repository.count(user_id=1) == 1
+    assert repository.count(user_id=2) == 1
+
+
 def test_repository_normalizes_private_use_salary_on_write_and_historical_read(
     tmp_path,
 ) -> None:
