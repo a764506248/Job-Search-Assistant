@@ -2,21 +2,37 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from threading import Lock
 
+from ..database import db_connect, recreate_index
 from ..domain.models import CapturedJob, StoredJob
 from ..domain.salary import normalize_salary_text, prefer_salary_text
-from ..database import db_connect, recreate_index
 
 
 class JobRepository:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
+        self._initialized = False
+        self._initialize_lock = Lock()
 
     def initialize(self) -> None:
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
-            connection.execute(
-                """
+        if self._initialized:
+            return
+        with self._initialize_lock:
+            if self._initialized:
+                return
+            self.database_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._connect() as connection:
+                # local-service 与 automation-runner 是两个独立进程。首次启动时
+                # 串行执行迁移，避免两个进程同时 DROP/CREATE 索引形成死锁。
+                if getattr(connection, "is_postgres", False):
+                    connection.execute("SELECT pg_advisory_xact_lock(?)", (740_310_221,))
+                self._initialize_schema(connection)
+            self._initialized = True
+
+    def _initialize_schema(self, connection: object) -> None:
+        connection.execute(
+            """
                 CREATE TABLE IF NOT EXISTS job_postings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL DEFAULT 1,
@@ -47,33 +63,31 @@ class JobRepository:
                     UNIQUE(platform, platform_job_id, content_hash)
                 )
                 """
-            )
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(job_postings)")}
-            migrations = {
-                "user_id": "INTEGER NOT NULL DEFAULT 1",
-                "has_communicated": "INTEGER NOT NULL DEFAULT 0",
-                "has_interview": "INTEGER NOT NULL DEFAULT 0",
-                "generated_greeting": "TEXT",
-                "resume_variant": "TEXT NOT NULL DEFAULT 'default'",
-                "generated_resume_id": "INTEGER",
-                "resume_optimization": "TEXT",
-                "company_size": "TEXT",
-                "work_address": "TEXT",
-            }
-            for name, definition in migrations.items():
-                if name not in columns:
-                    connection.execute(
-                        f"ALTER TABLE job_postings ADD COLUMN {name} {definition}"
-                    )
-            self._deduplicate_existing(connection)
-            # 唯一索引必须带上 user_id，否则不同用户采集同一职位会互相顶掉。
-            recreate_index(
-                connection,
-                "idx_job_postings_platform_job_id",
-                """CREATE UNIQUE INDEX IF NOT EXISTS
+        )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(job_postings)")}
+        migrations = {
+            "user_id": "INTEGER NOT NULL DEFAULT 1",
+            "has_communicated": "INTEGER NOT NULL DEFAULT 0",
+            "has_interview": "INTEGER NOT NULL DEFAULT 0",
+            "generated_greeting": "TEXT",
+            "resume_variant": "TEXT NOT NULL DEFAULT 'default'",
+            "generated_resume_id": "INTEGER",
+            "resume_optimization": "TEXT",
+            "company_size": "TEXT",
+            "work_address": "TEXT",
+        }
+        for name, definition in migrations.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE job_postings ADD COLUMN {name} {definition}")
+        self._deduplicate_existing(connection)
+        # 唯一索引必须带上 user_id，否则不同用户采集同一职位会互相顶掉。
+        recreate_index(
+            connection,
+            "idx_job_postings_platform_job_id",
+            """CREATE UNIQUE INDEX IF NOT EXISTS
                 idx_job_postings_platform_job_id
                 ON job_postings(user_id, platform, platform_job_id)""",
-            )
+        )
 
     def save_many(self, jobs: list[CapturedJob], *, user_id: int = 1) -> list[str]:
         self.initialize()
@@ -339,14 +353,22 @@ class JobRepository:
         if normalized:
             pattern = f"%{normalized}%"
             fields = (
-                "title", "company_name", "company_size", "location", "work_address",
-                "salary_text", "experience", "education", "description", "skills_json",
-                "recruiter_name", "recruiter_title", "generated_greeting",
+                "title",
+                "company_name",
+                "company_size",
+                "location",
+                "work_address",
+                "salary_text",
+                "experience",
+                "education",
+                "description",
+                "skills_json",
+                "recruiter_name",
+                "recruiter_title",
+                "generated_greeting",
             )
             conditions.append(
-                "(" + " OR ".join(
-                    f"LOWER(COALESCE({field}, '')) LIKE ?" for field in fields
-                ) + ")"
+                "(" + " OR ".join(f"LOWER(COALESCE({field}, '')) LIKE ?" for field in fields) + ")"
             )
             parameters.extend(pattern for _ in fields)
 

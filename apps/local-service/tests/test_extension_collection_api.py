@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from job_search_assistant.automation.browser_protocol import BrowserProtocolError
 from job_search_assistant.main import create_app
 from job_search_assistant.repositories.automation import AutomationRepository
+from job_search_assistant.repositories.jobs import JobRepository
 
 
 class DeterministicEmbedder:
@@ -185,9 +186,7 @@ class FakeConnectedBrowserHub:
             )
             limit = int(payload.get("limit", 10))
             available = [
-                job
-                for job in self.jobs
-                if str(job.get("platformJobId", "")) not in excluded
+                job for job in self.jobs if str(job.get("platformJobId", "")) not in excluded
             ]
             batch = available[:limit]
             return {
@@ -437,13 +436,17 @@ def configure_ready_delivery_environment(client: TestClient) -> None:
     assert project.status_code == 201
     assert model.status_code == 201
     assert client.post(f"/v1/library/models/{model.json()['id']}/test").status_code == 200
-    assert client.post(
-        "/v1/setup/browser/probe",
-        json={"projectExtensionReady": True, "bossLoggedIn": True, "source": "manual"},
-    ).status_code == 200
-    assert client.post(
-        "/v1/automation/runner/heartbeat", json={"runnerId": "test-runner"}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/v1/setup/browser/probe",
+            json={"projectExtensionReady": True, "bossLoggedIn": True, "source": "manual"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post("/v1/automation/runner/heartbeat", json={"runnerId": "test-runner"}).status_code
+        == 200
+    )
     assert client.get("/v1/setup/status").json()["overall"] == "ready"
 
 
@@ -482,9 +485,7 @@ def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
     assert persisted["status"] == "draft"
     assert persisted["configSnapshot"]["collection"]["status"] == "ready"
     assert persisted["configSnapshot"]["collection"]["phase"] == "awaiting_confirmation"
-    assert [job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]] == [
-        "fresh-job"
-    ]
+    assert [job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]] == ["fresh-job"]
     assert "historical-job" not in {
         job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]
     }
@@ -594,10 +595,7 @@ def test_all_rule_rejected_jobs_are_a_reviewed_no_matches_outcome(tmp_path) -> N
     assert reviewed[0]["outcome"] == "rule_rejected"
     assert reviewed[0]["suitabilityScore"] is not None
     assert any("低于最低薪资 20K，无交集" in reason for reason in reviewed[0]["reasons"])
-    assert any(
-        match["ruleId"] == "builtin:minimum-salary"
-        for match in reviewed[0]["ruleMatches"]
-    )
+    assert any(match["ruleId"] == "builtin:minimum-salary" for match in reviewed[0]["ruleMatches"])
 
     events = client.get(f"/v1/automation/runs/{run_id}/events").json()["items"]
     terminal = events[-1]
@@ -614,12 +612,46 @@ def test_all_rule_rejected_jobs_are_a_reviewed_no_matches_outcome(tmp_path) -> N
     assert final["configSnapshot"]["collection"]["attemptId"] == 2
     terminal_events = [
         event
-        for event in client.get(
-            f"/v1/automation/runs/{run_id}/events"
-        ).json()["items"]
+        for event in client.get(f"/v1/automation/runs/{run_id}/events").json()["items"]
         if event["eventType"] == "analysis-finished"
     ]
     assert [event["payload"]["attemptId"] for event in terminal_events] == [1, 2]
+
+
+def test_single_job_analysis_failure_keeps_approved_jobs_and_allows_confirmation(
+    tmp_path, monkeypatch
+) -> None:
+    hub = FakeConnectedBrowserHub(
+        [
+            captured_job("approved-before-error", "甲智能"),
+            captured_job("analysis-error", "乙智能"),
+            captured_job("approved-after-error", "丙智能"),
+        ]
+    )
+    original = JobRepository.update_generated_greeting
+
+    def fail_one_greeting(self, snapshot_id, greeting, *, user_id=1):
+        job = self.get(snapshot_id, user_id=user_id)
+        if job.platform_job_id == "analysis-error":
+            raise RuntimeError("simulated database deadlock")
+        return original(self, snapshot_id, greeting, user_id=user_id)
+
+    monkeypatch.setattr(JobRepository, "update_generated_greeting", fail_one_greeting)
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=3, candidate_limit=3)
+
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+
+    assert collection["status"] == "ready"
+    assert collection["analyzedCount"] == 3
+    assert collection["approvedCount"] == 2
+    assert collection["analysisErrorCount"] == 1
+    assert len(run["configSnapshot"]["plannedJobs"]) == 2
+    assert {job["jobId"] for job in run["configSnapshot"]["plannedJobs"]} == {
+        "approved-before-error",
+        "approved-after-error",
+    }
 
 
 def test_collection_continues_past_old_three_times_target_until_match(tmp_path) -> None:
@@ -642,9 +674,7 @@ def test_collection_continues_past_old_three_times_target_until_match(tmp_path) 
     assert collection["analyzedCount"] == 13
     assert collection["approvedCount"] == 1
     assert collection["rejectedCount"] == 12
-    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == [
-        "eventual-match"
-    ]
+    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == ["eventual-match"]
     assert run["configSnapshot"]["plannedJobs"][0]["greeting"]
     assert len(collect_calls) == 3
 
@@ -664,9 +694,10 @@ def test_pipeline_stops_at_confirmation_then_only_selected_jobs_can_start(tmp_pa
     ready = client.get(f"/v1/automation/runs/{run_id}").json()
     assert ready["status"] == "draft"
     assert ready["configSnapshot"]["collection"]["phase"] == "awaiting_confirmation"
-    assert client.post(
-        "/v1/automation/runner/claim", json={"runnerId": "test-runner"}
-    ).json()["run"] is None
+    assert (
+        client.post("/v1/automation/runner/claim", json={"runnerId": "test-runner"}).json()["run"]
+        is None
+    )
 
     without_confirmation = client.post(f"/v1/automation/runs/{run_id}/start")
     assert without_confirmation.status_code == 422
@@ -684,9 +715,9 @@ def test_pipeline_stops_at_confirmation_then_only_selected_jobs_can_start(tmp_pa
     assert [job["jobId"] for job in confirmed.json()["configSnapshot"]["plannedJobs"]] == [
         "fresh-job-2"
     ]
-    claimed = client.post(
-        "/v1/automation/runner/claim", json={"runnerId": "test-runner"}
-    ).json()["run"]
+    claimed = client.post("/v1/automation/runner/claim", json={"runnerId": "test-runner"}).json()[
+        "run"
+    ]
     assert claimed["id"] == run_id
     assert [call["action"] for call in hub.calls] == [
         "session_status",
@@ -716,9 +747,12 @@ def test_collect_recovers_an_interrupted_collecting_state(tmp_path) -> None:
             },
         },
     ).json()
-    assert client.get(f"/v1/automation/runs/{created['id']}").json()["configSnapshot"][
-        "collection"
-    ]["status"] == "collecting"
+    assert (
+        client.get(f"/v1/automation/runs/{created['id']}").json()["configSnapshot"]["collection"][
+            "status"
+        ]
+        == "collecting"
+    )
 
     queued = client.post(f"/v1/automation/runs/{created['id']}/collect")
     recovered = client.get(f"/v1/automation/runs/{created['id']}").json()
@@ -739,9 +773,7 @@ def test_connected_unified_extension_makes_legacy_skill_optional(tmp_path) -> No
     hub = FakeConnectedBrowserHub()
     client = collection_client(tmp_path, hub)
 
-    checks = {
-        item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
-    }
+    checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
 
     assert checks["kimi-webbridge"]["label"] == "统一浏览器扩展"
     assert checks["kimi-webbridge"]["status"] == "ready"
@@ -783,14 +815,10 @@ def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> No
     ]
 
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
-    batch_events = [
-        event for event in events if event["eventType"] == "collection-batch-finished"
-    ]
+    batch_events = [event for event in events if event["eventType"] == "collection-batch-finished"]
     assert [event["payload"]["collectedCount"] for event in batch_events] == [5, 10, 12]
     assert [event["payload"]["newCount"] for event in batch_events] == [5, 5, 2]
-    checks = {
-        item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
-    }
+    checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["boss-login"]["status"] == "ready"
     assert checks["boss-login"]["blocking"] is False
 
@@ -812,9 +840,7 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
         "扩展采集单批职位超时，请适当降低岗位采集间隔" in error
         for error in collection["browserErrors"]
     )
-    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == [
-        "retained-job"
-    ]
+    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == ["retained-job"]
     assert len(collect_calls) == 3
     assert collect_calls[1]["payload"]["excludeJobIds"] == ["retained-job"]
     assert collect_calls[2]["payload"]["excludeJobIds"] == ["retained-job"]
@@ -884,9 +910,7 @@ def test_collection_timeout_without_results_fails_with_chinese_error(tmp_path) -
     assert run["configSnapshot"]["collection"]["collectedCount"] == 0
     assert run["configSnapshot"]["collection"]["attemptId"] == 1
     assert len([call for call in hub.calls if call["action"] == "collect_jobs"]) == 2
-    events = client.get(
-        f"/v1/automation/runs/{created['id']}/events"
-    ).json()["items"]
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
     terminal = events[-1]
     assert terminal["eventType"] == "collection-failed"
     assert terminal["level"] == "error"
@@ -906,9 +930,7 @@ def test_collection_stops_before_navigation_when_boss_is_logged_out(tmp_path) ->
     assert run["configSnapshot"]["collection"]["status"] == "failed"
     assert "BOSS 登录状态无效" in run["configSnapshot"]["collection"]["error"]
     assert [call["action"] for call in hub.calls] == ["session_status"]
-    checks = {
-        item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
-    }
+    checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["boss-login"]["status"] == "blocked"
     assert checks["boss-login"]["blocking"] is True
 
@@ -955,9 +977,7 @@ def test_outdated_extension_is_blocked_before_collection_dispatch(tmp_path) -> N
     assert response.status_code == 202
     assert retried["configSnapshot"]["collection"]["status"] == "failed"
     assert hub.calls == []
-    checks = {
-        item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]
-    }
+    checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["kimi-webbridge"]["status"] == "blocked"
     assert "v0.4.5" in checks["kimi-webbridge"]["message"]
     assert "v0.4.15" in checks["kimi-webbridge"]["message"]

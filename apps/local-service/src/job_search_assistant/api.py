@@ -2258,24 +2258,49 @@ def create_router(
                 run = automation_run(run_id)
                 if run.status == "draft":
                     collection = run.config_snapshot.get("collection", {})
+                    preserved_jobs = run.config_snapshot.get("plannedJobs", [])
+                    if not isinstance(preserved_jobs, list):
+                        preserved_jobs = []
                     attempt_id = (
                         int(collection.get("attemptId", 0) or 0)
                         if isinstance(collection, dict)
                         else 0
                     )
-                    automation_repository.update_collection(
-                        run_id,
-                        "failed",
-                        planned_jobs=[],
-                        details={
-                            "phase": "failed",
-                            "source": "extension",
-                            "attemptId": attempt_id,
-                            "currentKeyword": None,
-                            "error": f"自动采集异常：{error}",
-                            "failedAt": datetime.now(UTC).isoformat(),
-                        },
-                    )
+                    if preserved_jobs:
+                        automation_repository.update_collection(
+                            run_id,
+                            "ready",
+                            planned_jobs=preserved_jobs,
+                            details={
+                                "phase": "awaiting_confirmation",
+                                "source": "extension",
+                                "attemptId": attempt_id,
+                                "currentKeyword": None,
+                                "approvedCount": len(preserved_jobs),
+                                "partial": True,
+                                "message": (
+                                    "后续分析中断，已保留前面通过的 "
+                                    f"{len(preserved_jobs)} 个岗位，可继续确认投递"
+                                ),
+                                "warning": f"自动采集异常：{error}",
+                                "error": None,
+                                "completedAt": datetime.now(UTC).isoformat(),
+                                "failedAt": None,
+                            },
+                        )
+                    else:
+                        automation_repository.update_collection(
+                            run_id,
+                            "failed",
+                            details={
+                                "phase": "failed",
+                                "source": "extension",
+                                "attemptId": attempt_id,
+                                "currentKeyword": None,
+                                "error": f"自动采集异常：{error}",
+                                "failedAt": datetime.now(UTC).isoformat(),
+                            },
+                        )
             except (HTTPException, KeyError, ValueError):
                 logger.exception("failed to persist collection crash run=%s", run_id)
         finally:
@@ -2927,6 +2952,7 @@ def create_router(
                 automation_repository.update_collection(
                     run_id,
                     "collecting",
+                    planned_jobs=planned_jobs,
                     details={
                         "phase": "analyzing",
                         "attemptId": attempt_id,
@@ -3023,7 +3049,7 @@ def create_router(
                         target_roles=string_list(config.get("targetRoles")),
                         search_keywords=string_list(config.get("searchKeywords")),
                     )
-                except (HTTPException, KeyError, RuntimeError, TypeError, ValueError) as error:
+                except Exception as error:  # noqa: BLE001 - 单个岗位失败不能丢弃已通过清单
                     error_text = (
                         str(error.detail)
                         if isinstance(error, HTTPException)
