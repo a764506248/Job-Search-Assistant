@@ -74,13 +74,22 @@
               <span v-if="!isAnalyzing">分批采集，每批最长约 30 秒</span>
               <span v-else>分析结果会逐条更新</span>
             </div>
-            <div class="automation-progress-metrics">
-              <span>已采集 {{ collection?.collectedCount || 0 }}</span>
-              <span>已分析 {{ collection?.analyzedCount || 0 }}</span>
-              <span>通过 {{ collection?.approvedCount || 0 }}</span>
-              <span v-if="collection?.existingExcludedCount">本地去重 {{ collection.existingExcludedCount }}</span>
+            <div class="automation-live-progress" :class="{ 'is-analyzing': isAnalyzing }">
+              <div class="automation-live-progress-heading">
+                <strong>{{ isAnalyzing ? '分析进度' : '采集进度' }}</strong>
+                <span>{{ collectionProgressCurrent }} / {{ collectionProgressTotal }}</span>
+              </div>
+              <div class="automation-live-progress-track" role="progressbar" :aria-label="isAnalyzing ? '职位分析进度' : '职位采集进度'" :aria-valuenow="collectionProgressCurrent" aria-valuemin="0" :aria-valuemax="collectionProgressTotal">
+                <i :style="{ width: `${collectionProgressPercent}%` }"></i>
+              </div>
             </div>
-            <a-button danger :loading="stoppingCollectionRunId === selected.id" @click="stopSelectedCollection">中断采集</a-button>
+            <div class="automation-progress-metrics" aria-label="实时处理统计">
+              <div><span>采集</span><strong>{{ collection?.collectedCount || 0 }}</strong><small>候选职位</small></div>
+              <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>{{ isAnalyzing ? '正在逐条处理' : '采集完成后开始' }}</small></div>
+              <div><span>通过</span><strong>{{ collection?.approvedCount || 0 }}</strong><small>进入待确认</small></div>
+              <div v-if="collection?.existingExcludedCount"><span>历史排除</span><strong>{{ collection.existingExcludedCount }}</strong><small>已存在岗位</small></div>
+            </div>
+            <a-button danger :loading="stoppingCollectionRunId === selected.id" @click="stopSelectedCollection">{{ isAnalyzing ? '中断分析' : '中断采集' }}</a-button>
           </div>
           <div v-else-if="isNoMatches || ['failed', 'cancelled'].includes(collectionStatus)" :class="isNoMatches ? 'automation-no-matches' : 'library-empty'">
             <template v-if="isNoMatches">
@@ -356,6 +365,15 @@ const collectionElapsedSeconds = computed(() => {
   return Number.isFinite(startedAtMs) ? Math.max(0, Math.floor((nowMs.value - startedAtMs) / 1_000)) : 0
 })
 const collectionElapsedText = computed(() => formatDuration(collectionElapsedSeconds.value))
+const collectionProgressCurrent = computed(() => isAnalyzing.value
+  ? collection.value?.analyzedCount || 0
+  : collection.value?.collectedCount || 0)
+const collectionProgressTotal = computed(() => Math.max(1, isAnalyzing.value
+  ? collection.value?.collectedCount || 0
+  : collection.value?.candidateLimit || collection.value?.requestedTarget || 0))
+const collectionProgressPercent = computed(() => Math.min(100, Math.round(
+  collectionProgressCurrent.value / collectionProgressTotal.value * 100,
+)))
 const plannedCount = (run: AutomationRun) => Array.isArray(run.configSnapshot.plannedJobs) ? run.configSnapshot.plannedJobs.length : 0
 const runStatusName = (run: AutomationRun) => {
   if (run.status !== 'draft') return statusName(run.status)
@@ -906,11 +924,73 @@ useRefresh(load)
 }
 
 .automation-progress-metrics {
-  display: flex;
-  justify-content: center;
-  gap: 18px;
+  width: min(620px, 100%);
+  margin: 12px auto 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.automation-progress-metrics > div {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  background: #fff;
+  text-align: left;
+  transition: border-color .2s ease, background .2s ease, transform .2s ease;
+}
+
+.automation-progress-metrics > div.active {
+  border-color: #8bcbb4;
+  background: #eff9f5;
+  transform: translateY(-1px);
+}
+
+.automation-progress-metrics span,
+.automation-progress-metrics small {
   color: var(--muted);
+  font-size: 10px;
+}
+
+.automation-progress-metrics strong {
+  color: var(--brand-deep);
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.automation-live-progress {
+  width: min(620px, 100%);
+  margin: 12px auto 0;
+}
+
+.automation-live-progress-heading {
+  margin-bottom: 7px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.automation-live-progress-heading strong {
+  color: var(--ink);
   font-size: 11px;
+}
+
+.automation-live-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6eeea;
+}
+
+.automation-live-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1a755b, #70d5af);
+  transition: width .35s ease;
 }
 
 .automation-no-matches {

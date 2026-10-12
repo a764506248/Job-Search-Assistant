@@ -36,6 +36,7 @@
 
 ## 设计文档
 
+- [当前版本使用指南（人话版）](docs/USER_GUIDE.md)
 - [安装、前置依赖与首次启动](docs/SETUP.md)
 - [产品需求文档](docs/PRD.md)
 - [系统架构与流程](docs/ARCHITECTURE.md)

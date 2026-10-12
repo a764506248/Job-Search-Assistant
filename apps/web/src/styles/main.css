@@ -457,7 +457,6 @@ td small { color: var(--muted); }
 .setup-test-result p { margin: 5px 0; color: var(--muted); font-size: 11px; }
 .setup-test-result span { color: #89938e; font-size: 11px; }
 .setup-guide-hero { min-height: 246px; background: radial-gradient(circle at 83% 18%, rgba(112,229,185,.22), transparent 22%), linear-gradient(120deg, #0e332b 0%, #14634f 62%, #167a60 100%); }
-.setup-guide-hero .setup-voice-skip { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.08); color: #effff8; }
 .setup-guide { margin-top: 20px; display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 16px; }
 .setup-step-rail { padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.78); display: grid; align-content: start; gap: 5px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
 .setup-step-tab { position: relative; width: 100%; min-height: 80px; padding: 13px 14px; border: 0; border-radius: 11px; background: transparent; display: grid; grid-template-columns: 35px minmax(0,1fr) 8px; align-items: center; gap: 11px; color: var(--muted); text-align: left; cursor: pointer; transition: transform .25s ease, background .25s ease, color .25s ease; }
@@ -486,8 +485,6 @@ td small { color: var(--muted); }
 .setup-guide-status.is-complete { border-color: #b9dfd0; background: #effaf5; }
 .setup-guide-status.is-complete > span { background: #d5f1e5; color: var(--brand); }
 .setup-guide-actions { margin-top: auto; padding-top: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.setup-voice-inline { height: 32px; padding: 0 5px; border: 0; background: transparent; display: inline-flex; align-items: center; gap: 7px; color: var(--brand); font-size: 11px; font-weight: 800; cursor: pointer; }
-.setup-voice-inline span { width: 23px; height: 23px; border-radius: 50%; background: var(--brand-soft); display: grid; place-items: center; font-size: 8px; }
 .setup-pairing-inline { margin-top: 15px !important; padding: 8px 11px; border-radius: 8px; background: #edf7f3; color: var(--brand-deep) !important; }
 .setup-pairing-inline strong { margin: 0 10px; font: 800 18px/1 ui-monospace, monospace; letter-spacing: .15em; }
 .setup-pairing-inline small { color: var(--muted); }

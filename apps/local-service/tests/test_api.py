@@ -1390,6 +1390,98 @@ def test_analyze_and_plan_atomically_saves_matches_and_generates_greeting(tmp_pa
     assert client.get("/v1/jobs").json()["total"] == 1
 
 
+def test_analyze_and_plan_blocks_unrelated_job_for_ai_agent_target(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            tmp_path / "jobs.sqlite3",
+            embedder=MaterialPreviewEmbedder(),
+            greeting_generator=FakeGreetingGenerator(),
+        )
+    )
+    client.put(
+        "/v1/profile",
+        json={
+            "data": {
+                "targetRoles": ["AI Agent 开发工程师"],
+                "searchKeywords": ["AI Agent 开发工程师"],
+                "summary": "熟悉 Python、RAG 与 Agent 开发",
+                "minimumSuitabilityScore": 1,
+                "minimumCustomizationConfidence": 1,
+            }
+        },
+    )
+
+    response = client.post(
+        "/v1/jobs/analyze-and-plan",
+        json={
+            "job": {
+                "platform": "boss",
+                "platformJobId": "unrelated-hardware-plan",
+                "url": "https://www.zhipin.com/job_detail/unrelated-hardware-plan.html",
+                "title": "FPGA开发工程师",
+                "companyName": "示例硬件公司",
+                "salaryText": "25-40K",
+                "description": "负责 FPGA 逻辑设计，熟悉 Python 辅助开发",
+                "skills": ["Python", "FPGA"],
+                "capturedAt": "2026-10-12T08:00:00Z",
+                "source": "dom",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    match = response.json()["match"]
+    assert match["suitabilityScore"] == 0
+    assert match["decision"]["shouldDeliver"] is False
+    assert match["decision"]["materialStrategy"] == "blocked"
+    assert any("非 AI Agent 目标职类" in reason for reason in match["decision"]["reasons"])
+
+
+def test_analyze_and_plan_accepts_large_model_role_with_agent_duties(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            tmp_path / "jobs.sqlite3",
+            embedder=MaterialPreviewEmbedder(),
+            greeting_generator=FakeGreetingGenerator(),
+        )
+    )
+    client.put(
+        "/v1/profile",
+        json={
+            "data": {
+                "targetRoles": ["AI Agent 开发工程师"],
+                "searchKeywords": ["AI Agent 开发工程师"],
+                "summary": "熟悉 Python、RAG 与 Agent 开发",
+                "minimumSuitabilityScore": 1,
+                "minimumCustomizationConfidence": 1,
+            }
+        },
+    )
+
+    response = client.post(
+        "/v1/jobs/analyze-and-plan",
+        json={
+            "job": {
+                "platform": "boss",
+                "platformJobId": "large-model-agent-plan",
+                "url": "https://www.zhipin.com/job_detail/large-model-agent-plan.html",
+                "title": "大模型应用开发工程师",
+                "companyName": "示例智能公司",
+                "salaryText": "25-40K",
+                "description": "负责企业级 Agent 与 RAG 应用开发",
+                "skills": ["Python", "RAG"],
+                "capturedAt": "2026-10-12T08:00:00Z",
+                "source": "dom",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    match = response.json()["match"]
+    assert match["suitabilityScore"] > 0
+    assert match["decision"]["shouldDeliver"] is True
+
+
 def test_analyze_and_plan_normalizes_private_use_salary_before_persisting(tmp_path) -> None:
     client = TestClient(
         create_app(

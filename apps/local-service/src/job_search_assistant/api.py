@@ -32,13 +32,13 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .auth_token import issue_token, verify_token
-from .config import settings
 from .automation.browser_protocol import (
     ALLOWED_ACTIONS,
     PROTOCOL_VERSION,
     BrowserConnectionHub,
     BrowserProtocolError,
 )
+from .config import settings
 from .domain import (
     DecisionRequest,
     DecisionResponse,
@@ -111,6 +111,7 @@ from .domain.models import (
     StoredJob,
 )
 from .domain.salary import evaluate_salary_policy, normalize_salary_text
+from .domain.target_relevance import evaluate_target_relevance
 from .knowledge import KnowledgeSearchService
 from .project_extraction import (
     GreetingGenerator,
@@ -120,8 +121,8 @@ from .project_extraction import (
     ProjectExtractor,
 )
 from .repositories import (
-    AutomationRepository,
     AuthRepository,
+    AutomationRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -1958,6 +1959,8 @@ def create_router(
         minimum_suitability_score: int | None = None,
         minimum_customization_confidence: int | None = None,
         company_blocked: bool = False,
+        target_roles: list[str] | None = None,
+        search_keywords: list[str] | None = None,
     ) -> JobAnalysisPlanResponse:
         """岗位分析入口：采集流水线与 HTTP 端点共用，因此不依赖 Request 对象。"""
         job_repository.save_many([job], user_id=user_id)
@@ -1985,8 +1988,39 @@ def create_router(
             company_blocked=company_blocked,
         )
 
+        target_relevance = evaluate_target_relevance(
+            title=job.title,
+            description=job.description,
+            target_roles=(
+                target_roles if target_roles is not None else config.target_roles
+            ),
+            search_keywords=(
+                search_keywords
+                if search_keywords is not None
+                else config.search_keywords
+            ),
+        )
+        if not target_relevance.relevant:
+            match = match.model_copy(
+                update={
+                    "suitability_score": 0,
+                    "decision": match.decision.model_copy(
+                        update={
+                            "material_strategy": MaterialStrategy.BLOCKED,
+                            "should_deliver": False,
+                            "effective_suitability_score": 0,
+                            "reasons": [target_relevance.reason],
+                        }
+                    ),
+                    "scoring_version": "local-keyword-v1+target-gate-v1",
+                }
+            )
+
         # 适合度是是否投递的硬门槛；定制可信度不足时才回退默认材料。
-        if match.suitability_score < suitability_threshold:
+        if (
+            match.decision.should_deliver
+            and match.suitability_score < suitability_threshold
+        ):
             match = match.model_copy(
                 update={
                     "decision": match.decision.model_copy(
@@ -2986,6 +3020,8 @@ def create_router(
                         minimum_customization_confidence=int(
                             config.get("minimumCustomizationConfidence", 80)
                         ),
+                        target_roles=string_list(config.get("targetRoles")),
+                        search_keywords=string_list(config.get("searchKeywords")),
                     )
                 except (HTTPException, KeyError, RuntimeError, TypeError, ValueError) as error:
                     error_text = (
