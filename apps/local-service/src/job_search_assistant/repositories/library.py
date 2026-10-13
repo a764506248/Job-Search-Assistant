@@ -11,6 +11,7 @@ from ..database import db_connect, ensure_column, recreate_index, table_exists
 
 LibraryKind = Literal["projects", "resumes", "rules", "models", "targets"]
 ALLOWED_KINDS = {"projects", "resumes", "rules", "models", "targets"}
+MAX_RESUMES_PER_USER = 5
 
 
 class LibraryRepository:
@@ -95,6 +96,8 @@ class LibraryRepository:
         self.initialize()
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
+            if kind == "resumes":
+                self._check_resume_quota(connection, user_id)
             cursor = connection.execute(
                 """
                 INSERT INTO library_records(user_id, kind, name, data_json, created_at, updated_at)
@@ -229,6 +232,7 @@ class LibraryRepository:
             "stagedProjects": projects,
         }
         with self._connect() as connection:
+            self._check_resume_quota(connection, user_id)
             resume_cursor = connection.execute(
                 """INSERT INTO library_records(user_id, kind, name, data_json, created_at, updated_at)
                 VALUES (?, 'resumes', ?, ?, ?, ?) RETURNING id""",
@@ -239,6 +243,29 @@ class LibraryRepository:
             "resumeId": resume_cursor.lastrowid,
             "projectIds": [],
         }
+
+    @staticmethod
+    def _check_resume_quota(connection: Any, user_id: int) -> None:
+        if getattr(connection, "is_postgres", False):
+            # Serialize writes for one account so concurrent requests cannot
+            # both pass the count check and exceed the quota.
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(?)",
+                (1_000_000 + int(user_id),),
+            )
+        else:
+            connection.execute("BEGIN IMMEDIATE")
+        resume_count = int(
+            connection.execute(
+                """SELECT COUNT(*) FROM library_records
+                WHERE kind = 'resumes' AND user_id = ?""",
+                (user_id,),
+            ).fetchone()[0]
+        )
+        if resume_count >= MAX_RESUMES_PER_USER:
+            raise ValueError(
+                f"每个账号最多保存 {MAX_RESUMES_PER_USER} 份简历，请先删除旧简历"
+            )
 
     def confirm_resume(self, resume_id: int, *, user_id: int = 1) -> dict[str, Any]:
         self.initialize()

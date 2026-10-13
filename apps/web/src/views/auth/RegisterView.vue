@@ -1,6 +1,9 @@
 <template>
   <main class="auth-page">
-    <section class="auth-card">
+    <div class="auth-shell">
+      <AuthScene />
+      <section class="auth-card">
+      <div class="auth-brand"><span>J</span><strong>Job Search Assistant</strong></div>
       <p class="eyebrow">JOB SEARCH ASSISTANT</p>
       <h1>申请注册</h1>
       <p class="auth-hint">每个来源 IP 只能申请一个账号。提交后需管理员审核通过，才能登录使用。</p>
@@ -20,13 +23,16 @@
       </form>
 
       <p v-if="!submitted" class="auth-switch">已有账号？<router-link to="/login">返回登录</router-link></p>
-    </section>
+      <p class="auth-security">一个 IP 一个账号 · 审核通过后启用</p>
+      </section>
+    </div>
   </main>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { api } from '../../services/api'
+import AuthScene from './AuthScene.vue'
 
 const username = ref('')
 const password = ref('')

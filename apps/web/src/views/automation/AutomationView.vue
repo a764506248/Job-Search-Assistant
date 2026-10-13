@@ -3,7 +3,7 @@
     <section class="automation-command panel">
       <div><p class="eyebrow">ONE-CLICK AUTOMATION</p><h2>自动投递任务</h2><p>启动一次，系统会自动完成扩展采集和本地分析；准备流程只在企业清单确认处暂停，确认后自动进入投递。</p></div>
       <label>计划投递数<input v-model.number="targetCount" type="number" min="1" max="100" /><small>首次建议只投 1 个</small></label>
-      <label>最多分析职位数<input v-model.number="candidateLimit" type="number" :min="targetCount" max="500" /><small>筛选后通过数可能少于此数</small></label>
+      <label>最多分析职位数<input v-model.number="candidateLimit" type="number" :min="targetCount" max="200" /><small>筛选后通过数可能少于此数</small></label>
       <a-button type="primary" :disabled="launchDisabled" :loading="creating" @click="createRun">{{ launchButtonText }}</a-button>
     </section>
     <section class="automation-collection-settings panel" aria-label="本次采集筛选">
@@ -546,7 +546,7 @@ async function createRun() {
   }
   creating.value = true
   try {
-    const normalizedCandidateLimit = Math.max(targetCount.value, Math.min(Number(candidateLimit.value) || 100, 500))
+    const normalizedCandidateLimit = Math.max(targetCount.value, Math.min(Number(candidateLimit.value) || 100, 200))
     const normalizedIntervalSeconds = Math.max(0, Math.min(Number(collectionIntervalSeconds.value) || 0, 30))
     const normalizedFilters = Object.fromEntries(
       Object.entries(collectionFilters.value).filter(([, value]) => value?.trim()),

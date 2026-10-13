@@ -144,7 +144,7 @@ def test_health(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.4.29"
+    assert response.json()["version"] == "0.4.30"
 
 
 def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:

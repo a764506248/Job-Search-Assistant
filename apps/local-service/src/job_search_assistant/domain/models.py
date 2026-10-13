@@ -117,7 +117,7 @@ class SetupTestRunResponse(ApiModel):
 
 
 class AutomationRunCreateRequest(ApiModel):
-    target_count: int = Field(default=20, ge=1, le=500)
+    target_count: int = Field(default=20, ge=1, le=100)
     config: dict[str, Any] = Field(default_factory=dict)
 
 

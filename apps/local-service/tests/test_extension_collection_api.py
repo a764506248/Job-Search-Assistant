@@ -691,7 +691,8 @@ def test_collection_continues_past_old_three_times_target_until_match(tmp_path) 
     assert collection["rejectedCount"] == 12
     assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == ["eventual-match"]
     assert run["configSnapshot"]["plannedJobs"][0]["greeting"]
-    assert len(collect_calls) == 3
+    assert len(collect_calls) == 5
+    assert all(call["payload"]["limit"] <= 3 for call in collect_calls)
 
 
 def test_pipeline_stops_at_confirmation_then_only_selected_jobs_can_start(tmp_path) -> None:
@@ -798,7 +799,7 @@ def test_connected_unified_extension_is_the_browser_runtime(tmp_path) -> None:
     assert "自动确认" in checks["boss-login"]["message"]
 
 
-def test_collection_stops_after_first_batch_reaches_delivery_target(tmp_path) -> None:
+def test_collection_stops_after_small_batches_reach_delivery_target(tmp_path) -> None:
     jobs = [captured_job(f"batch-job-{index}", f"公司{index}") for index in range(12)]
     hub = FakeConnectedBrowserHub(jobs)
     client = collection_client(tmp_path, hub)
@@ -809,23 +810,23 @@ def test_collection_stops_after_first_batch_reaches_delivery_target(tmp_path) ->
     collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
 
     assert collection["status"] == "ready"
-    assert collection["collectedCount"] == 5
+    assert collection["collectedCount"] == 6
     assert collection["analyzedCount"] == 4
     assert collection["approvedCount"] == 4
-    assert len(collect_calls) == 1
+    assert len(collect_calls) == 2
     assert collect_calls[0]["payload"] == {
-        "limit": 5,
+        "limit": 3,
         "excludeJobIds": [],
         "itemIntervalMs": 2000,
         "searchUrl": "https://www.zhipin.com/web/geek/jobs?query=AI",
         "collectionTabId": 7,
         "scrollPosition": 0,
     }
-    assert collect_calls[0]["deadlineMs"] == 70_000
+    assert collect_calls[0]["deadlineMs"] == 66_000
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
     batch_events = [event for event in events if event["eventType"] == "collection-batch-finished"]
-    assert [event["payload"]["collectedCount"] for event in batch_events] == [5]
-    assert [event["payload"]["newCount"] for event in batch_events] == [5]
+    assert [event["payload"]["collectedCount"] for event in batch_events] == [3, 6]
+    assert [event["payload"]["newCount"] for event in batch_events] == [3, 3]
     checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["boss-login"]["status"] == "ready"
     assert checks["boss-login"]["blocking"] is False

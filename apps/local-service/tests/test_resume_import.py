@@ -139,6 +139,34 @@ def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
     assert updated["data"]["summary"] == "第二版"
 
 
+def test_resume_import_is_limited_to_five_per_account(tmp_path) -> None:
+    client = TestClient(create_app(
+        tmp_path / "jobs.sqlite3",
+        embedder=FakeEmbedder(),
+        project_extractor=StructuredResumeExtractor(),
+    ))
+    for index in range(5):
+        response = client.post(
+            "/v1/resumes/import",
+            files={"file": (f"resume-{index}.txt", f"第 {index + 1} 份简历".encode(), "text/plain")},
+        )
+        assert response.status_code == 201
+
+    rejected = client.post(
+        "/v1/resumes/import",
+        files={"file": ("resume-6.txt", "第 6 份简历".encode(), "text/plain")},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "每个账号最多保存 5 份简历，请先删除旧简历"
+    direct_create = client.post(
+        "/v1/library/resumes",
+        json={"name": "bypass.txt", "data": {"rawText": "绕过上传接口"}},
+    )
+    assert direct_create.status_code == 400
+    assert direct_create.json()["detail"] == rejected.json()["detail"]
+    assert len(client.get("/v1/library/resumes").json()["items"]) == 5
+
+
 def test_pdf_import_generates_first_page_image_and_supports_default_selection(
     tmp_path,
 ) -> None:

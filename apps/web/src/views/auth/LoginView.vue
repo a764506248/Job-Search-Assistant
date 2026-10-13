@@ -1,6 +1,9 @@
 <template>
   <main class="auth-page">
-    <section class="auth-card">
+    <div class="auth-shell">
+      <AuthScene />
+      <section class="auth-card">
+      <div class="auth-brand"><span>J</span><strong>Job Search Assistant</strong></div>
       <p class="eyebrow">JOB SEARCH ASSISTANT</p>
       <h1>{{ needsSetup ? '创建管理员账号' : '登录' }}</h1>
       <p class="auth-hint">
@@ -19,7 +22,9 @@
       <p v-if="!needsSetup && !checking" class="auth-switch">
         还没有账号？<router-link to="/register">申请注册</router-link>
       </p>
-    </section>
+      <p class="auth-security">端到端账号隔离 · 操作全程留痕</p>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -27,6 +32,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../services/api'
+import AuthScene from './AuthScene.vue'
 
 const router = useRouter()
 const username = ref('')

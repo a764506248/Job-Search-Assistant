@@ -129,7 +129,7 @@ from .repositories import (
     JobRepository,
     LibraryRepository,
 )
-from .repositories.library import ALLOWED_KINDS, LibraryKind
+from .repositories.library import ALLOWED_KINDS, MAX_RESUMES_PER_USER, LibraryKind
 from .resume_html import build_resume_html
 from .resume_images import render_pdf_first_page
 from .resume_import import MAX_RESUME_BYTES, extract_projects_from_text, parse_resume
@@ -138,7 +138,8 @@ from .resume_templates import RESUME_TEMPLATES, SAMPLE_RESUME, TEAL_PROFESSIONAL
 
 logger = logging.getLogger("job_search_assistant.client")
 MIN_COLLECTION_EXTENSION_VERSION = (0, 4, 15)
-COLLECTION_BATCH_SIZE = 5
+COLLECTION_BATCH_SIZE = 3
+MAX_CANDIDATE_LIMIT = 200
 COLLECTION_BATCH_DEADLINE_MS = 60_000
 COLLECTION_BATCH_RETRY_COUNT = 1
 MAX_COLLECTION_BATCH_DEADLINE_MS = 330_000
@@ -2454,7 +2455,7 @@ def create_router(
             configured_candidate_limit = int(config.get("candidateLimit", 100) or 100)
         except (TypeError, ValueError):
             configured_candidate_limit = 100
-        candidate_limit = max(target_count, min(configured_candidate_limit, 500))
+        candidate_limit = max(target_count, min(configured_candidate_limit, MAX_CANDIDATE_LIMIT))
         try:
             configured_interval_ms = int(config.get("collectionIntervalMs", 2_000) or 0)
         except (TypeError, ValueError):
@@ -3371,6 +3372,10 @@ def create_router(
         user_id = int(user["id"])
         filename = Path((file.filename or "resume").replace("\\", "/")).name
         try:
+            if len(library_repository.list("resumes", user_id=user_id)) >= MAX_RESUMES_PER_USER:
+                raise ValueError(
+                    f"每个账号最多保存 {MAX_RESUMES_PER_USER} 份简历，请先删除旧简历"
+                )
             file_content = await file.read(MAX_RESUME_BYTES + 1)
             parsed = parse_resume(filename, file_content)
             if Path(filename).suffix.lower() == ".pdf":
@@ -3607,14 +3612,17 @@ def create_router(
         user = required_user(http_request)
         user_id = int(user["id"])
         valid = valid_kind(kind)
-        if valid == "models":
-            validate_model_data(request.data)
-            return public_model_record(
+        try:
+            if valid == "models":
+                validate_model_data(request.data)
+                return public_model_record(
+                    library_repository.create(valid, request.name, request.data, user_id=user_id)
+                )
+            record = LibraryRecord.model_validate(
                 library_repository.create(valid, request.name, request.data, user_id=user_id)
             )
-        record = LibraryRecord.model_validate(
-            library_repository.create(valid, request.name, request.data, user_id=user_id)
-        )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         return record
 
     @router.put("/library/{kind}/{record_id}", response_model=LibraryRecord)
