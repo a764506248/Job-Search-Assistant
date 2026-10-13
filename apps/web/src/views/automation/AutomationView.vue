@@ -18,7 +18,7 @@
         <label>薪资待遇<select v-model="collectionFilters.salary"><option value="">不限</option><option value="402">3K 以下</option><option value="403">3–5K</option><option value="404">5–10K</option><option value="405">10–20K</option><option value="406">20–50K</option><option value="407">50K 以上</option></select></label>
         <label>工作经验<select v-model="collectionFilters.experience"><option value="">不限</option><option value="102">在校/应届</option><option value="103">1年以内</option><option value="104">1–3年</option><option value="105">3–5年</option><option value="106">5–10年</option><option value="107">10年以上</option></select></label>
         <label>学历要求<select v-model="collectionFilters.degree"><option value="">不限</option><option value="202">初中及以下</option><option value="203">中专/中技</option><option value="204">高中</option><option value="205">大专</option><option value="206">本科</option><option value="207">硕士</option><option value="208">博士</option></select></label>
-        <label>公司规模<select v-model="collectionFilters.scale"><option value="">不限</option><option value="301">0–20人</option><option value="302">20–99人</option><option value="303">100–499人</option><option value="304">500–999人</option><option value="305">1000–9999人</option><option value="306">10000人以上</option></select></label>
+        <label>公司规模<a-select v-model:value="companyScaleCodes" class="company-scale-select" mode="multiple" :options="companyScaleOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
         <label>公司行业编码<input v-model="collectionFilters.industry" inputmode="numeric" placeholder="可选；多个编码用逗号分隔" /></label>
         <label>岗位采集间隔（秒）<input v-model.number="collectionIntervalSeconds" type="number" min="0" max="30" step="0.5" /></label>
       </div>
@@ -228,13 +228,21 @@ const candidateLimit = ref(10)
 const searchKeywordsInput = ref('')
 const collectionCityCode = ref('')
 const collectionIntervalSeconds = ref(2)
+const companyScaleOptions = [
+  { value: '301', label: '0–20人' },
+  { value: '302', label: '20–99人' },
+  { value: '303', label: '100–499人' },
+  { value: '304', label: '500–999人' },
+  { value: '305', label: '1000–9999人' },
+  { value: '306', label: '10000人以上' },
+]
+const companyScaleCodes = ref<string[]>([])
 const collectionFilters = ref<AutomationCollectionFilters>({
   jobType: '',
   salary: '',
   experience: '',
   degree: '',
   industry: '',
-  scale: '',
 })
 const creating = ref(false)
 const collectingRunId = ref<number>()
@@ -500,6 +508,7 @@ async function createRun() {
     const normalizedFilters = Object.fromEntries(
       Object.entries(collectionFilters.value).filter(([, value]) => value?.trim()),
     )
+    if (companyScaleCodes.value.length) normalizedFilters.scale = companyScaleCodes.value.join(',')
     const keywords = searchKeywordsInput.value.split(/[,，\n]/).map(value => value.trim()).filter(Boolean)
     candidateLimit.value = normalizedCandidateLimit
     collectionIntervalSeconds.value = normalizedIntervalSeconds
@@ -779,6 +788,16 @@ useRefresh(load)
 .automation-filter-grid select:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px rgb(23 107 85 / 10%);
+}
+
+.automation-filter-grid .company-scale-select {
+  width: 100%;
+}
+
+.automation-filter-grid .company-scale-select :deep(.ant-select-selector) {
+  min-height: 34px;
+  border-color: var(--line);
+  border-radius: 8px;
 }
 
 .automation-collection-settings > p {

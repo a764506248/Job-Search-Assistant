@@ -469,7 +469,7 @@ def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
                 "experience": "105",
                 "degree": "206",
                 "industry": "100021",
-                "scale": "304",
+                "scale": "304,999,302",
             },
         },
     )
@@ -499,7 +499,7 @@ def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
             "experience": "105",
             "degree": "206",
             "industry": "100021",
-            "scale": "304",
+            "scale": "302,304",
         },
     }
     assert hub.calls[2]["payload"]["excludeJobIds"] == ["historical-job"]

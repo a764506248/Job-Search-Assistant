@@ -149,6 +149,7 @@ COLLECTION_FILTER_KEYS = (
     "industry",
     "scale",
 )
+BOSS_COMPANY_SCALE_CODES = ("301", "302", "303", "304", "305", "306")
 
 
 def extension_supports_collection(version: object) -> bool:
@@ -2415,6 +2416,15 @@ def create_router(
                 str(raw_collection_filters.get(key, "")).strip(),
             )
         }
+        if "scale" in collection_filters:
+            selected_scale_codes = set(collection_filters["scale"].split(","))
+            normalized_scale_codes = [
+                code for code in BOSS_COMPANY_SCALE_CODES if code in selected_scale_codes
+            ]
+            if normalized_scale_codes:
+                collection_filters["scale"] = ",".join(normalized_scale_codes)
+            else:
+                collection_filters.pop("scale", None)
         historical_job_ids = set(
             await run_in_threadpool(
                 job_repository.list_platform_job_ids, "boss", user_id=user_id

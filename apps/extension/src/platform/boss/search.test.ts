@@ -9,7 +9,7 @@ describe('BOSS search URL', () => {
       experience: '105',
       degree: '206',
       industry: '100021,100020',
-      scale: '304',
+      scale: '302,303,304',
     }))
 
     expect(Object.fromEntries(url.searchParams)).toMatchObject({
@@ -20,7 +20,7 @@ describe('BOSS search URL', () => {
       experience: '105',
       degree: '206',
       industry: '100021,100020',
-      scale: '304',
+      scale: '302,303,304',
     })
   })
 

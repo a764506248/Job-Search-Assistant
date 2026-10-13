@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { Button, Checkbox, ConfigProvider, Input, Layout, Modal, Pagination } from 'ant-design-vue'
+import { Button, Checkbox, ConfigProvider, Input, Layout, Modal, Pagination, Select } from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
 import './styles/main.css'
 import App from './app/App.vue'
@@ -20,4 +20,5 @@ createApp(App)
   .use(Layout)
   .use(Modal)
   .use(Pagination)
+  .use(Select)
   .mount('#app')
