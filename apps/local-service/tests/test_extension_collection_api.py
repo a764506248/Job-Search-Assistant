@@ -560,7 +560,7 @@ def test_automatic_pipeline_deduplicates_analyzes_and_never_sends(tmp_path) -> N
         for event in events
         if event["eventType"] == "collection-stage-changed"
     ]
-    assert phases == ["searching", "collecting", "analyzing", "awaiting_confirmation"]
+    assert phases == ["searching", "collecting", "awaiting_confirmation"]
 
     calls_before_idempotent_retry = len(hub.calls)
     retry = client.post(f"/v1/automation/runs/{created['id']}/collect")
@@ -792,7 +792,7 @@ def test_connected_unified_extension_is_the_browser_runtime(tmp_path) -> None:
     assert "自动确认" in checks["boss-login"]["message"]
 
 
-def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> None:
+def test_collection_stops_after_first_batch_reaches_delivery_target(tmp_path) -> None:
     jobs = [captured_job(f"batch-job-{index}", f"公司{index}") for index in range(12)]
     hub = FakeConnectedBrowserHub(jobs)
     client = collection_client(tmp_path, hub)
@@ -803,27 +803,20 @@ def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> No
     collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
 
     assert collection["status"] == "ready"
-    assert collection["collectedCount"] == 12
-    assert len(collect_calls) == 3
+    assert collection["collectedCount"] == 5
+    assert collection["analyzedCount"] == 4
+    assert collection["approvedCount"] == 4
+    assert len(collect_calls) == 1
     assert collect_calls[0]["payload"] == {
         "limit": 5,
         "excludeJobIds": [],
         "itemIntervalMs": 2000,
     }
     assert collect_calls[0]["deadlineMs"] == 70_000
-    assert collect_calls[1]["payload"]["limit"] == 5
-    assert collect_calls[1]["payload"]["excludeJobIds"] == [
-        f"batch-job-{index}" for index in range(5)
-    ]
-    assert collect_calls[1]["deadlineMs"] == 70_000
-    assert collect_calls[2]["payload"]["excludeJobIds"] == [
-        f"batch-job-{index}" for index in range(10)
-    ]
-
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
     batch_events = [event for event in events if event["eventType"] == "collection-batch-finished"]
-    assert [event["payload"]["collectedCount"] for event in batch_events] == [5, 10, 12]
-    assert [event["payload"]["newCount"] for event in batch_events] == [5, 5, 2]
+    assert [event["payload"]["collectedCount"] for event in batch_events] == [5]
+    assert [event["payload"]["newCount"] for event in batch_events] == [5]
     checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["boss-login"]["status"] == "ready"
     assert checks["boss-login"]["blocking"] is False
@@ -832,7 +825,7 @@ def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> No
 def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> None:
     hub = TimeoutAfterFirstBatchHub([captured_job("retained-job", "保留公司")])
     client = collection_client(tmp_path, hub)
-    created = create_pending_run(client, target_count=1)
+    created = create_pending_run(client, target_count=2)
 
     run = client.get(f"/v1/automation/runs/{created['id']}").json()
     collection = run["configSnapshot"]["collection"]

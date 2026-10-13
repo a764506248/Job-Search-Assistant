@@ -1469,6 +1469,17 @@ def create_router(
         user = required_user(http_request)
         return automation_run(run_id, int(user["id"]))
 
+    @router.delete("/automation/runs/{run_id}", status_code=204)
+    def delete_automation_run(run_id: int, http_request: Request) -> Response:
+        user = required_user(http_request)
+        try:
+            automation_repository.delete_run(run_id, user_id=int(user["id"]))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="automation run not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return Response(status_code=204)
+
     @router.get("/automation/runs/{run_id}/report", response_model=AutomationReport)
     def get_automation_report(run_id: int, http_request: Request) -> AutomationReport:
         user = required_user(http_request)
@@ -2476,6 +2487,152 @@ def create_router(
         browser_errors: list[str] = []
         skipped_count = 0
         exhausted_without_new_jobs = False
+        planned_jobs: list[dict[str, object]] = []
+        reviewed_jobs: list[dict[str, object]] = []
+        rejected_count = 0
+        rule_rejected_count = 0
+        duplicate_count = 0
+        material_error_count = 0
+        analysis_error_count = 0
+        analyzed_count = 0
+        analysis_errors: list[str] = []
+        analysis_started = False
+
+        def review_identity(
+            job: CapturedJob, snapshot: StoredJob | None = None
+        ) -> dict[str, object]:
+            if snapshot is None:
+                try:
+                    snapshot = job_repository.get_by_platform_job_id(
+                        job.platform, job.platform_job_id, user_id=user_id
+                    )
+                except KeyError:
+                    snapshot = None
+            return {
+                "snapshotId": snapshot.id if snapshot is not None else None,
+                "jobId": job.platform_job_id,
+                "title": snapshot.title if snapshot is not None else job.title,
+                "companyName": snapshot.company_name if snapshot is not None else job.company_name,
+                "salaryText": snapshot.salary_text if snapshot is not None else job.salary_text,
+                "location": snapshot.location if snapshot is not None else job.location,
+            }
+
+        def persist_analysis_progress() -> None:
+            automation_repository.update_collection(
+                run_id,
+                "collecting",
+                planned_jobs=planned_jobs,
+                details={
+                    "phase": "collecting_and_analyzing",
+                    "attemptId": attempt_id,
+                    "collectedCount": len(captured),
+                    "analyzedCount": analyzed_count,
+                    "approvedCount": len(planned_jobs),
+                    "rejectedCount": rejected_count,
+                    "ruleRejectedCount": rule_rejected_count,
+                    "duplicateCount": duplicate_count,
+                    "materialErrorCount": material_error_count,
+                    "analysisErrorCount": analysis_error_count,
+                    "reviewedJobs": reviewed_jobs,
+                },
+                emit_event=False,
+            )
+
+        async def analyze_jobs(jobs: list[CapturedJob]) -> None:
+            nonlocal analyzed_count, rejected_count, rule_rejected_count
+            nonlocal duplicate_count, material_error_count, analysis_error_count
+            nonlocal analysis_started
+            if jobs and not analysis_started:
+                analysis_started = True
+                automation_repository.append_event(
+                    run_id,
+                    "analysis-started",
+                    "info",
+                    {
+                        "phase": "collecting_and_analyzing",
+                        "attemptId": attempt_id,
+                        "operation": "analyze-and-plan",
+                        "message": "首批职位已采集，开始边采集边分析",
+                    },
+                )
+            for job in jobs:
+                if len(planned_jobs) >= target_count:
+                    break
+                ensure_collection_active(run_id)
+                analyzed_count += 1
+                try:
+                    result = await run_in_threadpool(
+                        resolve_job_plan,
+                        job,
+                        user_id=user_id,
+                        minimum_suitability_score=int(config.get("minimumSuitabilityScore", 60)),
+                        minimum_customization_confidence=int(
+                            config.get("minimumCustomizationConfidence", 80)
+                        ),
+                        target_roles=string_list(config.get("targetRoles")),
+                        search_keywords=string_list(config.get("searchKeywords")),
+                    )
+                except Exception as error:  # noqa: BLE001
+                    error_text = (
+                        str(error.detail)
+                        if isinstance(error, HTTPException)
+                        else str(error) or error.__class__.__name__
+                    )
+                    analysis_errors.append(f"{job.title}：{error_text}")
+                    rejected_count += 1
+                    analysis_error_count += 1
+                    reviewed_jobs.append({
+                        **review_identity(job),
+                        "outcome": "analysis_error",
+                        "suitabilityScore": None,
+                        "reasons": [error_text],
+                        "ruleMatches": [],
+                    })
+                    persist_analysis_progress()
+                    continue
+                snapshot = result.snapshot
+                decision = result.match.decision
+                reasons = list(decision.reasons)
+                rule_matches = [
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in decision.rule_matches
+                ]
+                if result.duplicate:
+                    outcome = "duplicate"
+                    duplicate_count += 1
+                elif not decision.should_deliver:
+                    outcome = "rule_rejected"
+                    rule_rejected_count += 1
+                elif not result.generated_greeting:
+                    outcome = "material_error"
+                    material_error_count += 1
+                    reasons = list(dict.fromkeys([*reasons, "未生成可用问候语"]))
+                else:
+                    outcome = "approved"
+                reviewed_jobs.append({
+                    **review_identity(job, snapshot),
+                    "outcome": outcome,
+                    "suitabilityScore": result.match.suitability_score,
+                    "reasons": reasons,
+                    "ruleMatches": rule_matches,
+                })
+                if outcome != "approved":
+                    rejected_count += 1
+                    persist_analysis_progress()
+                    continue
+                planned_jobs.append({
+                    "snapshotId": snapshot.id,
+                    "jobId": snapshot.platform_job_id,
+                    "url": snapshot.url,
+                    "title": snapshot.title,
+                    "companyName": snapshot.company_name,
+                    "salaryText": snapshot.salary_text,
+                    "location": snapshot.location,
+                    "greeting": result.generated_greeting,
+                    "suitabilityScore": result.match.suitability_score,
+                    "materialStrategy": result.match.decision.material_strategy.value,
+                })
+                persist_analysis_progress()
 
         async with collection_lock:
             ensure_collection_active(run_id)
@@ -2866,6 +3023,7 @@ def create_router(
                         await run_in_threadpool(
                             job_repository.save_many, new_jobs, user_id=user_id
                         )
+                        await analyze_jobs(new_jobs)
 
                     exhausted = collection.evidence.get("exhausted") is True
                     if exhausted and not new_jobs:
@@ -2899,6 +3057,9 @@ def create_router(
                             "exhausted": exhausted,
                         },
                     )
+                    if len(planned_jobs) >= target_count:
+                        halt_collection = True
+                        break
                     if exhausted or not new_jobs:
                         break
 
@@ -2971,190 +3132,6 @@ def create_router(
                     },
                 )
                 raise HTTPException(status_code=409, detail=reason)
-
-            planned_jobs: list[dict[str, object]] = []
-            reviewed_jobs: list[dict[str, object]] = []
-            rejected_count = 0
-            rule_rejected_count = 0
-            duplicate_count = 0
-            material_error_count = 0
-            analysis_error_count = 0
-            analyzed_count = 0
-            analysis_errors: list[str] = []
-
-            def persist_analysis_progress() -> None:
-                automation_repository.update_collection(
-                    run_id,
-                    "collecting",
-                    planned_jobs=planned_jobs,
-                    details={
-                        "phase": "analyzing",
-                        "attemptId": attempt_id,
-                        "analyzedCount": analyzed_count,
-                        "approvedCount": len(planned_jobs),
-                        "rejectedCount": rejected_count,
-                        "ruleRejectedCount": rule_rejected_count,
-                        "duplicateCount": duplicate_count,
-                        "materialErrorCount": material_error_count,
-                        "analysisErrorCount": analysis_error_count,
-                        "reviewedJobs": reviewed_jobs,
-                    },
-                    emit_event=False,
-                )
-
-            def review_identity(
-                job: CapturedJob, snapshot: StoredJob | None = None
-            ) -> dict[str, object]:
-                if snapshot is None:
-                    try:
-                        snapshot = job_repository.get_by_platform_job_id(
-                            job.platform, job.platform_job_id, user_id=user_id
-                        )
-                    except KeyError:
-                        snapshot = None
-                return {
-                    "snapshotId": snapshot.id if snapshot is not None else None,
-                    "jobId": job.platform_job_id,
-                    "title": snapshot.title if snapshot is not None else job.title,
-                    "companyName": (
-                        snapshot.company_name if snapshot is not None else job.company_name
-                    ),
-                    "salaryText": (
-                        snapshot.salary_text if snapshot is not None else job.salary_text
-                    ),
-                    "location": snapshot.location if snapshot is not None else job.location,
-                }
-
-            automation_repository.update_collection(
-                run_id,
-                "collecting",
-                details={
-                    "phase": "analyzing",
-                    "attemptId": attempt_id,
-                    "currentKeyword": None,
-                    "collectedCount": len(captured),
-                    "analyzedCount": 0,
-                    "approvedCount": 0,
-                    "rejectedCount": 0,
-                    "ruleRejectedCount": 0,
-                    "duplicateCount": 0,
-                    "materialErrorCount": 0,
-                    "analysisErrorCount": 0,
-                    "reviewedJobs": [],
-                },
-                emit_event=False,
-            )
-            automation_repository.append_event(
-                run_id,
-                "collection-stage-changed",
-                "info",
-                {
-                    "phase": "analyzing",
-                    "attemptId": attempt_id,
-                    "collectedCount": len(captured),
-                    "message": "本地服务正在逐个执行 analyze-and-plan",
-                },
-            )
-            automation_repository.append_event(
-                run_id,
-                "analysis-started",
-                "info",
-                {
-                    "phase": "analyzing",
-                    "attemptId": attempt_id,
-                    "collectedCount": len(captured),
-                    "operation": "analyze-and-plan",
-                },
-            )
-            for job in captured.values():
-                ensure_collection_active(run_id)
-                analyzed_count += 1
-                try:
-                    result = await run_in_threadpool(
-                        resolve_job_plan,
-                        job,
-                        user_id=user_id,
-                        minimum_suitability_score=int(
-                            config.get("minimumSuitabilityScore", 60)
-                        ),
-                        minimum_customization_confidence=int(
-                            config.get("minimumCustomizationConfidence", 80)
-                        ),
-                        target_roles=string_list(config.get("targetRoles")),
-                        search_keywords=string_list(config.get("searchKeywords")),
-                    )
-                except Exception as error:  # noqa: BLE001 - 单个岗位失败不能丢弃已通过清单
-                    error_text = (
-                        str(error.detail)
-                        if isinstance(error, HTTPException)
-                        else str(error) or error.__class__.__name__
-                    )
-                    analysis_errors.append(f"{job.title}：{error_text}")
-                    rejected_count += 1
-                    analysis_error_count += 1
-                    reviewed_jobs.append(
-                        {
-                            **review_identity(job),
-                            "outcome": "analysis_error",
-                            "suitabilityScore": None,
-                            "reasons": [error_text],
-                            "ruleMatches": [],
-                        }
-                    )
-                    persist_analysis_progress()
-                    continue
-
-                snapshot = result.snapshot
-                decision = result.match.decision
-                reasons = list(decision.reasons)
-                rule_matches = [
-                    item.model_dump(mode="json", by_alias=True)
-                    for item in decision.rule_matches
-                ]
-                if result.duplicate:
-                    outcome = "duplicate"
-                    duplicate_count += 1
-                elif not decision.should_deliver:
-                    outcome = "rule_rejected"
-                    rule_rejected_count += 1
-                elif not result.generated_greeting:
-                    outcome = "material_error"
-                    material_error_count += 1
-                    reasons = list(dict.fromkeys([*reasons, "未生成可用问候语"]))
-                else:
-                    outcome = "approved"
-
-                reviewed_jobs.append(
-                    {
-                        **review_identity(job, snapshot),
-                        "outcome": outcome,
-                        "suitabilityScore": result.match.suitability_score,
-                        "reasons": reasons,
-                        "ruleMatches": rule_matches,
-                    }
-                )
-                if outcome != "approved":
-                    rejected_count += 1
-                    persist_analysis_progress()
-                    continue
-
-                planned_jobs.append(
-                    {
-                        "snapshotId": snapshot.id,
-                        "jobId": snapshot.platform_job_id,
-                        "url": snapshot.url,
-                        "title": snapshot.title,
-                        "companyName": snapshot.company_name,
-                        "salaryText": snapshot.salary_text,
-                        "location": snapshot.location,
-                        "greeting": result.generated_greeting,
-                        "suitabilityScore": result.match.suitability_score,
-                        "materialStrategy": result.match.decision.material_strategy.value,
-                    }
-                )
-                persist_analysis_progress()
-                if len(planned_jobs) >= target_count:
-                    break
 
             ensure_collection_active(run_id)
             details = {

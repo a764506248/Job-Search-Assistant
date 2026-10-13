@@ -92,6 +92,7 @@ export const api = {
   createBrowserPairing: () => request<BrowserPairing>('/v1/browser/pairing', { method: 'POST' }),
   testBrowserConnection: () => request<{ status: string; evidence: Record<string, unknown> }>('/v1/browser/actions/test', json('POST', { action: 'ping', payload: {} })),
   automationRuns: () => request<{ items: AutomationRun[] }>('/v1/automation/runs'),
+  deleteAutomationRun: (id: number) => request<void>(`/v1/automation/runs/${id}`, { method: 'DELETE' }),
   deliveries: (limit = 500) => request<{ total: number; items: DeliveryRecord[] }>(`/v1/deliveries?limit=${limit}`),
   createAutomationRun: (targetCount: number, config: AutomationCollectionConfig) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config })),
   collectAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collect`, { method: 'POST' }),

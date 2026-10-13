@@ -50,6 +50,7 @@
             <a-button v-if="run.status === 'running'" size="small" @click="control(run, 'pause')">暂停</a-button>
             <a-button v-if="run.status === 'paused'" size="small" @click="control(run, 'resume')">继续</a-button>
             <a-button v-if="['running','paused'].includes(run.status)" size="small" danger @click="control(run, 'stop')">停止</a-button>
+            <a-button v-if="canDeleteRun(run)" size="small" danger :loading="deletingRunId === run.id" @click="deleteRun(run)">删除</a-button>
           </div>
         </article>
       </section>
@@ -71,8 +72,7 @@
             <div class="automation-activity" role="status" aria-live="polite">
               <i aria-hidden="true"></i>
               <span>已用时 {{ collectionElapsedText }}</span>
-              <span v-if="!isAnalyzing">分批采集，每批最长约 30 秒</span>
-              <span v-else>分析结果会逐条更新</span>
+              <span>每批采集后立即分析，结果会逐条更新</span>
             </div>
             <div class="automation-live-progress" :class="{ 'is-analyzing': isAnalyzing }">
               <div class="automation-live-progress-heading">
@@ -85,7 +85,7 @@
             </div>
             <div class="automation-progress-metrics" aria-label="实时处理统计">
               <div><span>采集</span><strong>{{ collection?.collectedCount || 0 }}</strong><small>候选职位</small></div>
-              <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>{{ isAnalyzing ? '正在逐条处理' : '采集完成后开始' }}</small></div>
+              <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>与采集流水处理</small></div>
               <div><span>通过</span><strong>{{ collection?.approvedCount || 0 }}</strong><small>进入待确认</small></div>
               <div v-if="collection?.existingExcludedCount"><span>投递排除</span><strong>{{ collection.existingExcludedCount }}</strong><small>已联系岗位</small></div>
             </div>
@@ -274,6 +274,7 @@ const collectingRunId = ref<number>()
 const stoppingCollectionRunId = ref<number>()
 const starting = ref(false)
 const retryingRunId = ref<number>()
+const deletingRunId = ref<number>()
 const runs = ref<AutomationRun[]>([])
 const selected = ref<AutomationRun>()
 const events = ref<AutomationEvent[]>([])
@@ -337,7 +338,7 @@ const collectionFor = (run?: AutomationRun): AutomationCollectionState | undefin
 const collection = computed(() => collectionFor(selected.value))
 const collectionStatus = computed<AutomationCollectionStatus>(() => collection.value?.status || 'pending')
 const collectionPhase = computed(() => collection.value?.phase || (collectionStatus.value === 'ready' ? 'awaiting_confirmation' : collectionStatus.value))
-const isAnalyzing = computed(() => collectionPhase.value === 'analyzing' || (collection.value?.analyzedCount || 0) > 0)
+const isAnalyzing = computed(() => ['analyzing', 'collecting_and_analyzing'].includes(collectionPhase.value) || (collection.value?.analyzedCount || 0) > 0)
 const isNoMatchesState = (state?: AutomationCollectionState) => state?.status === 'no_matches'
   || (state?.status === 'failed' && (state.collectedCount ?? 0) > 0)
 const isNoMatches = computed(() => isNoMatchesState(collection.value))
@@ -454,6 +455,8 @@ const pipelineStageClass = (stage: number) => ({ active: pipelineStep.value === 
 const isErrorStatus = (status: string) => ['failed', 'blocked', 'cancelled'].includes(status)
 const isRetryable = (run: AutomationRun) => ['failed', 'blocked', 'cancelled'].includes(run.status)
   && plannedCount(run) > run.successCount
+const canDeleteRun = (run: AutomationRun) => !['ready', 'running', 'paused', 'stopping'].includes(run.status)
+  && !(run.status === 'draft' && ['pending', 'collecting'].includes(collectionFor(run)?.status || 'pending'))
 const reviewOutcomeName = (outcome: AutomationReviewOutcome) => reviewOutcomeNames[outcome]
 const reviewReasons = (job: AutomationReviewedJob) => job.reasons.length ? job.reasons : [{
   approved: '符合当前投递规则',
@@ -650,6 +653,36 @@ async function stopSelectedCollection() {
   }
 }
 async function control(run: AutomationRun, action: 'start' | 'pause' | 'resume' | 'stop') { try { selected.value = await api.controlAutomationRun(run.id, action); await load(); await loadEvents(run.id) } catch (error) { message.error((error as Error).message) } }
+function deleteRun(run: AutomationRun) {
+  Modal.confirm({
+    title: `删除任务记录 #${run.id}？`,
+    content: '该任务的事件和投递执行记录也会一并删除，职位快照和已经成功投递的岗位记录不会被删除。',
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      deletingRunId.value = run.id
+      try {
+        await api.deleteAutomationRun(run.id)
+        recoveryStates.delete(run.id)
+        if (selected.value?.id === run.id) {
+          stream?.close()
+          selected.value = undefined
+          report.value = undefined
+          events.value = []
+        }
+        await load()
+        if (!selected.value && runs.value[0]) await selectRun(runs.value[0])
+        message.success(`任务记录 #${run.id} 已删除`)
+      } catch (error) {
+        message.error((error as Error).message)
+        throw error
+      } finally {
+        deletingRunId.value = undefined
+      }
+    },
+  })
+}
 function retryRun(run: AutomationRun) {
   Modal.confirm({
     title: `确认重试任务 #${run.id}？`,
@@ -1114,9 +1147,14 @@ useRefresh(load)
 }
 
 .automation-review-results {
+  max-height: min(58vh, 680px);
   margin-top: 15px;
+  padding-right: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: 8px;
+  scrollbar-gutter: stable;
 }
 
 .automation-review-heading {

@@ -143,6 +143,27 @@ class AutomationRepository:
         )
         return result
 
+    def delete_run(self, run_id: int, *, user_id: int) -> None:
+        """Delete an inactive user-owned task and its audit children."""
+        run = self.get_run(run_id, user_id=user_id)
+        if run["status"] in {"ready", "running", "paused", "stopping"}:
+            raise ValueError("active automation run cannot be deleted")
+        collection = run["config_snapshot"].get("collection", {})
+        if run["status"] == "draft" and collection.get("status") in {
+            "pending",
+            "collecting",
+        }:
+            raise ValueError("active automation collection cannot be deleted")
+        with db_connect(self.database_path) as connection:
+            connection.execute("DELETE FROM automation_actions WHERE run_id = ?", (run_id,))
+            connection.execute("DELETE FROM automation_events WHERE run_id = ?", (run_id,))
+            deleted = connection.execute(
+                "DELETE FROM automation_runs WHERE id = ? AND user_id = ?",
+                (run_id, user_id),
+            )
+            if deleted.rowcount != 1:
+                raise KeyError(run_id)
+
     def confirm_plan(
         self, run_id: int, planned_jobs: list[dict[str, Any]]
     ) -> dict[str, Any]:
