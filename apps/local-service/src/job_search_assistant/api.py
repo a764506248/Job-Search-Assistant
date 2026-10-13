@@ -2319,7 +2319,7 @@ def create_router(
                 scheduled_collection_run_ids.discard(run_id)
 
     async def collect_and_analyze_automation_jobs(run_id: int, user_id: int | None = None) -> AutomationRun:
-        """Collect through the extension, then analyze locally without any send action."""
+        """Collect through the extension and analyze each completed batch locally."""
         run = automation_run(run_id)
         if user_id is None:
             user_id = run_owner_id(run_id)
@@ -2858,7 +2858,11 @@ def create_router(
                         run_id,
                         "collecting",
                         details={
-                            "phase": "collecting",
+                            "phase": (
+                                "collecting_and_analyzing"
+                                if analysis_started
+                                else "collecting"
+                            ),
                             "currentKeyword": keyword,
                             "collectedCount": len(captured),
                             "batchNumber": batch_number,
@@ -3032,7 +3036,11 @@ def create_router(
                         run_id,
                         "collecting",
                         details={
-                            "phase": "collecting",
+                            "phase": (
+                                "collecting_and_analyzing"
+                                if analysis_started
+                                else "collecting"
+                            ),
                             "currentKeyword": keyword,
                             "collectedCount": len(captured),
                             "skippedCount": skipped_count,
