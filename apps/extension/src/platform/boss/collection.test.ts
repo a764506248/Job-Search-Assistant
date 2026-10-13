@@ -1,9 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { collectBossSearchJobs } from './collection'
+import {
+  collectBossSearchJobs,
+  readBossSearchScrollPosition,
+  restoreBossSearchScrollPosition,
+} from './collection'
 
 describe('collectBossSearchJobs', () => {
   beforeEach(() => { document.body.innerHTML = '' })
   afterEach(() => { vi.useRealTimers() })
+
+  it('restores and reports the search-list scroll position between batches', () => {
+    document.body.innerHTML = '<main class="job-list-container"></main>'
+    const container = document.querySelector<HTMLElement>('.job-list-container')!
+    Object.defineProperty(container, 'scrollTop', { value: 0, writable: true })
+    const scrollListener = vi.fn()
+    container.addEventListener('scroll', scrollListener)
+
+    restoreBossSearchScrollPosition(document, 860)
+
+    expect(container.scrollTop).toBe(860)
+    expect(readBossSearchScrollPosition(document)).toBe(860)
+    expect(scrollListener).toHaveBeenCalledOnce()
+  })
 
   it('clicks search cards, captures stable details and keeps the detail URL', async () => {
     document.body.innerHTML = `

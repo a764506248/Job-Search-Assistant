@@ -51,6 +51,7 @@ export interface BossSearchCollectionOptions {
   lazyLoadWaitMs?: number
   timeBudgetMs?: number
   excludeJobIds?: Iterable<string>
+  scrollPosition?: number
 }
 
 export async function collectBossSearchJobs(
@@ -95,6 +96,8 @@ export async function collectBossSearchJobs(
       pageState,
     }
   }
+
+  restoreBossSearchScrollPosition(doc, options.scrollPosition)
 
   collection: for (let round = 0; round < maxRounds && jobs.size < limit; round += 1) {
     if (Date.now() >= deadlineAt) {
@@ -206,6 +209,27 @@ export async function collectBossSearchJobs(
     detectedCardCount,
     pageState,
   }
+}
+
+export function readBossSearchScrollPosition(doc: Document): number {
+  const container = searchResultContainer(doc)
+  return Math.max(0, Math.round(container?.scrollTop ?? doc.defaultView?.scrollY ?? 0))
+}
+
+export function restoreBossSearchScrollPosition(
+  doc: Document,
+  position: number | undefined,
+): void {
+  if (!Number.isFinite(position) || Number(position) <= 0) return
+  const normalized = Math.max(0, Math.round(Number(position)))
+  const container = searchResultContainer(doc)
+  if (container) {
+    container.scrollTop = normalized
+    container.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return
+  }
+  doc.defaultView?.scrollTo?.(0, normalized)
+  doc.defaultView?.dispatchEvent(new Event('scroll'))
 }
 
 async function waitForCollectionInterval(intervalMs: number, deadlineAt: number): Promise<boolean> {
@@ -409,18 +433,22 @@ function normalize(value: string | null | undefined): string {
 function scrollSearchResults(doc: Document): void {
   const cards = searchCards(doc, doc.location?.href ?? '')
   cards.at(-1)?.scrollIntoView?.({ block: 'end' })
-  const container = doc.querySelector<HTMLElement>([
-    '.job-list-container',
-    '.job-list-box',
-    '.job-list',
-    '.search-job-result',
-  ].join(','))
+  const container = searchResultContainer(doc)
   if (container) {
     container.scrollTop = container.scrollHeight
     container.dispatchEvent(new Event('scroll', { bubbles: true }))
   }
   doc.defaultView?.scrollTo?.(0, doc.documentElement.scrollHeight)
   doc.defaultView?.dispatchEvent(new Event('scroll'))
+}
+
+function searchResultContainer(doc: Document): HTMLElement | null {
+  return doc.querySelector<HTMLElement>([
+    '.job-list-container',
+    '.job-list-box',
+    '.job-list',
+    '.search-job-result',
+  ].join(','))
 }
 
 function delay(milliseconds: number): Promise<void> {
