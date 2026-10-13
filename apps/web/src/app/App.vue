@@ -1,6 +1,6 @@
 <template>
   <a-config-provider :theme="theme">
-    <router-view v-if="route.name === 'home' || route.name === 'login' || !route.name" />
+    <router-view v-if="isPublicPage()" />
     <a-layout v-else class="app-shell">
       <aside class="sidebar">
         <div class="brand">
@@ -47,6 +47,7 @@
 import { Modal } from 'ant-design-vue'
 import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import webPackage from '../../package.json'
 import { api } from '../services/api'
 
 const route = useRoute()
@@ -56,7 +57,10 @@ const service = reactive({ online: false, text: '正在连接本地服务' })
 const isAdmin = ref(false)
 const username = ref('')
 const signingOut = ref(false)
-const rawAppVersion = String(import.meta.env.VITE_APP_VERSION || 'dev')
+const injectedAppVersion = String(import.meta.env.VITE_APP_VERSION || '').trim()
+const rawAppVersion = injectedAppVersion && injectedAppVersion !== 'dev'
+  ? injectedAppVersion
+  : webPackage.version
 const appVersion = rawAppVersion.startsWith('v') ? rawAppVersion : `v${rawAppVersion}`
 let authWatchTimer: number | undefined
 
@@ -79,7 +83,7 @@ const visibleNavigation = computed(() => isAdmin.value ? [...navigation, adminNa
 const pageTitle = computed(() => String(route.meta.title || '自动投递'))
 
 function isPublicPage() {
-  return !route.name || route.name === 'home' || route.name === 'login'
+  return !route.name || Boolean(route.meta.public)
 }
 
 async function loadShellContext() {

@@ -3,8 +3,8 @@
     <div class="panel-heading">
       <div>
         <p class="eyebrow">ADMINISTRATION</p>
-        <h2>用户管理</h2>
-        <p class="muted">仅管理员可见；可创建、停用、恢复和删除账号。</p>
+        <h2>注册审核与用户管理</h2>
+        <p class="muted">待审核 {{ pendingCount }} 个；通过审核后账号才可登录使用。</p>
       </div>
       <a-button type="primary" @click="openCreate">创建用户</a-button>
     </div>
@@ -31,19 +31,26 @@
     <div class="table-panel">
       <table>
         <thead>
-          <tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+          <tr><th>ID</th><th>用户名</th><th>注册 IP</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
         </thead>
         <tbody>
           <tr v-for="user in users" :key="user.id">
             <td>{{ user.id }}</td>
             <td>{{ user.username }}</td>
+            <td>{{ user.registrationIp || '管理员创建' }}</td>
             <td>{{ user.isAdmin ? '管理员' : '普通用户' }}</td>
-            <td><span class="status-tag" :class="user.isActive ? 'is-active' : 'is-inactive'">{{ user.isActive ? '启用' : '已停用' }}</span></td>
+            <td><span class="status-tag" :class="statusClass(user)">{{ statusText(user) }}</span></td>
             <td>{{ formatDate(user.createdAt) }}</td>
             <td class="admin-actions">
-              <a-button size="small" @click="toggle(user)">{{ user.isActive ? '停用' : '恢复' }}</a-button>
-              <a-button size="small" @click="toggleAdmin(user)">{{ user.isAdmin ? '取消管理员' : '设为管理员' }}</a-button>
-              <a-button size="small" danger @click="remove(user)">删除</a-button>
+              <template v-if="user.approvalStatus === 'pending'">
+                <a-button type="primary" size="small" @click="approve(user)">审核通过</a-button>
+                <a-button size="small" danger @click="remove(user, true)">拒绝并删除</a-button>
+              </template>
+              <template v-else>
+                <a-button size="small" @click="toggle(user)">{{ user.isActive ? '停用' : '恢复' }}</a-button>
+                <a-button size="small" @click="toggleAdmin(user)">{{ user.isAdmin ? '取消管理员' : '设为管理员' }}</a-button>
+                <a-button size="small" danger @click="remove(user)">删除</a-button>
+              </template>
             </td>
           </tr>
         </tbody>
@@ -66,6 +73,7 @@ const newPassword = ref('')
 const newIsAdmin = ref(false)
 
 const canSubmit = computed(() => newUsername.value.trim().length >= 3 && newPassword.value.length >= 8)
+const pendingCount = computed(() => users.value.filter((user) => user.approvalStatus === 'pending').length)
 
 function messageOf(cause: unknown, fallback: string) {
   return cause instanceof Error ? cause.message : fallback
@@ -122,11 +130,21 @@ async function toggleAdmin(user: AdminUser) {
   }
 }
 
-function remove(user: AdminUser) {
+async function approve(user: AdminUser) {
+  error.value = ''
+  try {
+    await api.adminApproveUser(user.id)
+    await load()
+  } catch (cause) {
+    error.value = messageOf(cause, '审核失败')
+  }
+}
+
+function remove(user: AdminUser, rejected = false) {
   Modal.confirm({
-    title: '删除用户',
-    content: `确定删除用户「${user.username}」？该操作不可撤销。`,
-    okText: '删除',
+    title: rejected ? '拒绝注册申请' : '删除用户',
+    content: `确定${rejected ? '拒绝并删除申请' : '删除用户'}「${user.username}」？该操作不可撤销。`,
+    okText: rejected ? '拒绝并删除' : '删除',
     okType: 'danger',
     cancelText: '取消',
     async onOk() {
@@ -139,6 +157,16 @@ function remove(user: AdminUser) {
       }
     },
   })
+}
+
+function statusText(user: AdminUser) {
+  if (user.approvalStatus === 'pending') return '待审核'
+  return user.isActive ? '启用' : '已停用'
+}
+
+function statusClass(user: AdminUser) {
+  if (user.approvalStatus === 'pending') return 'is-pending'
+  return user.isActive ? 'is-active' : 'is-inactive'
 }
 
 function formatDate(value: string) {

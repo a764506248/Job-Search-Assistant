@@ -16,6 +16,9 @@
           {{ checking ? '正在检查…' : loading ? '处理中…' : needsSetup ? '创建并进入' : '登录' }}
         </button>
       </form>
+      <p v-if="!needsSetup && !checking" class="auth-switch">
+        还没有账号？<router-link to="/register">申请注册</router-link>
+      </p>
     </section>
   </main>
 </template>

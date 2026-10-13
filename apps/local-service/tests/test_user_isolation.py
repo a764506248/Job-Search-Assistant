@@ -154,6 +154,7 @@ def test_admin_endpoints_require_admin_role(tmp_path) -> None:
     assert client.post(
         "/v1/admin/users", json={"username": "third-user", "password": "password123"}
     ).status_code == 403
+    assert client.post("/v1/admin/users/1/approve").status_code == 403
 
 
 def test_disabled_user_existing_jwt_is_rejected(tmp_path) -> None:
@@ -178,7 +179,7 @@ def test_current_admin_cannot_remove_own_admin_role(tmp_path) -> None:
     assert response.status_code == 400
 
 
-def test_bootstrap_guides_first_admin_and_closes_self_service(tmp_path) -> None:
+def test_bootstrap_and_ip_scoped_registration_approval(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     # 跳过 conftest 的自动建号，模拟全新部署的空数据库。
     setattr(client, MARKER, True)
@@ -192,10 +193,42 @@ def test_bootstrap_guides_first_admin_and_closes_self_service(tmp_path) -> None:
     assert registered.json()["user"]["isAdmin"] is True
     assert client.get("/v1/auth/bootstrap").json() == {"needsSetup": False}
 
-    # 初始化完成后自助注册关闭。
+    # 初始化后允许申请注册，但账号必须等待管理员审核。
+    pending = client.post(
+        "/v1/auth/register",
+        json={"username": "self-service", "password": "password123"},
+        headers={"X-Real-IP": "203.0.113.10"},
+    )
+    assert pending.status_code == 200
+    assert pending.json()["pendingApproval"] is True
+    assert pending.json()["user"]["approvalStatus"] == "pending"
+    assert pending.json()["user"]["isActive"] is False
+
+    # 同一个 IP 不能换用户名重复占号。
+    duplicate_ip = client.post(
+        "/v1/auth/register",
+        json={"username": "another-user", "password": "password123"},
+        headers={"X-Real-IP": "203.0.113.10"},
+    )
+    assert duplicate_ip.status_code == 409
+
+    # 待审核账号不可登录；管理员审核后才能使用。
     assert client.post(
-        "/v1/auth/register", json={"username": "self-service", "password": "password123"}
-    ).status_code == 403
+        "/v1/auth/login", json={"username": "self-service", "password": "password123"}
+    ).status_code == 401
+    admin_login = client.post(
+        "/v1/auth/login", json={"username": "first-admin", "password": "password123"}
+    ).json()
+    pending_id = pending.json()["user"]["id"]
+    approved = client.post(
+        f"/v1/admin/users/{pending_id}/approve",
+        headers={"Authorization": f"Bearer {admin_login['token']}"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["user"]["approvalStatus"] == "approved"
+    assert client.post(
+        "/v1/auth/login", json={"username": "self-service", "password": "password123"}
+    ).status_code == 200
 
 
 def test_extension_token_belongs_to_pairing_account(tmp_path) -> None:

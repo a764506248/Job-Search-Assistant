@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import re
@@ -230,6 +231,7 @@ def create_router(
     scheduled_collection_run_ids: set[int] = set()
     collection_schedule_lock = Lock()
     collection_tasks: dict[int, asyncio.Task[None]] = {}
+    registration_lock = asyncio.Lock()
 
     class CollectionCancelled(RuntimeError):
         """Raised when a user stops a draft run during collection or analysis."""
@@ -266,6 +268,17 @@ def create_router(
             raise HTTPException(status_code=401, detail="未登录")
         return user
 
+    def registration_ip(request: Request) -> str:
+        # The bundled Nginx proxy overwrites X-Real-IP, so callers cannot spoof
+        # this value in production. Direct development requests use client.host.
+        candidate = request.headers.get("X-Real-IP", "").strip()
+        if not candidate and request.client:
+            candidate = request.client.host
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="无法识别注册来源 IP") from error
+
     def runner_authenticated(request: Request) -> bool:
         expected = settings.runner_token
         supplied = request.headers.get("X-Runner-Token", "")
@@ -282,19 +295,22 @@ def create_router(
 
     @router.post("/auth/register")
     async def register(request: Request) -> dict:
-        # 系统初始化完成后自助注册关闭，账号统一由管理员在“用户管理”中创建。
-        if auth_repository.has_users():
-            raise HTTPException(status_code=403, detail="注册已关闭，请联系管理员创建账号")
         payload = await request.json()
-        try:
-            user = auth_repository.create_user(
-                str(payload.get("username", "")),
-                str(payload.get("password", "")),
-                is_admin=True,
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"user": user}
+        async with registration_lock:
+            needs_setup = not auth_repository.has_users()
+            try:
+                user = auth_repository.create_user(
+                    str(payload.get("username", "")),
+                    str(payload.get("password", "")),
+                    is_admin=needs_setup,
+                    is_active=needs_setup,
+                    registration_ip=None if needs_setup else registration_ip(request),
+                    approval_status="approved" if needs_setup else "pending",
+                )
+            except ValueError as error:
+                status_code = 409 if "已存在" in str(error) or "已注册" in str(error) else 400
+                raise HTTPException(status_code=status_code, detail=str(error)) from error
+        return {"user": user, "pendingApproval": not needs_setup}
 
     @router.post("/auth/login")
     async def login(request: Request) -> Response:
@@ -368,6 +384,18 @@ def create_router(
             return {"user": auth_repository.update_user(user_id, password=payload.get("password"), is_admin=payload.get("isAdmin"), is_active=payload.get("isActive"))}
         except (KeyError, ValueError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @router.post("/admin/users/{user_id}/approve")
+    async def admin_approve_user(user_id: int, request: Request) -> dict:
+        admin = required_user(request)
+        if not admin["isAdmin"]:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        try:
+            return {"user": auth_repository.approve_user(user_id)}
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="用户不存在") from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @router.delete("/admin/users/{user_id}")
     async def admin_delete_user(user_id: int, request: Request) -> dict:

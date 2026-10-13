@@ -22,7 +22,15 @@ import type {
   StoredJob,
 } from '../types'
 
-export type AdminUser = { id: number; username: string; isAdmin: boolean; isActive: boolean; createdAt: string }
+export type AdminUser = {
+  id: number
+  username: string
+  isAdmin: boolean
+  isActive: boolean
+  registrationIp: string | null
+  approvalStatus: 'pending' | 'approved'
+  createdAt: string
+}
 
 type UnauthorizedHandler = () => void
 let unauthorizedHandler: UnauthorizedHandler | null = null
@@ -78,10 +86,11 @@ export const api = {
   me: () => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/me'),
   bootstrap: () => request<{ needsSetup: boolean }>('/v1/auth/bootstrap'),
   login: async (username: string, password: string) => { const result = await request<{ user: { id: number; username: string; isAdmin: boolean }; token: string }>('/v1/auth/login', json('POST', { username, password })); localStorage.setItem('jsa_access_token', result.token); return result },
-  register: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/register', json('POST', { username, password })),
+  register: (username: string, password: string) => request<{ user: AdminUser; pendingApproval: boolean }>('/v1/auth/register', json('POST', { username, password })),
   adminUsers: () => request<{ items: AdminUser[] }>('/v1/admin/users'),
   adminCreateUser: (username: string, password: string, isAdmin = false) => request<{ user: AdminUser }>('/v1/admin/users', json('POST', { username, password, isAdmin })),
   adminUpdateUser: (id: number, data: { password?: string; isAdmin?: boolean; isActive?: boolean }) => request<{ user: AdminUser }>(`/v1/admin/users/${id}`, json('PATCH', data)),
+  adminApproveUser: (id: number) => request<{ user: AdminUser }>(`/v1/admin/users/${id}/approve`, { method: 'POST' }),
   adminDeleteUser: (id: number) => request<{ ok: boolean }>(`/v1/admin/users/${id}`, { method: 'DELETE' }),
   logout: async () => { localStorage.removeItem('jsa_access_token'); return request<{ ok: boolean }>('/v1/auth/logout', { method: 'POST' }) },
   health: () => request<HealthResponse>('/v1/health'),

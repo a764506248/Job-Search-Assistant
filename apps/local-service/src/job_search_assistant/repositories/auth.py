@@ -7,7 +7,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ..database import db_connect
+from ..database import db_connect, ensure_column
 
 
 class AuthRepository:
@@ -40,13 +40,33 @@ class AuthRepository:
                 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
                 """
             )
+            ensure_column(connection, "users", "registration_ip", "TEXT")
+            ensure_column(
+                connection,
+                "users",
+                "approval_status",
+                "TEXT NOT NULL DEFAULT 'approved'",
+            )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_registration_ip_unique "
+                "ON users(registration_ip)"
+            )
 
     def has_users(self) -> bool:
         self.initialize()
         with db_connect(self.database_path) as connection:
             return connection.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
 
-    def create_user(self, username: str, password: str, *, is_admin: bool = False) -> dict:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        is_admin: bool = False,
+        is_active: bool = True,
+        registration_ip: str | None = None,
+        approval_status: str = "approved",
+    ) -> dict:
         self.initialize()
         # Store usernames in a canonical form so SQLite and PostgreSQL enforce
         # the same case-insensitive account semantics.
@@ -59,13 +79,27 @@ class AuthRepository:
         try:
             with db_connect(self.database_path) as connection:
                 cursor = connection.execute(
-                    """INSERT INTO users(username, password_hash, is_admin, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?) RETURNING id""",
-                    (username, _hash_password(password), int(is_admin), now, now),
+                    """INSERT INTO users(
+                        username, password_hash, is_admin, is_active,
+                        registration_ip, approval_status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
+                    (
+                        username,
+                        _hash_password(password),
+                        int(is_admin),
+                        int(is_active),
+                        registration_ip,
+                        approval_status,
+                        now,
+                        now,
+                    ),
                 )
                 user_id = int(cursor.lastrowid)
         except Exception as error:
-            if isinstance(error, sqlite3.IntegrityError) or "unique" in str(error).lower():
+            message = str(error).lower()
+            if isinstance(error, sqlite3.IntegrityError) or "unique" in message:
+                if "registration_ip" in message:
+                    raise ValueError("当前 IP 已注册过账号，请等待审核或联系管理员") from error
                 raise ValueError("用户名已存在") from error
             raise
         return self.get_user(user_id)
@@ -75,7 +109,8 @@ class AuthRepository:
         with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
-                "SELECT * FROM users WHERE username = ? AND is_active = 1",
+                """SELECT * FROM users WHERE username = ? AND is_active = 1
+                AND approval_status = 'approved'""",
                 (username.strip().lower(),),
             ).fetchone()
         if row is None or not _verify_password(password, row["password_hash"]):
@@ -139,6 +174,24 @@ class AuthRepository:
                 connection.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(values))
         return self.get_user(user_id)
 
+    def approve_user(self, user_id: int) -> dict:
+        self.initialize()
+        now = datetime.now(UTC).isoformat()
+        with db_connect(self.database_path) as connection:
+            cursor = connection.execute(
+                """UPDATE users SET approval_status = 'approved', is_active = 1,
+                updated_at = ? WHERE id = ? AND approval_status = 'pending'""",
+                (now, user_id),
+            )
+            if cursor.rowcount == 0:
+                try:
+                    user = self.get_user(user_id)
+                except KeyError:
+                    raise
+                if user["approvalStatus"] != "pending":
+                    raise ValueError("该账号不是待审核状态")
+        return self.get_user(user_id)
+
     def delete_user(self, user_id: int) -> None:
         self.initialize()
         with db_connect(self.database_path) as connection:
@@ -146,7 +199,15 @@ class AuthRepository:
 
     @staticmethod
     def _user(row: sqlite3.Row) -> dict:
-        return {"id": int(row["id"]), "username": row["username"], "isAdmin": bool(row["is_admin"]), "isActive": bool(row["is_active"]), "createdAt": row["created_at"]}
+        return {
+            "id": int(row["id"]),
+            "username": row["username"],
+            "isAdmin": bool(row["is_admin"]),
+            "isActive": bool(row["is_active"]),
+            "registrationIp": row["registration_ip"],
+            "approvalStatus": row["approval_status"],
+            "createdAt": row["created_at"],
+        }
 
 
 def _hash_password(password: str) -> str:

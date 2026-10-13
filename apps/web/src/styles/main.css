@@ -672,6 +672,9 @@ td small { color: var(--muted); }
 .auth-card form button { padding: 12px; border: 0; border-radius: 8px; background: #176b55; color: white; font: inherit; font-weight: 700; cursor: pointer; }
 .auth-card form button:disabled { opacity: .6; }
 .auth-error { color: #b42318; }
+.auth-switch { margin: 18px 0 0; text-align: center; color: #65766e; }
+.auth-switch a, .auth-success a { color: #176b55; font-weight: 700; }
+.auth-success { display: grid; gap: 10px; margin-top: 20px; padding: 18px; border: 1px solid #a9d8c4; border-radius: 10px; background: #edf8f3; color: #315d4d; }
 .admin-user-form { display: grid; gap: 16px; padding: 6px 0; }
 .admin-user-form label { display: grid; gap: 7px; color: #32483e; font-weight: 600; font-size: 13px; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -679,6 +682,7 @@ td small { color: var(--muted); }
 .status-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .status-tag.is-active { background: #e2f4eb; color: #176b55; }
 .status-tag.is-inactive { background: #f2f3f2; color: #7b8580; }
+.status-tag.is-pending { background: #fff3d6; color: #8a5a00; }
 .topbar-account { display: flex; align-items: center; gap: 12px; }
 .account-name { color: var(--muted); font-size: 13px; }
 
