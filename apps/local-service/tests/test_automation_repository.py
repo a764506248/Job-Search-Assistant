@@ -238,3 +238,25 @@ def test_uncertain_action_is_never_retried_automatically(tmp_path) -> None:
     assert uncertain["status"] == "uncertain"
     assert execute is False
     assert uncertain["attempt_count"] == 1
+
+
+def test_successfully_contacted_job_ids_require_send_success_and_user_ownership(
+    tmp_path,
+) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    first_user_run = repository.create_run({}, 2, user_id=1)
+    second_user_run = repository.create_run({}, 1, user_id=2)
+
+    sent, _ = repository.claim_action(first_user_run["id"], "sent-job", "send_greeting")
+    repository.finish_action(sent["idempotency_key"], succeeded=True)
+    failed, _ = repository.claim_action(first_user_run["id"], "failed-job", "send_greeting")
+    repository.finish_action(failed["idempotency_key"], succeeded=False)
+    other_user, _ = repository.claim_action(
+        second_user_run["id"], "other-user-job", "send_greeting"
+    )
+    repository.finish_action(other_user["idempotency_key"], succeeded=True)
+
+    assert repository.list_successfully_contacted_job_ids(user_id=1) == ["sent-job"]
+    assert repository.list_successfully_contacted_job_ids(user_id=2) == [
+        "other-user-job"
+    ]

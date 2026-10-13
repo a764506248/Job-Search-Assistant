@@ -450,13 +450,13 @@ def configure_ready_delivery_environment(client: TestClient) -> None:
     assert client.get("/v1/setup/status").json()["overall"] == "ready"
 
 
-def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
+def test_new_run_recollects_historical_jobs_that_were_never_contacted(
     tmp_path,
 ) -> None:
-    hub = FakeConnectedBrowserHub([captured_job("fresh-job", "新公司")])
-    client = collection_client(tmp_path, hub)
     historical = captured_job("historical-job", "历史公司")
     historical["generatedGreeting"] = "历史问候语"
+    hub = FakeConnectedBrowserHub([historical, captured_job("fresh-job", "新公司")])
+    client = collection_client(tmp_path, hub)
 
     saved = client.post("/v1/jobs/capture", json={"jobs": [historical]})
     created = create_pending_run(
@@ -485,10 +485,10 @@ def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
     assert persisted["status"] == "draft"
     assert persisted["configSnapshot"]["collection"]["status"] == "ready"
     assert persisted["configSnapshot"]["collection"]["phase"] == "awaiting_confirmation"
-    assert [job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]] == ["fresh-job"]
-    assert "historical-job" not in {
-        job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]
-    }
+    assert [job["jobId"] for job in persisted["configSnapshot"]["plannedJobs"]] == [
+        "historical-job",
+        "fresh-job",
+    ]
     assert client.get("/v1/jobs").json()["total"] == 2
     assert hub.calls[1]["payload"] == {
         "query": "AI Agent",
@@ -502,7 +502,7 @@ def test_new_run_automatically_collects_and_never_reuses_historical_sqlite_jobs(
             "scale": "302,304",
         },
     }
-    assert hub.calls[2]["payload"]["excludeJobIds"] == ["historical-job"]
+    assert hub.calls[2]["payload"]["excludeJobIds"] == []
     assert hub.calls[2]["payload"]["itemIntervalMs"] == 3500
 
 
@@ -515,6 +515,15 @@ def test_automatic_pipeline_deduplicates_analyzes_and_never_sends(tmp_path) -> N
     hub = FakeConnectedBrowserHub([historical, first, duplicate, second])
     client = collection_client(tmp_path, hub)
     client.post("/v1/jobs/capture", json={"jobs": [historical]})
+    prior_run = AutomationRepository(tmp_path / "jobs.sqlite3").create_run({}, 1)
+    automation_repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    action, execute = automation_repository.claim_action(
+        int(prior_run["id"]), "historical-job", "send_greeting"
+    )
+    assert execute is True
+    automation_repository.finish_action(
+        str(action["idempotency_key"]), succeeded=True
+    )
     created = create_pending_run(client)
 
     run = client.get(f"/v1/automation/runs/{created['id']}").json()

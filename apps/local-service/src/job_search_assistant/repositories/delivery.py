@@ -164,6 +164,23 @@ class DeliveryRepository:
             ).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def list_successful_platform_job_ids(
+        self, platform: str, *, user_id: int = 1
+    ) -> list[str]:
+        """Return only jobs with durable evidence that contact was sent."""
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT platform_job_id FROM delivery_records
+                WHERE user_id = ? AND platform = ?
+                  AND status IN ('delivered', 'greeting_sent')
+                ORDER BY platform_job_id
+                """,
+                (user_id, platform),
+            ).fetchall()
+        return [str(row[0]) for row in rows if row[0]]
+
     def _connect(self) -> sqlite3.Connection:
         return db_connect(self.database_path)
 

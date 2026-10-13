@@ -2430,9 +2430,17 @@ def create_router(
                 collection_filters[filter_key] = ",".join(normalized_codes)
             else:
                 collection_filters.pop(filter_key, None)
-        historical_job_ids = set(
+        contacted_job_ids = set(
             await run_in_threadpool(
-                job_repository.list_platform_job_ids, "boss", user_id=user_id
+                automation_repository.list_successfully_contacted_job_ids,
+                user_id=user_id,
+            )
+        )
+        contacted_job_ids.update(
+            await run_in_threadpool(
+                delivery_repository.list_successful_platform_job_ids,
+                "boss",
+                user_id=user_id,
             )
         )
         captured: dict[str, CapturedJob] = {}
@@ -2558,7 +2566,7 @@ def create_router(
                     "profileName": profile_name or None,
                     "bossAccountName": boss_account_name or None,
                     "identityVerified": bool(profile_name and boss_account_name),
-                    "existingExcludedCount": len(historical_job_ids),
+                    "existingExcludedCount": len(contacted_job_ids),
                     "collectedCount": 0,
                     "analyzedCount": 0,
                     "approvedCount": 0,
@@ -2659,7 +2667,7 @@ def create_router(
                         COLLECTION_BATCH_DEADLINE_MS
                         + collection_interval_ms * batch_limit,
                     )
-                    excluded_job_ids = sorted(historical_job_ids | set(captured))
+                    excluded_job_ids = sorted(contacted_job_ids | set(captured))
                     automation_repository.update_collection(
                         run_id,
                         "collecting",
@@ -2890,7 +2898,7 @@ def create_router(
                             "attemptId": attempt_id,
                             "currentKeyword": None,
                             "candidateLimit": candidate_limit,
-                            "existingExcludedCount": len(historical_job_ids),
+                            "existingExcludedCount": len(contacted_job_ids),
                             "collectedCount": 0,
                             "analyzedCount": 0,
                             "approvedCount": 0,
@@ -2906,8 +2914,8 @@ def create_router(
                             "outcome": "no_matches",
                             "message": (
                                 "没有发现新的可采集岗位"
-                                f"；已跳过本地已有 {len(historical_job_ids)} 个岗位"
-                                if historical_job_ids
+                                f"；已跳过已成功投递的 {len(contacted_job_ids)} 个岗位"
+                                if contacted_job_ids
                                 else "搜索结果中没有新的可采集岗位"
                             ),
                             "error": None,

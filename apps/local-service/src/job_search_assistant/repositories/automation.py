@@ -520,6 +520,28 @@ class AutomationRepository:
             ).fetchall()
         return [row.as_dict() if hasattr(row, "as_dict") else dict(row) for row in rows]
 
+    def list_successfully_contacted_job_ids(self, *, user_id: int = 1) -> list[str]:
+        """Return jobs for which this user has actually sent a greeting.
+
+        Merely collecting or analysing a posting is deliberately not enough:
+        interrupted draft runs must be allowed to discover that posting again.
+        """
+        self.initialize()
+        with db_connect(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT action.job_id
+                FROM automation_actions AS action
+                JOIN automation_runs AS run ON run.id = action.run_id
+                WHERE run.user_id = ?
+                  AND action.action_type = 'send_greeting'
+                  AND action.status = 'succeeded'
+                ORDER BY action.job_id
+                """,
+                (user_id,),
+            ).fetchall()
+        return [str(row[0]) for row in rows if row[0]]
+
     def report(self, run_id: int, *, user_id: int | None = None) -> dict[str, Any]:
         run = self.get_run(run_id, user_id=user_id)
         return {

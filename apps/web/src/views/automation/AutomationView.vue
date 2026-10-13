@@ -87,7 +87,7 @@
               <div><span>采集</span><strong>{{ collection?.collectedCount || 0 }}</strong><small>候选职位</small></div>
               <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>{{ isAnalyzing ? '正在逐条处理' : '采集完成后开始' }}</small></div>
               <div><span>通过</span><strong>{{ collection?.approvedCount || 0 }}</strong><small>进入待确认</small></div>
-              <div v-if="collection?.existingExcludedCount"><span>历史排除</span><strong>{{ collection.existingExcludedCount }}</strong><small>已存在岗位</small></div>
+              <div v-if="collection?.existingExcludedCount"><span>投递排除</span><strong>{{ collection.existingExcludedCount }}</strong><small>已联系岗位</small></div>
             </div>
             <a-button danger :loading="stoppingCollectionRunId === selected.id" @click="stopSelectedCollection">{{ isAnalyzing ? '中断分析' : '中断采集' }}</a-button>
           </div>
@@ -96,7 +96,7 @@
               <div class="automation-no-matches-heading">
                 <div>
                   <strong>{{ collection?.message || '采集与分析完成，暂无符合规则的岗位' }}</strong>
-                  <p>新职位会完成本地规则判断；本地已有岗位会在扩展打开详情前直接跳过，不再重复采集。你可以调整关键词、候选上限或规则后重新采集。</p>
+                  <p>新职位会完成本地规则判断；仅已成功发送问候语的岗位会被跳过。中断、失败或只采集未投递的岗位仍可重新进入任务。</p>
                 </div>
                 <a-button :disabled="!browserReady" :loading="collectingRunId === selected.id" @click="collectSelectedRun">重新采集</a-button>
               </div>
@@ -105,7 +105,7 @@
                 <div><strong>{{ collectionMetrics.analyzed }}</strong><span>已分析</span></div>
                 <div><strong>{{ collectionMetrics.approved }}</strong><span>通过</span></div>
                 <div><strong>{{ collectionMetrics.rejected }}</strong><span>未通过</span></div>
-                <div v-if="collection?.existingExcludedCount"><strong>{{ collection.existingExcludedCount }}</strong><span>本地去重</span></div>
+                <div v-if="collection?.existingExcludedCount"><strong>{{ collection.existingExcludedCount }}</strong><span>已投递排除</span></div>
               </div>
               <section v-if="reviewedJobs.length" class="automation-review-results" aria-label="岗位判断明细">
                 <div class="automation-review-heading"><strong>岗位判断明细</strong><span>共 {{ reviewedJobs.length }} 个</span></div>
@@ -432,7 +432,7 @@ const collectionResultSummary = (run: AutomationRun) => {
   const analyzed = state?.analyzedCount ?? collected
   const approved = state?.approvedCount ?? plannedCount(run)
   const rejected = state?.rejectedCount ?? Math.max(0, analyzed - approved)
-  const excluded = state?.existingExcludedCount ? ` · 本地去重 ${state.existingExcludedCount}` : ''
+  const excluded = state?.existingExcludedCount ? ` · 已投递排除 ${state.existingExcludedCount}` : ''
   return `采集 ${collected} · 分析 ${analyzed} · 通过 ${approved} · 未通过 ${rejected}${excluded}`
 }
 const cityNames: Record<string, string> = { '100010000': '全国', '101010100': '北京', '101020100': '上海', '101280100': '广州', '101280600': '深圳', '101210100': '杭州', '101270100': '成都' }
