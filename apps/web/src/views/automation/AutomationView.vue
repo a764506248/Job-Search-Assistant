@@ -15,10 +15,10 @@
         <label class="wide">搜索关键词<input v-model="searchKeywordsInput" placeholder="留空沿用个人档案；多个关键词用逗号分隔" /></label>
         <label>城市<select v-model="collectionCityCode"><option value="">沿用个人档案</option><option value="100010000">全国</option><option value="101010100">北京</option><option value="101020100">上海</option><option value="101280100">广州</option><option value="101280600">深圳</option><option value="101210100">杭州</option><option value="101270100">成都</option></select></label>
         <label>求职类型<select v-model="collectionFilters.jobType"><option value="">不限</option><option value="1901">全职</option><option value="1902">实习</option><option value="1903">兼职</option></select></label>
-        <label>薪资待遇<select v-model="collectionFilters.salary"><option value="">不限</option><option value="402">3K 以下</option><option value="403">3–5K</option><option value="404">5–10K</option><option value="405">10–20K</option><option value="406">20–50K</option><option value="407">50K 以上</option></select></label>
-        <label>工作经验<select v-model="collectionFilters.experience"><option value="">不限</option><option value="102">在校/应届</option><option value="103">1年以内</option><option value="104">1–3年</option><option value="105">3–5年</option><option value="106">5–10年</option><option value="107">10年以上</option></select></label>
-        <label>学历要求<select v-model="collectionFilters.degree"><option value="">不限</option><option value="202">初中及以下</option><option value="203">中专/中技</option><option value="204">高中</option><option value="205">大专</option><option value="206">本科</option><option value="207">硕士</option><option value="208">博士</option></select></label>
-        <label>公司规模<a-select v-model:value="companyScaleCodes" class="company-scale-select" mode="multiple" :options="companyScaleOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
+        <label>薪资待遇<a-select v-model:value="salaryCodes" class="boss-multi-select" mode="multiple" :options="salaryOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
+        <label>工作经验<a-select v-model:value="experienceCodes" class="boss-multi-select" mode="multiple" :options="experienceOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
+        <label>学历要求<a-select v-model:value="degreeCodes" class="boss-multi-select" mode="multiple" :options="degreeOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
+        <label>公司规模<a-select v-model:value="companyScaleCodes" class="boss-multi-select" mode="multiple" :options="companyScaleOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
         <label>公司行业编码<input v-model="collectionFilters.industry" inputmode="numeric" placeholder="可选；多个编码用逗号分隔" /></label>
         <label>岗位采集间隔（秒）<input v-model.number="collectionIntervalSeconds" type="number" min="0" max="30" step="0.5" /></label>
       </div>
@@ -43,7 +43,7 @@
         <div class="panel-heading"><h2>任务记录</h2><a-button @click="load">刷新</a-button></div>
         <div v-if="!runs.length" class="library-empty">还没有自动投递任务。</div>
         <article v-for="run in runs" :key="run.id" :class="{ selected: selected?.id === run.id }" @click="selectRun(run)">
-          <div><strong>#{{ run.id }} · {{ runStatusName(run) }}</strong><span>计划 {{ plannedCount(run) }} · 目标 {{ run.targetCount }} · 成功 {{ run.successCount }} · 失败 {{ run.failureCount }}</span><span>{{ run.runnerId ? `执行器 ${run.runnerId} · 心跳 ${run.heartbeatAt ? formatTime(run.heartbeatAt) : '等待中'}` : run.status === 'draft' ? collectionSummary(run) : '尚未被执行器认领' }}</span><span v-if="collectionCount(run) > 0 || collectionExistingExcludedCount(run) > 0">{{ collectionResultSummary(run) }}</span></div>
+          <div><strong>#{{ run.id }} · {{ runStatusName(run) }}</strong><span>计划 {{ plannedCount(run) }} · 目标 {{ run.targetCount }} · 成功 {{ run.successCount }} · 失败 {{ run.failureCount }}</span><span class="automation-run-filters">{{ searchConditionSummary(run) }}</span><span>{{ run.runnerId ? `执行器 ${run.runnerId} · 心跳 ${run.heartbeatAt ? formatTime(run.heartbeatAt) : '等待中'}` : run.status === 'draft' ? collectionSummary(run) : '尚未被执行器认领' }}</span><span v-if="collectionCount(run) > 0 || collectionExistingExcludedCount(run) > 0">{{ collectionResultSummary(run) }}</span></div>
           <div class="automation-actions" @click.stop>
             <a-button v-if="run.status === 'interrupted'" size="small" @click="control(run, 'start')">重新启动</a-button>
             <span v-if="isRetryable(run)" class="automation-retry-action"><a-button size="small" type="primary" :loading="retryingRunId === run.id" @click="retryRun(run)">投递重试</a-button></span>
@@ -228,6 +228,31 @@ const candidateLimit = ref(10)
 const searchKeywordsInput = ref('')
 const collectionCityCode = ref('')
 const collectionIntervalSeconds = ref(2)
+const salaryOptions = [
+  { value: '402', label: '3K 以下' },
+  { value: '403', label: '3–5K' },
+  { value: '404', label: '5–10K' },
+  { value: '405', label: '10–20K' },
+  { value: '406', label: '20–50K' },
+  { value: '407', label: '50K 以上' },
+]
+const experienceOptions = [
+  { value: '102', label: '在校/应届' },
+  { value: '103', label: '1年以内' },
+  { value: '104', label: '1–3年' },
+  { value: '105', label: '3–5年' },
+  { value: '106', label: '5–10年' },
+  { value: '107', label: '10年以上' },
+]
+const degreeOptions = [
+  { value: '202', label: '初中及以下' },
+  { value: '203', label: '中专/中技' },
+  { value: '204', label: '高中' },
+  { value: '205', label: '大专' },
+  { value: '206', label: '本科' },
+  { value: '207', label: '硕士' },
+  { value: '208', label: '博士' },
+]
 const companyScaleOptions = [
   { value: '301', label: '0–20人' },
   { value: '302', label: '20–99人' },
@@ -237,11 +262,11 @@ const companyScaleOptions = [
   { value: '306', label: '10000人以上' },
 ]
 const companyScaleCodes = ref<string[]>([])
+const salaryCodes = ref<string[]>([])
+const experienceCodes = ref<string[]>([])
+const degreeCodes = ref<string[]>([])
 const collectionFilters = ref<AutomationCollectionFilters>({
   jobType: '',
-  salary: '',
-  experience: '',
-  degree: '',
   industry: '',
 })
 const creating = ref(false)
@@ -410,6 +435,21 @@ const collectionResultSummary = (run: AutomationRun) => {
   const excluded = state?.existingExcludedCount ? ` · 本地去重 ${state.existingExcludedCount}` : ''
   return `采集 ${collected} · 分析 ${analyzed} · 通过 ${approved} · 未通过 ${rejected}${excluded}`
 }
+const cityNames: Record<string, string> = { '100010000': '全国', '101010100': '北京', '101020100': '上海', '101280100': '广州', '101280600': '深圳', '101210100': '杭州', '101270100': '成都' }
+const jobTypeNames: Record<string, string> = { '1901': '全职', '1902': '实习', '1903': '兼职' }
+const optionNames = (value: unknown, options: Array<{ value: string; label: string }>) => {
+  const labels = new Map(options.map(option => [option.value, option.label]))
+  return String(value || '').split(',').map(code => labels.get(code)).filter(Boolean).join('、') || '不限'
+}
+const searchConditionSummary = (run: AutomationRun) => {
+  const config = run.configSnapshot
+  const filters = (config.collectionFilters || collectionFor(run)?.collectionFilters || {}) as AutomationCollectionFilters
+  const keywords = Array.isArray(config.searchKeywords) ? config.searchKeywords.join('、') : '沿用个人档案'
+  const city = cityNames[String(config.cityCode || '')] || '沿用个人档案'
+  const jobType = jobTypeNames[String(filters.jobType || '')] || '不限'
+  const industry = filters.industry ? `编码 ${filters.industry}` : '不限'
+  return `搜索条件：关键词 ${keywords}｜城市 ${city}｜类型 ${jobType}｜薪资 ${optionNames(filters.salary, salaryOptions)}｜经验 ${optionNames(filters.experience, experienceOptions)}｜学历 ${optionNames(filters.degree, degreeOptions)}｜规模 ${optionNames(filters.scale, companyScaleOptions)}｜行业 ${industry}`
+}
 const pipelineStageClass = (stage: number) => ({ active: pipelineStep.value === stage, complete: pipelineStep.value > stage, pending: pipelineStep.value < stage })
 const isErrorStatus = (status: string) => ['failed', 'blocked', 'cancelled'].includes(status)
 const isRetryable = (run: AutomationRun) => ['failed', 'blocked', 'cancelled'].includes(run.status)
@@ -508,6 +548,9 @@ async function createRun() {
     const normalizedFilters = Object.fromEntries(
       Object.entries(collectionFilters.value).filter(([, value]) => value?.trim()),
     )
+    if (salaryCodes.value.length) normalizedFilters.salary = salaryCodes.value.join(',')
+    if (experienceCodes.value.length) normalizedFilters.experience = experienceCodes.value.join(',')
+    if (degreeCodes.value.length) normalizedFilters.degree = degreeCodes.value.join(',')
     if (companyScaleCodes.value.length) normalizedFilters.scale = companyScaleCodes.value.join(',')
     const keywords = searchKeywordsInput.value.split(/[,，\n]/).map(value => value.trim()).filter(Boolean)
     candidateLimit.value = normalizedCandidateLimit
@@ -790,11 +833,11 @@ useRefresh(load)
   box-shadow: 0 0 0 2px rgb(23 107 85 / 10%);
 }
 
-.automation-filter-grid .company-scale-select {
+.automation-filter-grid .boss-multi-select {
   width: 100%;
 }
 
-.automation-filter-grid .company-scale-select :deep(.ant-select-selector) {
+.automation-filter-grid .boss-multi-select :deep(.ant-select-selector) {
   min-height: 34px;
   border-color: var(--line);
   border-radius: 8px;

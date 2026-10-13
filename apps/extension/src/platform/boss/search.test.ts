@@ -5,9 +5,9 @@ describe('BOSS search URL', () => {
   it('applies the task-scoped collection filters', () => {
     const url = new URL(buildBossSearchUrl('AI Agent', '101010100', {
       jobType: '1901',
-      salary: '406',
-      experience: '105',
-      degree: '206',
+      salary: '404,405,406',
+      experience: '104,105',
+      degree: '206,207',
       industry: '100021,100020',
       scale: '302,303,304',
     }))
@@ -16,9 +16,9 @@ describe('BOSS search URL', () => {
       query: 'AI Agent',
       city: '101010100',
       jobType: '1901',
-      salary: '406',
-      experience: '105',
-      degree: '206',
+      salary: '404,405,406',
+      experience: '104,105',
+      degree: '206,207',
       industry: '100021,100020',
       scale: '302,303,304',
     })

@@ -149,7 +149,12 @@ COLLECTION_FILTER_KEYS = (
     "industry",
     "scale",
 )
-BOSS_COMPANY_SCALE_CODES = ("301", "302", "303", "304", "305", "306")
+BOSS_MULTI_FILTER_CODES = {
+    "salary": ("402", "403", "404", "405", "406", "407"),
+    "experience": ("102", "103", "104", "105", "106", "107"),
+    "degree": ("202", "203", "204", "205", "206", "207", "208"),
+    "scale": ("301", "302", "303", "304", "305", "306"),
+}
 
 
 def extension_supports_collection(version: object) -> bool:
@@ -2416,15 +2421,15 @@ def create_router(
                 str(raw_collection_filters.get(key, "")).strip(),
             )
         }
-        if "scale" in collection_filters:
-            selected_scale_codes = set(collection_filters["scale"].split(","))
-            normalized_scale_codes = [
-                code for code in BOSS_COMPANY_SCALE_CODES if code in selected_scale_codes
-            ]
-            if normalized_scale_codes:
-                collection_filters["scale"] = ",".join(normalized_scale_codes)
+        for filter_key, allowed_codes in BOSS_MULTI_FILTER_CODES.items():
+            if filter_key not in collection_filters:
+                continue
+            selected_codes = set(collection_filters[filter_key].split(","))
+            normalized_codes = [code for code in allowed_codes if code in selected_codes]
+            if normalized_codes:
+                collection_filters[filter_key] = ",".join(normalized_codes)
             else:
-                collection_filters.pop("scale", None)
+                collection_filters.pop(filter_key, None)
         historical_job_ids = set(
             await run_in_threadpool(
                 job_repository.list_platform_job_ids, "boss", user_id=user_id
