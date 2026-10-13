@@ -1,7 +1,9 @@
+import sqlite3
 from datetime import UTC, datetime
 
 from job_search_assistant.domain.models import CapturedJob
 from job_search_assistant.repositories import JobRepository
+from job_search_assistant.repositories import jobs as jobs_repository_module
 
 
 def make_job(description: str = "负责 RAG 应用研发") -> CapturedJob:
@@ -32,3 +34,62 @@ def test_repository_upserts_changed_content_into_stable_job_snapshot(tmp_path) -
     assert repository.delete(jobs[0].id) is True
     assert repository.delete(jobs[0].id) is False
     assert repository.count() == 0
+
+
+def test_repository_runs_schema_initialization_only_once(tmp_path, monkeypatch) -> None:
+    calls = 0
+    original = jobs_repository_module.recreate_index
+
+    def counted_recreate_index(*args, **kwargs) -> None:
+        nonlocal calls
+        calls += 1
+        original(*args, **kwargs)
+
+    monkeypatch.setattr(jobs_repository_module, "recreate_index", counted_recreate_index)
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+
+    repository.save_many([make_job()])
+    repository.get_by_platform_job_id("boss", "job-123")
+    repository.count()
+
+    assert calls == 1
+
+
+def test_repository_deduplicates_jobs_only_within_the_same_user(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+
+    assert repository.save_many([make_job()], user_id=1) == ["job-123"]
+    assert repository.save_many([make_job()], user_id=1) == []
+    assert repository.save_many([make_job()], user_id=2) == ["job-123"]
+
+    assert repository.list_platform_job_ids("boss", user_id=1) == ["job-123"]
+    assert repository.list_platform_job_ids("boss", user_id=2) == ["job-123"]
+    assert repository.count(user_id=1) == 1
+    assert repository.count(user_id=2) == 1
+
+
+def test_repository_normalizes_private_use_salary_on_write_and_historical_read(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "jobs.sqlite3"
+    repository = JobRepository(database_path)
+    raw_salary = "\ue033\ue031-\ue035\ue031K·\ue032\ue035薪"
+
+    repository.save_many([make_job().model_copy(update={"salary_text": raw_salary})])
+    with sqlite3.connect(database_path) as connection:
+        persisted = connection.execute("SELECT salary_text FROM job_postings").fetchone()[0]
+        assert persisted == "20-40K·14薪"
+        connection.execute("UPDATE job_postings SET salary_text = ?", (raw_salary,))
+
+    assert repository.list_recent()[0].salary_text == "20-40K·14薪"
+
+
+def test_repository_does_not_replace_readable_salary_with_unknown_private_use_text(
+    tmp_path,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+    repository.save_many([make_job().model_copy(update={"salary_text": "25-35K"})])
+
+    repository.save_many([make_job().model_copy(update={"salary_text": "\ue100-\ue101K"})])
+
+    assert repository.list_recent()[0].salary_text == "25-35K"

@@ -38,7 +38,7 @@ const result: AutomaticJobMatchResponse = {
   },
   evidence: [{
     sourceType: 'projects', sourceId: '1', sourceName: '企业知识库', chunkIndex: 0,
-    content: '使用 Python 与 RAG 构建知识检索服务', score: 0.82, vectorScore: 0.8, keywordScore: 0.86,
+    content: '使用 Python 与 RAG 构建知识检索服务', score: 0.82, keywordScore: 0.86,
   }],
   scoringVersion: 'local-hybrid-v1',
 }

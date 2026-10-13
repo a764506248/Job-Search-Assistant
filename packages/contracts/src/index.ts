@@ -124,14 +124,13 @@ export interface JobEvaluationResponse {
   decision: DecisionResponse
 }
 
-export interface RagSearchResult {
+export interface KnowledgeEvidence {
   sourceType: string
   sourceId: string
   sourceName: string
   chunkIndex: number
   content: string
   score: number
-  vectorScore: number
   keywordScore: number
 }
 
@@ -152,6 +151,51 @@ export interface AutomaticJobMatchResponse {
   suitabilityScore: number
   customizationConfidence: number
   decision: DecisionResponse
-  evidence: RagSearchResult[]
+  evidence: KnowledgeEvidence[]
   scoringVersion: string
+}
+
+export interface JobInsightRequest {
+  useAi?: boolean
+  modelRecordId?: number
+}
+
+export interface JobInsightResponse {
+  jobId: number
+  mode: 'local' | 'ai'
+  summary: string
+  strengths: string[]
+  gaps: string[]
+  recommendations: string[]
+  interviewQuestions: string[]
+  match: AutomaticJobMatchResponse
+  modelRecordId?: number
+  modelName?: string
+  modelId?: string
+}
+
+/** Public, non-secret evidence that a user froze a selected delivery list. */
+export interface AutomationPlanConfirmation {
+  status: 'confirmed'
+  source: 'selected-job-list'
+  confirmedAt: string
+  selectedJobIds: string[]
+}
+
+/** Runner-to-local-service capability. Never forward approvalToken to the browser. */
+export interface RunnerApprovedGreetingPayload {
+  expectedJobId: string
+  expectedTitle: string
+  expectedCompany: string
+  text: string
+  approvalToken: string
+}
+
+/** Browser payload after the local service has validated and removed the capability. */
+export interface ConfirmedGreetingBrowserPayload {
+  expectedJobId: string
+  expectedTitle: string
+  expectedCompany: string
+  text: string
+  planConfirmed: true
 }

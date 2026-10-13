@@ -1,0 +1,78 @@
+# 服务器部署编排：只拉取 GHCR 预构建镜像，不在低配服务器本地构建。
+# 数据目录必须保持为 ./deploy-data:/data，避免更新容器时切换到空数据库。
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-job_search_assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-jsa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./deploy-data/postgres:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/a764506248/job-search-assistant-web:${JSA_IMAGE_TAG:-latest}
+    ports:
+      - "80:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  local-service:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    expose:
+      - "8765"
+    environment:
+      JSA_HOST: 0.0.0.0
+      JSA_PORT: 8765
+      JSA_DATA_DIR: /data
+      # Pass a URL-encoded DSN (especially if the password contains @, &, or #).
+      JSA_DATABASE_URL: ${JSA_DATABASE_URL:?set JSA_DATABASE_URL in .env}
+      JSA_JWT_SECRET: ${JSA_JWT_SECRET:?set JSA_JWT_SECRET in .env}
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:?set JSA_RUNNER_TOKEN in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./deploy-data:/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  automation-runner:
+    image: ghcr.io/a764506248/job-search-assistant-local-service:${JSA_IMAGE_TAG:-latest}
+    command:
+      - job-search-assistant-runner
+      - --base-url
+      - http://local-service:8765
+    environment:
+      JSA_RUNNER_TOKEN: ${JSA_RUNNER_TOKEN:?set JSA_RUNNER_TOKEN in .env}
+    depends_on:
+      local-service:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: unless-stopped

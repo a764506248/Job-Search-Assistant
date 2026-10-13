@@ -110,3 +110,11 @@ def test_model_configuration_requires_credentials_and_masks_api_key(tmp_path) ->
         "latencyMs": 12,
         "message": "连接成功，模型已返回内容",
     }
+    verified = client.get("/v1/library/models").json()["items"][0]["data"]
+    assert verified["lastVerificationStatus"] == "ok"
+    assert verified["lastVerifiedLatencyMs"] == 12
+    assert verified["lastVerifiedAt"]
+
+    setup = client.get("/v1/setup/status").json()
+    model_check = next(item for item in setup["checks"] if item["key"] == "model")
+    assert model_check["status"] == "ready"

@@ -14,6 +14,8 @@ dependencies = [
   "python-multipart>=0.0.20,<1",
   "reportlab>=4.4,<5",
   "uvicorn>=0.35,<1",
+  "websockets>=15,<16",
+  "psycopg[binary]>=3.2,<4",
 ]
 
 [dependency-groups]
@@ -25,6 +27,7 @@ dev = [
 
 [project.scripts]
 job-search-assistant-local = "job_search_assistant.main:run"
+job-search-assistant-runner = "job_search_assistant.automation.runner:main"
 
 [build-system]
 requires = ["hatchling"]

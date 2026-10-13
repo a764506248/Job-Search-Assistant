@@ -12,11 +12,11 @@ from .repositories import LibraryRepository
 
 class ProjectExtractor(Protocol):
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> list[dict[str, object]]: ...
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
@@ -26,13 +26,19 @@ class ModelConnectionTester(Protocol):
 
 class MaterialPreviewGenerator(Protocol):
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
 class GreetingGenerator(Protocol):
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
+    ) -> dict[str, object]: ...
+
+
+class JobAnalysisGenerator(Protocol):
+    def generate(
+        self, context: dict[str, object], model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]: ...
 
 
@@ -73,10 +79,13 @@ def _model_settings(config: dict[str, object]) -> tuple[str, str, str, str]:
 
 
 def _model_candidates(
-    library: LibraryRepository, model_record_id: int | None = None
+    library: LibraryRepository, model_record_id: int | None = None, *, user_id: int = 1
 ) -> list[dict[str, object]]:
-    """Return primary then fallback model, without retrying the same record."""
-    configs = library.list("models")
+    """Return primary then fallback model, without retrying the same record.
+
+    模型配置按账号隔离，调用方必须传入当前用户，避免读到其他人的模型与密钥。
+    """
+    configs = library.list("models", user_id=user_id)
     if not configs:
         raise RuntimeError("尚未配置云端模型，请先填写模型 ID、API Key 和 Base URL")
     selected: dict[str, object] | None = None
@@ -110,16 +119,18 @@ class CloudProjectExtractor:
         self.library = library
 
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> list[dict[str, object]]:
-        return list(self.extract_resume(resume_text, model_record_id)["projects"])
+        return list(
+            self.extract_resume(resume_text, model_record_id, user_id=user_id)["projects"]
+        )
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self, resume_text: str, model_record_id: int | None = None, *, user_id: int = 1
     ) -> dict[str, object]:
         prompt = self._prompt(resume_text[:60000])
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             config = record["data"]
             try:
                 model_id, api_key, base_url, provider = _model_settings(config)
@@ -380,11 +391,15 @@ class CloudMaterialPreviewGenerator:
         self.library = library
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         prompt = self._prompt(context)
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             try:
                 model_id, api_key, base_url, provider = _model_settings(record["data"])
                 if provider == "Anthropic":
@@ -410,7 +425,7 @@ class CloudMaterialPreviewGenerator:
     @staticmethod
     def _prompt(context: dict[str, object]) -> str:
         return f"""你是求职材料编排器。请仅使用输入中的真实事实，不得虚构经历、指标、学历或技能。
-结合职位 JD、个人档案、向量检索证据、默认问候语和默认简历，生成一次只读测试预览。
+结合职位 JD、个人档案、本地资料匹配证据、默认问候语和默认简历，生成一次只读测试预览。
 问候语应自然、简短，并明确体现最相关的真实经历；简历只做内容选取和顺序编排。
 只返回 JSON，不要 Markdown，格式必须为：
 {{"greeting":"新问候语","resume":{{"headline":"目标标题","summary":["优势条目"],"skills":["技能"],"projects":["项目及匹配说明"],"workExperience":["工作经历"],"education":["教育经历"],"optimizationNotes":["为何这样编排"]}}}}
@@ -443,6 +458,78 @@ class CloudMaterialPreviewGenerator:
         return {"greeting": str(payload["greeting"]).strip(), "resume": normalized_resume}
 
 
+class CloudJobAnalysisGenerator:
+    """基于已配置模型对职位和候选人真实材料做只读分析。"""
+
+    def __init__(self, library: LibraryRepository) -> None:
+        self.library = library
+
+    def generate(
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        prompt = self._prompt(context)
+        errors: list[str] = []
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
+            try:
+                model_id, api_key, base_url, provider = _model_settings(record["data"])
+                if provider == "Anthropic":
+                    content = CloudProjectExtractor._call_anthropic(
+                        base_url, api_key, model_id, prompt
+                    )
+                else:
+                    content = CloudProjectExtractor._call_openai_compatible(
+                        base_url, api_key, model_id, prompt
+                    )
+                result = self._parse(content)
+                return {
+                    **result,
+                    "modelRecordId": record["id"],
+                    "modelName": record["name"],
+                    "modelId": model_id,
+                    "attemptErrors": errors,
+                }
+            except RuntimeError as error:
+                errors.append(f"{record['name']}：{error}")
+        raise RuntimeError("；".join(errors))
+
+    @staticmethod
+    def _prompt(context: dict[str, object]) -> str:
+        return f"""你是谨慎的求职职位分析顾问。
+请结合职位 JD、候选人档案、本地资料匹配证据和本地匹配结果做分析。
+只能使用输入中的真实事实，不得虚构候选人的经历、技能、年限、学历、指标或公司信息。证据不足时必须明确说明。
+建议应具体、可执行，面试问题用于帮助候选人准备，不要替候选人编造答案。
+只返回 JSON，不要 Markdown，格式必须为：
+{{"summary":"整体判断","strengths":["有证据的优势"],"gaps":["差距或待核实项"],"recommendations":["行动建议"],"interviewQuestions":["建议准备的问题"]}}
+
+输入：
+{json.dumps(context, ensure_ascii=False)}"""
+
+    @staticmethod
+    def _parse(content: str) -> dict[str, object]:
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("模型没有返回合法的职位分析 JSON") from error
+        if not isinstance(payload, dict) or not str(payload.get("summary", "")).strip():
+            raise RuntimeError("模型返回内容缺少 summary")
+        return {
+            "summary": str(payload["summary"]).strip(),
+            "strengths": CloudProjectExtractor._strings(payload.get("strengths")),
+            "gaps": CloudProjectExtractor._strings(payload.get("gaps")),
+            "recommendations": CloudProjectExtractor._strings(
+                payload.get("recommendations")
+            ),
+            "interviewQuestions": CloudProjectExtractor._strings(
+                payload.get("interviewQuestions")
+            ),
+        }
+
+
 class CloudGreetingGenerator:
     """使用主模型和兜底模型，仅生成职位问候语。"""
 
@@ -450,11 +537,15 @@ class CloudGreetingGenerator:
         self.library = library
 
     def generate(
-        self, context: dict[str, object], model_record_id: int | None = None
+        self,
+        context: dict[str, object],
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         prompt = self._prompt(context)
         errors: list[str] = []
-        for record in _model_candidates(self.library, model_record_id):
+        for record in _model_candidates(self.library, model_record_id, user_id=user_id):
             try:
                 model_id, api_key, base_url, provider = _model_settings(record["data"])
                 if provider == "Anthropic":
@@ -479,7 +570,7 @@ class CloudGreetingGenerator:
     @staticmethod
     def _prompt(context: dict[str, object]) -> str:
         return f"""你是求职问候语生成器。
-请结合职位 JD、个人档案、向量检索证据和默认问候语，生成一条适合首次联系招聘者的中文问候语。
+请结合职位 JD、个人档案、本地资料匹配证据和默认问候语，生成一条适合首次联系招聘者的中文问候语。
 要求：
 1. 只能使用输入中存在的真实经历、技能和项目，不得虚构事实、年限、指标、学历或公司经历。
 2. 优先选择与 JD 最相关的 1 至 2 项真实能力，不堆砌关键词。

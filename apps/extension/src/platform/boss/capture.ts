@@ -1,4 +1,5 @@
 import type { CapturedJob } from '@job-search-assistant/contracts'
+import { decodeBossSalaryText } from './salary'
 
 export const CAPTURE_EVENT = '__job_search_assistant_boss_capture__'
 export const CAPTURE_DIAGNOSTIC_EVENT = '__job_search_assistant_boss_capture_diagnostic__'
@@ -13,9 +14,27 @@ export interface CaptureDiagnostic {
 
 const SELECTORS = {
   title: ['.job-detail-info .job-name', '.job-detail-info .name h1', '.job-detail-box .name h1', '.job-detail-box .name', '.job-detail-box .job-name', 'h1.job-title', '.job-title .job-name', '.job-banner h1', '.job-primary h1'],
-  company: ['.job-detail-company .company-name', '.company-info .company-name', '.job-detail-box .company-name', '.job-detail-company a[href*="/gongsi/"]', '.company-info a[href*="/gongsi/"]', '.company-info'],
+  company: [
+    '.job-detail-company .company-name',
+    '.company-info .company-name',
+    '.job-detail-box .company-name',
+    '.job-detail-company a[href*="/gongsi/"]',
+    '.company-info a[href*="/gongsi/"]',
+    '.job-detail-box .boss-info .company-name',
+    '.job-detail-box .boss-info a[href*="/gongsi/"]',
+    '.boss-info .company-name',
+    '.boss-info a[href*="/gongsi/"]',
+    'a.boss-info[href*="/gongsi/"]',
+    '.company-info',
+  ],
   companySize: ['.job-detail-company .company-scale', '.company-info .company-scale', '.company-info .company-tag-list li', '.company-info .company-info-item'],
-  description: ['.job-detail-section .job-sec-text', '.job-detail-box .job-sec-text', '.job-detail-content .job-sec-text', '.job-sec-text'],
+  description: [
+    '.job-detail-body .desc',
+    '.job-detail-section .job-sec-text',
+    '.job-detail-box .job-sec-text',
+    '.job-detail-content .job-sec-text',
+    '.job-sec-text',
+  ],
   salary: ['.job-detail-info .salary', '.job-detail-box .salary', '.job-banner .salary', '.info-primary .salary'],
   location: ['.job-banner .text-city', '.info-primary .text-city', '.job-detail-header ul a', '.job-detail-info .text-city', '.job-detail-info .text-desc'],
   workAddress: ['.job-location .location-address', '.job-detail-box .location-address', '.location-address', '[class*="location-address"]'],
@@ -44,7 +63,7 @@ const COMPANY_SIZE_PATTERN = /(?:少于\s*\d+人|\d+\s*[-–—~]\s*\d+人|\d+�
 
 function text(document: Document, selectors: readonly string[]): string | undefined {
   for (const selector of selectors) {
-    const value = document.querySelector(selector)?.textContent?.trim()
+    const value = visibleNodeText(document.querySelector(selector))
     if (value) return value
   }
   return undefined
@@ -53,11 +72,27 @@ function text(document: Document, selectors: readonly string[]): string | undefi
 function texts(document: Document, selectors: readonly string[]): string[] {
   for (const selector of selectors) {
     const values = Array.from(document.querySelectorAll(selector))
-      .map((node) => node.textContent?.trim() ?? '')
+      .map(visibleNodeText)
       .filter(Boolean)
     if (values.length) return [...new Set(values)]
   }
   return []
+}
+
+function visibleNodeText(node: Element | null | undefined): string {
+  if (!node) return ''
+  const hiddenFragments = Array.from(node.querySelectorAll<HTMLElement>(
+    'script,noscript,template,[hidden],[aria-hidden="true"]',
+  )).map(item => item.textContent?.trim() ?? '').filter(Boolean)
+  let rendered = node instanceof HTMLElement ? node.innerText?.trim() : ''
+  for (const fragment of hiddenFragments) rendered = rendered.replace(fragment, '').trim()
+  if (rendered) return rendered
+  // jsdom has no layout-backed innerText. Removing non-visible content keeps
+  // fixtures representative and prevents style/script text from becoming JD.
+  const clone = node.cloneNode(true) as Element
+  clone.querySelectorAll('style,script,noscript,template,[hidden],[aria-hidden="true"]')
+    .forEach(item => item.remove())
+  return clone.textContent?.trim() ?? ''
 }
 
 function platformJobId(
@@ -91,7 +126,7 @@ function headerLabels(document: Document, title: string): string[] {
   const container = titleNode?.closest('.job-banner,.job-primary,.info-primary,.job-detail-info,.job-detail-box')
   if (!container) return []
   return Array.from(container.querySelectorAll('span,p,li,div'))
-    .map((node) => node.textContent?.trim() ?? '')
+    .map(visibleNodeText)
     .filter(Boolean)
 }
 
@@ -129,7 +164,7 @@ function activeCard(document: Document, title?: string): HTMLElement | null {
 function cardText(card: HTMLElement | null, selectors: readonly string[]): string | undefined {
   if (!card) return undefined
   for (const selector of selectors) {
-    const value = card.querySelector(selector)?.textContent?.trim()
+    const value = visibleNodeText(card.querySelector(selector))
     if (value) return value
   }
   return undefined
@@ -137,6 +172,9 @@ function cardText(card: HTMLElement | null, selectors: readonly string[]): strin
 
 function cardCompanyName(card: HTMLElement | null): string | undefined {
   return cleanCompanyName(cardText(card, [
+    'a.boss-info[href*="/gongsi/"]',
+    '.boss-info a[href*="/gongsi/"]',
+    '.boss-info .company-name',
     '.job-card-footer .company-name',
     '.job-card-footer [class*="company-name"]',
     '.job-card-footer .company-info a',
@@ -153,7 +191,7 @@ function cardLabels(card: HTMLElement | null): string[] {
   if (!card) return []
   return Array.from(card.querySelectorAll<HTMLElement>('span,li,p,a,div'))
     .filter((node) => node.children.length === 0)
-    .map((node) => node.textContent?.trim() ?? '')
+    .map(visibleNodeText)
     .filter(Boolean)
 }
 
@@ -161,10 +199,10 @@ function semanticDescription(document: Document): string | undefined {
   const heading = Array.from(document.querySelectorAll<HTMLElement>('h1,h2,h3,h4,strong,.title'))
     .find((node) => /^(?:职位描述|岗位描述|岗位职责|职位职责)$/.test(node.textContent?.trim() ?? ''))
   const container = heading?.closest<HTMLElement>(
-    'section,.job-detail-section,.job-detail-content,.job-detail-box,.detail-content',
+    'section,.job-detail-section,.job-detail-content,.job-detail-body,.detail-content',
   )
   if (!heading || !container) return undefined
-  const value = container.textContent?.replace(heading.textContent ?? '', '').trim()
+  const value = visibleNodeText(container).replace(visibleNodeText(heading), '').trim()
   return value && value.length >= 10 ? value : undefined
 }
 
@@ -200,7 +238,10 @@ function collectCoreFields(document: Document, page: Pick<Location, 'pathname'>)
     resolved: {
       platformJobId: directId ?? (hasJobSignal ? stablePartialId(page, [title ?? '', companyName ?? '']) : undefined),
       title: title ?? (hasJobSignal ? '职位名称待补充' : undefined),
-      companyName: companyName ?? (hasJobSignal ? '公司名称待补充' : undefined),
+      // A missing company is an identity failure, not a field that can be safely
+      // synthesized. Returning no snapshot prevents an unknown company from
+      // reaching analysis or the delivery confirmation list.
+      companyName,
       description: description ?? (hasJobSignal ? '职位描述暂未采集。' : undefined),
     },
   }
@@ -212,7 +253,7 @@ function companySize(document: Document, card?: HTMLElement | null): string | un
   const direct = texts(document, SELECTORS.companySize)
   const company = document.querySelector('.job-detail-company,.company-info,.company-card')
   const fallback = company
-    ? Array.from(company.querySelectorAll('span,li,p,div')).map((node) => node.textContent?.trim() ?? '')
+    ? Array.from(company.querySelectorAll('span,li,p,div')).map(visibleNodeText)
     : []
   return firstMatch([...direct, ...fallback], COMPANY_SIZE_PATTERN)
 }
@@ -230,6 +271,9 @@ export function captureBossJob(
   const cardValues = cardLabels(card)
   const labels = [...texts(document, SELECTORS.tags), ...headerLabels(document, title), ...cardValues]
   const uniqueLabels = [...new Set(labels)]
+  const decodedSalaryLabels = uniqueLabels
+    .map(label => decodeBossSalaryText(label))
+    .filter((label): label is string => Boolean(label))
   return {
     platform: 'boss',
     platformJobId: id,
@@ -241,9 +285,9 @@ export function captureBossJob(
       ?? cardText(card, ['.job-area', '.job-location', '.job-address', '.company-location'])
       ?? uniqueLabels.find((label) => LOCATION_PATTERN.test(label)),
     workAddress: text(document, SELECTORS.workAddress),
-    salaryText: text(document, SELECTORS.salary)
-      ?? cardText(card, ['.salary', '.job-salary'])
-      ?? firstMatch(uniqueLabels, SALARY_PATTERN),
+    salaryText: decodeBossSalaryText(text(document, SELECTORS.salary))
+      ?? decodeBossSalaryText(cardText(card, ['.salary', '.job-salary']))
+      ?? firstMatch(decodedSalaryLabels, SALARY_PATTERN),
     experience: uniqueLabels.find((label) => EXPERIENCE_PATTERN.test(label))?.match(EXPERIENCE_PATTERN)?.[0],
     education: uniqueLabels.find((label) => EDUCATION_PATTERN.test(label))?.match(EDUCATION_PATTERN)?.[0],
     description,

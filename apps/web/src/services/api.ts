@@ -1,21 +1,45 @@
 import type {
+  BrowserProbe,
+  BrowserPairing,
+  BrowserProtocolStatus,
+  AutomationEvent,
+  AutomationReport,
+  AutomationRun,
+  AutomationCollectionConfig,
+  DeliveryRecord,
   HealthResponse,
   JobMatch,
+  JobInsight,
   MaterialPreview,
   JobTrackingUpdate,
   LibraryRecord,
   ManualJobInput,
-  RagChunk,
-  RagSearchResult,
-  RagStatus,
+  ResumeConfirmationResult,
   ResumeImportResult,
   ResumeTemplate,
+  SetupStatus,
+  SetupTestRunResult,
   StoredJob,
 } from '../types'
 
+export type AdminUser = { id: number; username: string; isAdmin: boolean; isActive: boolean; createdAt: string }
+
+type UnauthorizedHandler = () => void
+let unauthorizedHandler: UnauthorizedHandler | null = null
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const token = localStorage.getItem('jsa_access_token')
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(path, { ...init, headers })
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith('/v1/auth/login') && !path.startsWith('/v1/auth/register')) {
+      localStorage.removeItem('jsa_access_token')
+      unauthorizedHandler?.()
+    }
     let message = `请求失败（${response.status}）`
     try {
       const payload = await response.json()
@@ -29,6 +53,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const token = localStorage.getItem('jsa_access_token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(path, { headers })
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('jsa_access_token')
+      unauthorizedHandler?.()
+    }
+    throw new Error(`图片读取失败（${response.status}）`)
+  }
+  return response.blob()
+}
+
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
@@ -36,7 +75,35 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 export const api = {
+  me: () => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/me'),
+  bootstrap: () => request<{ needsSetup: boolean }>('/v1/auth/bootstrap'),
+  login: async (username: string, password: string) => { const result = await request<{ user: { id: number; username: string; isAdmin: boolean }; token: string }>('/v1/auth/login', json('POST', { username, password })); localStorage.setItem('jsa_access_token', result.token); return result },
+  register: (username: string, password: string) => request<{ user: { id: number; username: string; isAdmin: boolean } }>('/v1/auth/register', json('POST', { username, password })),
+  adminUsers: () => request<{ items: AdminUser[] }>('/v1/admin/users'),
+  adminCreateUser: (username: string, password: string, isAdmin = false) => request<{ user: AdminUser }>('/v1/admin/users', json('POST', { username, password, isAdmin })),
+  adminUpdateUser: (id: number, data: { password?: string; isAdmin?: boolean; isActive?: boolean }) => request<{ user: AdminUser }>(`/v1/admin/users/${id}`, json('PATCH', data)),
+  adminDeleteUser: (id: number) => request<{ ok: boolean }>(`/v1/admin/users/${id}`, { method: 'DELETE' }),
+  logout: async () => { localStorage.removeItem('jsa_access_token'); return request<{ ok: boolean }>('/v1/auth/logout', { method: 'POST' }) },
   health: () => request<HealthResponse>('/v1/health'),
+  setupStatus: () => request<SetupStatus>('/v1/setup/status'),
+  saveBrowserProbe: (probe: BrowserProbe) => request<BrowserProbe>('/v1/setup/browser/probe', json('POST', probe)),
+  runSetupTest: () => request<SetupTestRunResult>('/v1/setup/test-run', { method: 'POST' }),
+  browserStatus: () => request<BrowserProtocolStatus>('/v1/browser/status'),
+  createBrowserPairing: () => request<BrowserPairing>('/v1/browser/pairing', { method: 'POST' }),
+  testBrowserConnection: () => request<{ status: string; evidence: Record<string, unknown> }>('/v1/browser/actions/test', json('POST', { action: 'ping', payload: {} })),
+  automationRuns: () => request<{ items: AutomationRun[] }>('/v1/automation/runs'),
+  deleteAutomationRun: (id: number) => request<void>(`/v1/automation/runs/${id}`, { method: 'DELETE' }),
+  deliveries: (limit = 500) => request<{ total: number; items: DeliveryRecord[] }>(`/v1/deliveries?limit=${limit}`),
+  createAutomationRun: (targetCount: number, config: AutomationCollectionConfig) => request<AutomationRun>('/v1/automation/runs', json('POST', { targetCount, config })),
+  collectAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collect`, { method: 'POST' }),
+  stopAutomationCollection: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/collection/stop`, { method: 'POST' }),
+  automationEvents: (id: number) => request<{ items: AutomationEvent[] }>(`/v1/automation/runs/${id}/events`),
+  automationReport: (id: number) => request<AutomationReport>(`/v1/automation/runs/${id}/report`),
+  retryAutomationRun: (id: number) => request<AutomationRun>(`/v1/automation/runs/${id}/retry`, { method: 'POST' }),
+  controlAutomationRun: (id: number, action: 'start' | 'pause' | 'resume' | 'stop', selectedJobIds?: string[]) => request<AutomationRun>(
+    `/v1/automation/runs/${id}/${action}`,
+    action === 'start' && selectedJobIds ? json('POST', { selectedJobIds }) : { method: 'POST' },
+  ),
   jobs: (options: { page?: number; pageSize?: number; query?: string; communicationResult?: string } = {}) => {
     const params = new URLSearchParams({
       page: String(options.page || 1),
@@ -46,13 +113,16 @@ export const api = {
     if (options.communicationResult) params.set('communicationResult', options.communicationResult)
     return request<{ total: number; page: number; pageSize: number; totalPages: number; items: StoredJob[] }>(`/v1/jobs?${params}`)
   },
-  createJob: (job: ManualJobInput) => request<StoredJob>('/v1/jobs', json('POST', job)),
-  updateJobTracking: (id: number, data: JobTrackingUpdate) => request<StoredJob>(`/v1/jobs/${id}/tracking`, json('PUT', data)),
+  createJob: (job: ManualJobInput) => request<StoredJob>('/v1/jobs', json('POST', job)),  updateJobTracking: (id: number, data: JobTrackingUpdate) => request<StoredJob>(`/v1/jobs/${id}/tracking`, json('PUT', data)),
   deleteJob: (id: number) => request<void>(`/v1/jobs/${id}`, { method: 'DELETE' }),
   matchJob: (job: StoredJob) => request<JobMatch>('/v1/jobs/match', json('POST', {
     title: job.title,
     jobText: job.description,
     skills: job.skills || [],
+  })),
+  analyzeJob: (id: number, useAi = false, modelRecordId?: number) => request<JobInsight>(`/v1/jobs/${id}/analysis`, json('POST', {
+    useAi,
+    ...(modelRecordId === undefined ? {} : { modelRecordId }),
   })),
   previewJobMaterials: (id: number) => request<MaterialPreview>(`/v1/jobs/${id}/material-preview`, json('POST', {})),
   profile: () => request<{ data: Record<string, any> }>('/v1/profile'),
@@ -68,11 +138,8 @@ export const api = {
     if (modelRecordId !== undefined) body.append('modelRecordId', String(modelRecordId))
     return request<ResumeImportResult>('/v1/resumes/import', { method: 'POST', body })
   },
+  confirmResume: (id: number) => request<ResumeConfirmationResult>(`/v1/resumes/${id}/confirm`, { method: 'POST' }),
+  resumePreviewImage: (id: number) => requestBlob(`/v1/resumes/${id}/preview-image`),
   setDefaultResumeImage: (id: number) => request<LibraryRecord>(`/v1/resumes/${id}/default-image`, { method: 'PUT' }),
-  ragStatus: () => request<RagStatus>('/v1/rag/status'),
-  ragChunks: () => request<{ total: number; items: RagChunk[] }>('/v1/rag/chunks'),
-  deleteRagChunk: (id: number) => request<void>(`/v1/rag/chunks/${id}`, { method: 'DELETE' }),
-  rebuildRag: () => request<{ rebuilt: number }>('/v1/rag/rebuild', { method: 'POST' }),
-  searchRag: (query: string) => request<{ items: RagSearchResult[] }>('/v1/rag/search', json('POST', { query, limit: 5 })),
   templates: () => request<{ items: ResumeTemplate[]; sampleData: Record<string, any> }>('/v1/resume-templates'),
 }

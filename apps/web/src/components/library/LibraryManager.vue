@@ -31,13 +31,43 @@
       <div class="section-title"><div><p class="eyebrow">{{ listEyebrow }}</p><h2>{{ listTitle }}</h2></div><span class="library-count">{{ records.length }} 条记录</span></div>
       <div v-if="loading" class="library-empty">正在读取本地数据…</div>
       <div v-else-if="!records.length" class="library-empty">还没有数据，请使用左侧表单添加第一条记录。</div>
-      <div v-else class="record-grid">
-        <article v-for="record in records" :key="record.id" class="record-card">
-          <div v-if="kind === 'resumes' && record.data.previewImageFile" class="resume-image-preview"><img :src="`/v1/resumes/${record.id}/preview-image`" :alt="`${record.name} 第一页预览`" /></div>
-          <div class="record-card-head">
+      <div v-else class="record-grid" :class="{ 'resume-record-list': kind === 'resumes' }">
+        <article v-for="record in records" :key="record.id" class="record-card" :class="{ 'resume-record-card': kind === 'resumes' }">
+          <div v-if="kind === 'resumes'" class="resume-record-summary">
+            <div class="resume-image-preview" :class="{ 'has-preview': record.data.previewImageFile }">
+              <img v-if="record.data.previewImageFile && previewUrls[record.id]" :src="previewUrls[record.id]" :alt="`${record.name} 第一页预览`" />
+              <span v-else-if="record.data.previewImageFile" class="resume-preview-loading">读取中…</span>
+              <span v-else class="resume-file-placeholder" aria-hidden="true"><strong>{{ String(record.data.format || 'PDF').slice(0, 4).toUpperCase() }}</strong></span>
+            </div>
+            <div class="resume-record-copy">
+              <div class="resume-confirmation-status" :class="record.data.confirmationStatus === 'pending' ? 'is-pending' : 'is-confirmed'">
+                {{ record.data.confirmationStatus === 'pending' ? '待确认识别结果' : '已确认，可用于投递' }}
+              </div>
+              <h3>{{ record.name }}</h3>
+              <p>{{ display(record) }}</p>
+            </div>
+            <div class="record-actions resume-record-actions">
+              <a-button v-if="record.data.confirmationStatus === 'pending'" size="small" type="primary" :loading="confirmingId === record.id" @click="confirmResume(record)">确认并写入知识库</a-button>
+              <a-button v-if="record.data.previewImageFile && record.data.confirmationStatus !== 'pending'" size="small" :type="record.data.isDefaultImage ? 'primary' : 'default'" :disabled="Boolean(record.data.isDefaultImage)" @click="setDefaultImage(record)">{{ record.data.isDefaultImage ? '默认投递图片' : '设为默认图片' }}</a-button>
+              <a-button size="small" @click="edit(record)">编辑</a-button>
+              <a-button size="small" danger @click="confirmDelete(record)">删除</a-button>
+            </div>
+          </div>
+          <div v-if="kind === 'resumes' && record.data.confirmationStatus === 'pending'" class="resume-confirmation-preview">
+            <div><span>识别姓名</span><strong>{{ record.data.stagedProfile?.displayName || '未识别' }}</strong></div>
+            <div><span>目标岗位</span><strong>{{ record.data.stagedProfile?.targetRoles || '未识别' }}</strong></div>
+            <div><span>候选项目</span><strong>{{ record.data.stagedProjects?.length || 0 }} 个</strong></div>
+            <details>
+              <summary>查看待确认内容摘要</summary>
+              <p v-if="record.data.stagedProjects?.length">{{ pendingProjectNames(record) }}</p>
+              <pre>{{ String(record.data.rawText || '').slice(0, 1200) }}</pre>
+            </details>
+          </div>
+          <div v-if="kind !== 'resumes'" class="record-card-head">
             <div><h3>{{ record.name }}</h3><p>{{ display(record) }}</p></div>
             <div class="record-actions">
-              <a-button v-if="kind === 'resumes' && record.data.previewImageFile" size="small" :type="record.data.isDefaultImage ? 'primary' : 'default'" :disabled="Boolean(record.data.isDefaultImage)" @click="setDefaultImage(record)">{{ record.data.isDefaultImage ? '默认投递图片' : '设为默认图片' }}</a-button>
+              <a-button v-if="kind === 'resumes' && record.data.confirmationStatus === 'pending'" size="small" type="primary" :loading="confirmingId === record.id" @click="confirmResume(record)">确认并写入知识库</a-button>
+              <a-button v-if="kind === 'resumes' && record.data.previewImageFile && record.data.confirmationStatus !== 'pending'" size="small" :type="record.data.isDefaultImage ? 'primary' : 'default'" :disabled="Boolean(record.data.isDefaultImage)" @click="setDefaultImage(record)">{{ record.data.isDefaultImage ? '默认投递图片' : '设为默认图片' }}</a-button>
               <a-button v-if="kind === 'models'" size="small" :loading="testingId === record.id" @click="testModel(record)">验证连接</a-button>
               <a-button size="small" @click="edit(record)">编辑</a-button>
               <a-button size="small" danger @click="confirmDelete(record)">删除</a-button>
@@ -53,7 +83,7 @@
 
 <script setup lang="ts">
 import { Modal, message } from 'ant-design-vue'
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref } from 'vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
 import type { LibraryRecord } from '../../types'
@@ -88,8 +118,29 @@ const loading = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
 const testingId = ref<number | null>(null)
+const confirmingId = ref<number | null>(null)
 const modelStatuses = reactive<Record<number, { ok: boolean; text: string }>>({})
+const previewUrls = reactive<Record<number, string>>({})
 const form = reactive<{ name: string; data: Record<string, any> }>({ name: '', data: {} })
+
+function clearPreviewUrls() {
+  Object.entries(previewUrls).forEach(([id, url]) => {
+    URL.revokeObjectURL(url)
+    delete previewUrls[Number(id)]
+  })
+}
+
+async function loadResumePreviews(items: LibraryRecord[]) {
+  clearPreviewUrls()
+  if (props.kind !== 'resumes') return
+  await Promise.all(items.filter(record => record.data.previewImageFile).map(async (record) => {
+    try {
+      previewUrls[record.id] = URL.createObjectURL(await api.resumePreviewImage(record.id))
+    } catch (error) {
+      message.error(`${record.name}：${(error as Error).message}`)
+    }
+  }))
+}
 
 function defaults() {
   return Object.fromEntries(props.fields.map((field) => [field.key, field.defaultValue || '']))
@@ -103,7 +154,10 @@ function resetForm() {
 
 async function reload() {
   loading.value = true
-  try { records.value = (await api.library(props.kind)).items }
+  try {
+    records.value = (await api.library(props.kind)).items
+    await loadResumePreviews(records.value)
+  }
   catch (error) { message.error((error as Error).message) }
   finally { loading.value = false }
 }
@@ -127,6 +181,10 @@ function edit(record: LibraryRecord) {
   form.name = record.name
   form.data = { ...defaults(), ...record.data, ...(props.kind === 'models' ? { apiKey: '' } : {}) }
   window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function pendingProjectNames(record: LibraryRecord) {
+  return (record.data.stagedProjects || []).map((project: Record<string, any>) => project.name).join('、')
 }
 
 function confirmDelete(record: LibraryRecord) {
@@ -166,7 +224,21 @@ async function setDefaultImage(record: LibraryRecord) {
   } catch (error) { message.error((error as Error).message) }
 }
 
+async function confirmResume(record: LibraryRecord) {
+  confirmingId.value = record.id
+  try {
+    const result = await api.confirmResume(record.id)
+    await reload()
+    message.success(`识别结果已确认，写入 ${result.projectIds.length} 个项目`)
+  } catch (error) {
+    message.error(`确认失败：${(error as Error).message}`)
+  } finally {
+    confirmingId.value = null
+  }
+}
+
 resetForm()
 useRefresh(reload)
+onBeforeUnmount(clearPreviewUrls)
 defineExpose({ reload })
 </script>

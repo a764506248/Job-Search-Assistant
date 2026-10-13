@@ -7,7 +7,7 @@ from job_search_assistant.main import create_app
 
 
 class FakeEmbedder:
-    model = "test/resume-embedding"
+    model = "test/local-matcher"
 
     def health(self) -> dict[str, object]:
         return {"status": "ok", "model": self.model}
@@ -27,7 +27,11 @@ def make_pdf(text: str) -> bytes:
 
 class FakeProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         assert "企业知识库问答系统" in resume_text
         assert model_record_id is None
@@ -49,7 +53,11 @@ class FakeProjectExtractor:
 
 class StructuredResumeExtractor:
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         return {
             "profile": {
@@ -79,7 +87,11 @@ class MutableStructuredResumeExtractor:
         ]
 
     def extract_resume(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> dict[str, object]:
         return {
             "profile": {},
@@ -105,7 +117,9 @@ def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
         "/v1/resumes/import",
         files={"file": ("resume-v1.txt", "第一版简历".encode(), "text/plain")},
     ).json()
-    first_project_id = first["projectIds"][0]
+    assert first["confirmationStatus"] == "pending"
+    first_confirmed = client.post(f"/v1/resumes/{first['resumeId']}/confirm").json()
+    first_project_id = first_confirmed["projectIds"][0]
 
     extractor.projects = [
         {"name": "已有 项目", "data": {"summary": "第二版", "extractionMethod": "ai"}},
@@ -115,10 +129,11 @@ def test_ai_resume_import_accumulates_projects_without_resetting_or_duplicating(
         "/v1/resumes/import",
         files={"file": ("resume-v2.txt", "第二版简历".encode(), "text/plain")},
     ).json()
+    second_confirmed = client.post(f"/v1/resumes/{second['resumeId']}/confirm").json()
 
     projects = client.get("/v1/library/projects").json()["items"]
     assert len(projects) == 2
-    assert second["projectIds"][0] == first_project_id
+    assert second_confirmed["projectIds"][0] == first_project_id
     assert {item["name"] for item in projects} == {"已有 项目", "新增项目"}
     updated = next(item for item in projects if item["id"] == first_project_id)
     assert updated["data"]["summary"] == "第二版"
@@ -140,6 +155,9 @@ def test_pdf_import_generates_first_page_image_and_supports_default_selection(
         "/v1/resumes/import",
         files={"file": ("resume-two.pdf", make_pdf("Second resume page"), "application/pdf")},
     ).json()
+    assert client.get("/v1/resumes/default-image").status_code == 404
+    client.post(f"/v1/resumes/{first['resumeId']}/confirm")
+    client.post(f"/v1/resumes/{second['resumeId']}/confirm")
 
     records = client.get("/v1/library/resumes").json()["items"]
     first_record = next(item for item in records if item["id"] == first["resumeId"])
@@ -180,6 +198,10 @@ def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path
     assert result["aiProjectCount"] == 2
     assert result["aiModelName"] == "兜底模型"
     assert result["aiAttemptErrors"] == ["主模型：timed out"]
+    assert result["confirmationRequired"] is True
+    assert client.get("/v1/profile").json()["data"] == {}
+    confirmation = client.post(f"/v1/resumes/{result['resumeId']}/confirm")
+    assert confirmation.status_code == 200
     profile = client.get("/v1/profile").json()["data"]
     assert profile["displayName"] == "AI 提取姓名"
     assert profile["strengths"] == [{"id": "strength-1", "content": "完整的个人优势"}]
@@ -188,18 +210,7 @@ def test_import_resume_uses_full_structured_result_and_reports_fallback(tmp_path
     assert {item["name"] for item in projects} == {"项目一", "项目二"}
     assert all(item["data"]["source"] == "resume-import" for item in projects)
 
-    chunks = client.get("/v1/rag/chunks").json()["items"]
-    strength_chunks = [item for item in chunks if item["knowledgeType"] == "strengths"]
-    assert len(strength_chunks) == 1
-    assert strength_chunks[0]["entityId"] == "strengths"
-    assert strength_chunks[0]["content"] == "完整的个人优势"
-    project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
-    assert {item["entityId"] for item in project_chunks} == {
-        str(item["id"]) for item in projects
-    }
-
-
-def test_import_resume_writes_profile_projects_resume_and_vectors(tmp_path) -> None:
+def test_import_resume_writes_profile_projects_and_resume(tmp_path) -> None:
     client = TestClient(
         create_app(
             tmp_path / "jobs.sqlite3",
@@ -231,9 +242,19 @@ xiaolin@example.com
 
     assert response.status_code == 201
     result = response.json()
-    assert result["indexRebuilt"] is True
-    assert result["indexedChunks"] >= 3
-    assert len(result["projectIds"]) == 1
+    assert result["projectIds"] == []
+    assert client.get("/v1/profile").json()["data"] == {}
+    pending_setup = client.get("/v1/setup/status").json()
+    pending_resume = next(
+        item for item in pending_setup["checks"] if item["key"] == "resume"
+    )
+    assert pending_resume["status"] == "blocked"
+    assert "等待确认" in pending_resume["message"]
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert len(confirmed["projectIds"]) == 1
+    ready_setup = client.get("/v1/setup/status").json()
+    ready_resume = next(item for item in ready_setup["checks"] if item["key"] == "resume")
+    assert ready_resume["status"] == "ready"
     assert result["aiExtractionUsed"] is True
     assert result["aiProjectCount"] == 1
     assert result["aiExtractionError"] is None
@@ -257,16 +278,14 @@ xiaolin@example.com
     assert resumes[0]["data"]["fileName"] == "张小林简历.txt"
     assert "rawText" in resumes[0]["data"]
 
-    chunks = client.get("/v1/rag/chunks").json()
-    assert chunks["total"] >= 3
-    assert {item["dimensions"] for item in chunks["items"]} == {3}
-
     repeated = client.post(
         "/v1/resumes/import",
         files={"file": ("张小林简历.txt", content.encode(), "text/plain")},
-    )
-    assert repeated.status_code == 201
-    assert repeated.json()["projectIds"] == result["projectIds"]
+    ).json()
+    repeated_confirmed = client.post(
+        f"/v1/resumes/{repeated['resumeId']}/confirm"
+    ).json()
+    assert repeated_confirmed["projectIds"] == confirmed["projectIds"]
     assert len(client.get("/v1/library/projects").json()["items"]) == 1
 
 
@@ -275,7 +294,11 @@ class SelectedModelProjectExtractor:
         self.model_record_id: int | None = None
 
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         self.model_record_id = model_record_id
         return [{"name": "AI 项目", "data": {"summary": "模型提取结果"}}]
@@ -331,7 +354,11 @@ def test_import_resume_rejects_unsupported_file(tmp_path) -> None:
 
 class FailingProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         raise RuntimeError("模型接口暂时不可用")
 
@@ -361,17 +388,22 @@ def test_import_resume_keeps_data_when_ai_extraction_fails(tmp_path) -> None:
     result = response.json()
     assert result["aiExtractionUsed"] is False
     assert result["aiExtractionError"] == "模型接口暂时不可用"
-    assert len(result["projectIds"]) == 1
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert len(confirmed["projectIds"]) == 1
 
 
 class EmptyProjectExtractor:
     def extract(
-        self, resume_text: str, model_record_id: int | None = None
+        self,
+        resume_text: str,
+        model_record_id: int | None = None,
+        *,
+        user_id: int = 1,
     ) -> list[dict[str, object]]:
         return []
 
 
-def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_empty(
+def test_import_resume_splits_projects_when_ai_returns_empty(
     tmp_path,
 ) -> None:
     client = TestClient(
@@ -402,20 +434,15 @@ def test_import_resume_splits_projects_before_building_vectors_when_ai_returns_e
     result = response.json()
     assert result["aiExtractionUsed"] is False
     assert "本地项目标题规则" in result["aiExtractionError"]
-    assert len(result["projectIds"]) == 2
+    confirmed = client.post(f"/v1/resumes/{result['resumeId']}/confirm").json()
+    assert len(confirmed["projectIds"]) == 2
 
     projects = client.get("/v1/library/projects").json()["items"]
     assert {item["name"] for item in projects} == {
         "实时语音导购 Agent",
         "内容运营系统",
     }
-    chunks = client.get("/v1/rag/chunks").json()["items"]
-    project_chunks = [item for item in chunks if item["knowledgeType"] == "project"]
-    assert {item["entityId"] for item in project_chunks} == {
-        str(project_id) for project_id in result["projectIds"]
-    }
-
     reprocess = client.post(f"/v1/resumes/{result['resumeId']}/extract-projects")
     assert reprocess.status_code == 200
-    assert reprocess.json()["projectIds"] == result["projectIds"]
+    assert reprocess.json()["projectIds"] == confirmed["projectIds"]
     assert reprocess.json()["extractionMethod"] == "local-heading-fallback"

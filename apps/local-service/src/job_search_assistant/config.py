@@ -13,9 +13,10 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8765
     local_token: str | None = None
+    database_url: str | None = None
+    jwt_secret: str | None = None
+    runner_token: str | None = None
     data_dir: Path = Path("data")
-    embedding_url: str = "http://127.0.0.1:8766"
-    embedding_model: str = "jinaai/jina-embeddings-v2-base-zh"
 
 
 settings = Settings()

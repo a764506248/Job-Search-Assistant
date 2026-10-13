@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -83,6 +84,10 @@ def _find_chrome() -> str | None:
     return next((path for path in candidates if path and Path(path).is_file()), None)
 
 
+def _looks_like_phone(value: str) -> bool:
+    return bool(re.search(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)", value))
+
+
 def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
     _register_chinese_font()
     buffer = BytesIO()
@@ -103,7 +108,10 @@ def _build_reportlab_pdf(data: dict[str, Any]) -> bytes:
     styles = _styles()
     story = []
 
-    contact = " · ".join(data["contact"])
+    contact = " · ".join(
+        item for item in data["contact"]
+        if not (data.get("hidePhone", True) and _looks_like_phone(item))
+    )
     header = Table(
         [
             [Paragraph(data["name"], styles["name"]), Paragraph(contact, styles["contact"])],

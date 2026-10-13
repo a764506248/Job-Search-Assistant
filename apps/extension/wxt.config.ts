@@ -3,11 +3,11 @@ import { defineConfig } from 'wxt'
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   manifest: {
-    name: 'Job Search Assistant - 简历图片测试版',
-    version: '0.2.3',
-    version_name: '0.2.3-resume-image-test',
-    description: 'BOSS 直聘默认简历图片发送测试版（原职位采集功能已暂停）',
-    permissions: ['storage'],
-    host_permissions: ['https://www.zhipin.com/*', 'http://127.0.0.1/*'],
+    name: 'Job Search Assistant',
+    version: '0.4.24',
+    version_name: '0.4.24-boss-filter-alignment',
+    description: '连接本地 Job Search Assistant，采集 BOSS 职位并安全执行已确认动作',
+    permissions: ['storage', 'tabs'],
+    host_permissions: ['https://www.zhipin.com/*', 'http://127.0.0.1/*', 'http://*/*', 'https://*/*'],
   },
 })

@@ -1,6 +1,7 @@
 # ruff: noqa: E501
 
 from html import escape
+import re
 from typing import Any
 
 
@@ -17,7 +18,10 @@ def build_resume_html(data: dict[str, Any]) -> str:
         f"<em>{escape(item['degree'])}</em></h3><time>{escape(item['period'])}</time></div></article>"
         for item in data["education"]
     )
-    contact = "<br>".join(escape(item) for item in data["contact"])
+    contact = "<br>".join(
+        escape(item) for item in data["contact"]
+        if not (data.get("hidePhone", True) and _looks_like_phone(item))
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(data["name"])} - 简历</title>
 <style>{PRINT_CSS}</style></head><body>
@@ -78,3 +82,7 @@ time { color: #526b7a; font-size: 8pt; white-space: nowrap; }
   .resume-document { width: auto; min-height: 0; margin: 0; padding: 0; }
 }
 """
+
+
+def _looks_like_phone(value: str) -> bool:
+    return bool(re.search(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)", value))

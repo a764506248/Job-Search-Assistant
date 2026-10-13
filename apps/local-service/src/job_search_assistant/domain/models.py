@@ -75,6 +75,191 @@ class HealthResponse(ApiModel):
     version: str
 
 
+SetupCheckStatus = Literal["ready", "pending", "warning", "blocked"]
+
+
+class SetupCheck(ApiModel):
+    key: str
+    label: str
+    status: SetupCheckStatus
+    message: str
+    blocking: bool = False
+    action_label: str | None = None
+    action_path: str | None = None
+
+
+class SetupStatusResponse(ApiModel):
+    overall: SetupCheckStatus
+    completed: int
+    total: int
+    checks: list[SetupCheck]
+    checked_at: datetime
+
+
+class BrowserProbeRequest(ApiModel):
+    project_extension_ready: bool = False
+    boss_logged_in: bool = False
+    source: Literal["installer", "manual", "extension"] = "manual"
+
+
+class BrowserProbeResponse(BrowserProbeRequest):
+    checked_at: datetime
+
+
+class SetupTestRunResponse(ApiModel):
+    ok: bool
+    mode: Literal["dry-run"] = "dry-run"
+    browser_actions_executed: bool = False
+    planned_keywords: list[str] = Field(default_factory=list)
+    daily_target: int
+    blocking_checks: list[str] = Field(default_factory=list)
+    message: str
+
+
+class AutomationRunCreateRequest(ApiModel):
+    target_count: int = Field(default=20, ge=1, le=500)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutomationRunStartRequest(ApiModel):
+    selected_job_ids: list[str] = Field(min_length=1)
+
+
+class AutomationRun(ApiModel):
+    id: int
+    status: str
+    config_snapshot: dict[str, Any]
+    target_count: int
+    success_count: int
+    failure_count: int
+    current_keyword: str | None = None
+    current_job_id: str | None = None
+    runner_id: str | None = None
+    heartbeat_at: datetime | None = None
+    stop_reason: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+
+
+class AutomationRunListResponse(ApiModel):
+    items: list[AutomationRun]
+
+
+class AutomationRunnerStatus(ApiModel):
+    runner_id: str | None = None
+    heartbeat_at: datetime | None = None
+    online: bool = False
+
+
+class AutomationEvent(ApiModel):
+    id: int
+    run_id: int
+    sequence: int
+    event_type: str
+    level: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class AutomationEventListResponse(ApiModel):
+    items: list[AutomationEvent]
+
+
+class AutomationRunnerClaimResponse(ApiModel):
+    run: AutomationRun | None = None
+    approval_token: str | None = None
+
+
+class AutomationHeartbeatRequest(ApiModel):
+    runner_id: str = Field(min_length=1, max_length=100)
+
+
+class AutomationRunnerFinishRequest(AutomationHeartbeatRequest):
+    status: Literal["completed", "failed", "blocked", "cancelled", "interrupted"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class AutomationProgressRequest(AutomationHeartbeatRequest):
+    job_id: str = Field(min_length=1, max_length=300)
+    outcome: Literal["success", "failure", "skipped"]
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class AutomationActionClaimRequest(ApiModel):
+    job_id: str = Field(min_length=1, max_length=300)
+    action_type: str = Field(min_length=1, max_length=100)
+
+
+class AutomationAction(ApiModel):
+    idempotency_key: str
+    run_id: int
+    job_id: str
+    action_type: str
+    status: Literal["pending", "succeeded", "failed", "uncertain"]
+    attempt_count: int
+    last_error: str | None = None
+    updated_at: datetime
+
+
+class AutomationActionClaimResponse(ApiModel):
+    action: AutomationAction
+    execute: bool
+
+
+class AutomationActionResultRequest(ApiModel):
+    succeeded: bool
+    error: str | None = Field(default=None, max_length=2000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutomationReport(ApiModel):
+    run: AutomationRun
+    actions: list[AutomationAction]
+    events: list[AutomationEvent]
+
+
+class BrowserPairingResponse(ApiModel):
+    code: str
+    expires_at: datetime
+    protocol_version: str
+
+
+class BrowserProtocolStatus(ApiModel):
+    connected: bool
+    paired: bool
+    protocol_version: str
+    extension_version: str | None = None
+
+
+class BrowserTestActionRequest(ApiModel):
+    action: Literal["ping", "session_status", "capture_job"] = "ping"
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BrowserActionResponse(ApiModel):
+    request_id: str
+    status: Literal[
+        "success", "failed", "blocked", "confirmation_required", "uncertain"
+    ]
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class AutomationBrowserActionRequest(AutomationHeartbeatRequest):
+    job_id: str = Field(min_length=1, max_length=300)
+    action: str = Field(min_length=1, max_length=100)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    deadline_ms: int = Field(default=20_000, ge=1_000, le=120_000)
+
+
+class AutomationBrowserActionResponse(ApiModel):
+    idempotency_key: str
+    execute: bool
+    result: BrowserActionResponse | None = None
+
+
 class ClientLogInput(ApiModel):
     source: Literal["extension-content", "extension-background", "extension-page"]
     level: Literal["warning", "error"] = "error"
@@ -302,9 +487,6 @@ class ResumeImportResponse(ApiModel):
     resume_id: int
     project_ids: list[int]
     extracted_characters: int
-    index_rebuilt: bool
-    indexed_chunks: int | None = None
-    index_error: str | None = None
     ai_extraction_used: bool
     ai_project_count: int = 0
     ai_extraction_error: str | None = None
@@ -313,31 +495,17 @@ class ResumeImportResponse(ApiModel):
     ai_model_id: str | None = None
     ai_attempt_errors: list[str] = Field(default_factory=list)
     ai_profile_extracted: bool = False
+    confirmation_required: bool = True
+    confirmation_status: Literal["pending", "confirmed"] = "pending"
 
 
-class RagStatus(ApiModel):
-    chunks: int
-    sources: int
-    indexed_at: datetime | None = None
-    model: str | None = None
-    embedding_available: bool
-    embedding_service: dict[str, Any]
+class ResumeConfirmationResponse(ApiModel):
+    resume: LibraryRecord
+    profile_fields: list[str]
+    project_ids: list[int]
 
 
-class RagRebuildResponse(ApiModel):
-    chunks: int
-    sources: int
-    indexed_at: datetime | None = None
-    model: str | None = None
-    rebuilt: int
-
-
-class RagSearchRequest(ApiModel):
-    query: str = Field(min_length=1)
-    limit: int = Field(default=5, ge=1, le=20)
-
-
-class RagSearchResult(ApiModel):
+class KnowledgeEvidence(ApiModel):
     source_type: str
     source_id: str
     source_name: str
@@ -347,7 +515,6 @@ class RagSearchResult(ApiModel):
     chunk_index: int
     content: str
     score: float
-    vector_score: float = 0
     keyword_score: float = 0
 
 
@@ -356,8 +523,8 @@ class AutomaticJobMatchResponse(ApiModel):
     suitability_score: int
     customization_confidence: int
     decision: DecisionResponse
-    evidence: list[RagSearchResult]
-    scoring_version: str = "local-hybrid-v1"
+    evidence: list[KnowledgeEvidence]
+    scoring_version: str = "local-keyword-v1"
 
 
 class AutomationConfigResponse(ApiModel):
@@ -394,6 +561,25 @@ class MaterialPreviewRequest(ApiModel):
     model_record_id: int | None = None
 
 
+class JobInsightRequest(ApiModel):
+    use_ai: bool = False
+    model_record_id: int | None = None
+
+
+class JobInsightResponse(ApiModel):
+    job_id: int
+    mode: Literal["local", "ai"]
+    summary: str
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    interview_questions: list[str] = Field(default_factory=list)
+    match: AutomaticJobMatchResponse
+    model_record_id: int | None = None
+    model_name: str | None = None
+    model_id: str | None = None
+
+
 class ResumeCompositionPreview(ApiModel):
     headline: str
     summary: list[str] = Field(default_factory=list)
@@ -413,29 +599,3 @@ class MaterialPreviewResponse(ApiModel):
     greeting: str
     resume: ResumeCompositionPreview
     match: AutomaticJobMatchResponse
-
-
-class RagSearchResponse(ApiModel):
-    items: list[RagSearchResult]
-
-
-class RagChunk(ApiModel):
-    id: int
-    source_type: str
-    source_id: str
-    source_name: str
-    knowledge_type: str = ""
-    entity_id: str = ""
-    tags: list[str] = Field(default_factory=list)
-    chunk_index: int
-    content: str
-    content_hash: str
-    embedding: list[float]
-    dimensions: int
-    model: str
-    indexed_at: datetime
-
-
-class RagChunkListResponse(ApiModel):
-    total: int
-    items: list[RagChunk]

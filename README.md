@@ -12,7 +12,7 @@
 
 由于包含非商业限制，本项目属于“源码可用（source-available）”，不属于 OSI 定义的开源软件。第三方依赖仍分别适用其自身许可证。
 
-当前阶段：MVP 基础开发。已建立浏览器扩展、本地服务、材料策略决策和 Boss JD 快照采集链路。Chrome 扩展当前发布为 `v0.2.3-resume-image-test`：原职位采集、分析和同步入口暂时停用，优先验证默认简历图片发送链路；相关源码仍保留，后续可恢复。职位快照跟进目前使用弹窗和兼容汇总字段，申请阶段事件模型尚在建设中。
+当前阶段：产品化开发。默认运行链路为 **Docker 本地服务 + 统一 Chrome 扩展**：扩展在已登录的 BOSS 页面搜索、收集职位并执行浏览器操作，本地服务负责规则、本地资料匹配、模型分析和任务状态，用户核对企业清单后再由内置 runner 驱动扩展投递。企业清单是发送前的批次确认门禁；确认并启动后问候语自动发送，简历图片按扩展悬浮控制台中的“自动发送 / 发送前确认 / 不发送”策略执行。后台需要登录使用，档案、项目、简历、规则、模型、职位和投递数据均按账号隔离，详见[账号与数据隔离](#账号与数据隔离)。
 
 ## 产品原则
 
@@ -22,40 +22,85 @@
 - 低匹配、风险识别失败或生成失败时，回退到默认简历和默认问候语。
 - 用户启动任务后，系统按已保存的策略自动投递并发送问候语。
 
+## 账号与数据隔离
+
+后台需要登录后才能使用，所有业务数据按账号隔离：
+
+- **登录与会话**：`POST /v1/auth/login` 校验账号密码并签发 JWT，前端把令牌放在 `Authorization: Bearer` 头中；令牌失效或缺失时任何数据接口都返回 401，前端会立即回到登录页。
+- **按用户隔离的数据**：个人档案、项目库、简历库、简历模板、匹配规则、模型配置、职位快照、投递记录、投递任务及其报告事件，都属于创建它们的账号。数据库里这些表都带 `user_id`，读写都按当前登录用户过滤。
+- **用户管理**：管理员在“用户管理”页创建、停用、恢复、删除账号，并授予或取消管理员权限。登录页不提供自助注册：只有在系统还没有任何账号时（首次启动），登录页才会引导创建首个管理员；此后自助注册关闭，账号统一由管理员创建。
+- **浏览器扩展的归属**：配对码由某个登录用户在“安装向导”中生成，扩展用该配对码换取的本地令牌就绑定到这个用户，之后扩展采集的职位和自动投递产生的数据都记在该用户名下。
+- **升级提示**：从单用户版本升级时，已有数据会自动归属到首个账号（`user_id = 1`）；旧版扩展令牌因为不含用户信息，升级后需要**重新生成配对码并配对一次**。
+
+数据隔离依赖登录身份，因此不要把 `8765` 暴露到局域网或公网；服务器部署请按 [`docs/DEPLOY_SERVER.md`](docs/DEPLOY_SERVER.md) 配置 `JSA_JWT_SECRET` 和独立的 `JSA_RUNNER_TOKEN`。
+
 ## 设计文档
 
+- [当前版本使用指南（人话版）](docs/USER_GUIDE.md)
 - [安装、前置依赖与首次启动](docs/SETUP.md)
 - [产品需求文档](docs/PRD.md)
 - [系统架构与流程](docs/ARCHITECTURE.md)
 - [数据模型与接口约定](docs/DATA_MODEL.md)
+- [一键安装与自动投递产品化路线图](docs/PRODUCTIZATION_ROADMAP.md)
+- [自动投递技术设计与阶段交付](docs/AUTOMATION_TECHNICAL_DESIGN.md)
+
+## 产品化路线图
+
+当前版本仍属于开发者版本，但默认使用只需要 Docker、本项目统一 Chrome 扩展和一份经用户确认的简历。三个产品化阶段的交付状态如下：
+
+| 阶段 | 用户入口 | 主要变化 | 当前状态 |
+| --- | --- | --- | --- |
+| 一：一键安装 | 安装器 + 首次使用向导 | 启动 Docker 服务、统一环境检查和简历导入确认 | 首版完成：macOS/Linux 与 Windows 安装器、向导、简历确认、浏览器探针、安全测试 |
+| 二：后台成为唯一入口 | 管理后台“自动投递” | 本地任务状态机、实时进度、暂停/恢复/停止 | 首版完成：任务 API、SSE、控制台、Docker 内置 runner、心跳、幂等动作与报告 |
+| 三：统一浏览器扩展 | 一个项目扩展 | 搜索、职位收集、读取、点击、问候语和图片发送 | 默认链路已统一；仍需真实环境验收 |
+
+目标体验：
+
+```text
+下载安装包
+→ 一键启动
+→ 按引导安装浏览器扩展
+→ 导入并确认简历
+→ 点击一次“启动自动流程”
+→ 系统自动完成扩展搜索/采集与本地分析
+→ 自动准备流程在企业清单处暂停，供用户核对和取消勾选
+→ 点击“确认企业并开始投递”，runner 自动继续
+```
+
+企业确认是 runner 启动前的人工门禁。进入真实发送后，问候语由扩展自动发送，不再逐条要求用户点击；扩展仍会在发送前后校验目标岗位/企业并验证发送结果。简历图片是否发送由后台任务开关决定，发送方式由扩展悬浮控制台配置。
+
+阶段范围、API、状态机、安全边界、迁移和验收标准见[产品化路线图](docs/PRODUCTIZATION_ROADMAP.md)，当前代码状态与协议说明见[自动投递技术设计](docs/AUTOMATION_TECHNICAL_DESIGN.md)。
 
 ## 整体流程
 
-![Job Search Assistant 整体工作流](docs/assets/system-workflow.svg)
+```mermaid
+flowchart LR
+  A[启动 Docker 服务] --> B[统一 Chrome 扩展连接并配对]
+  B --> C[后台创建自动投递任务]
+  C --> D[扩展搜索并收集职位]
+  D --> E[本地服务保存 JD、匹配资料并生成计划]
+  E --> F[用户核对企业清单]
+  F -->|确认| G[runner 认领任务]
+  G --> H[扩展校验目标并发送问候语]
+  H --> I[按策略发送简历图片]
+  I --> J[本地服务记录结果与审计报告]
+```
 
-系统以本地 API 和 SQLite 为业务事实源：Skill 负责三层循环编排，Kimi WebBridge 只执行浏览器读取与点击，项目 Chrome 扩展只在用户开启开关后处理默认简历图片的预览与确认发送。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
-
-## 自动投递 Skill
-
-项目内已经包含与当前本地 API 架构配套的
-[`boss-zhipin-assistant`](skills/boss-zhipin-assistant/SKILL.md) Skill。它负责流程编排，Kimi
-浏览器扩展负责读取页面和点击，项目自身的 Chrome 扩展负责安全发送默认简历图片；个人档案、匹配规则、RAG、职位快照、问候语和投递记录均由本地服务管理。
-
-当前 Skill 版本为 `v5.10.0`。当自动化配置同时满足 `sendResumeImage=true` 和 `defaultResumeImageAvailable=true` 时，Skill 会调用 Chrome 扩展完成“加载预览 → 确认发送”，不再使用需要本地文件访问权限的 WebBridge `upload`。确认投递配置时会明确显示“默认简历图片：已配置/未配置”；插件缺失、版本过低、预览失败或发送状态不明确时不会回退到其他文件。
-
-使用自动投递前，请先安装
-[Kimi Browser Extension](https://www.kimi.com/products/kimi-browser-extension)，再按照
-[首次启动文档](docs/SETUP.md#5-skill-与-kimi-自动投递)安装项目内 Skill。
+系统以本地 API 和 SQLite 为业务事实源。创建任务会立即排入后台流水线：统一 Chrome 扩展按关键词打开搜索页并收集职位，本地服务逐条保存 JD、执行规则、关键词资料匹配和模型分析并生成候选投递计划。用户看到企业、岗位和问候语清单，勾选并点击“确认企业并开始投递”后，服务端才冻结最终清单，内置 runner 才能认领任务。未确认企业时，采集阶段不会触发问候语或简历发送。完整设计见[系统架构与流程](docs/ARCHITECTURE.md)。
 
 ## 当前能力
 
-- WXT Chrome MV3 扩展 `v0.2.3-resume-image-test`；
+- JWT 登录会话与按账号隔离的数据读写，管理员可创建、停用、恢复、删除账号并管理权限；
+- 工作台按天展示采集与投递数据，独立的“数据指标”页支持近 7/14/30 天切换、每日明细、投递结果分布和公司 Top；
+- WXT Chrome MV3 统一扩展 `v0.4.15`：BOSS 页面内提供统一悬浮控制台，支持为每次任务指定城市、求职类型、薪资、经验、学历、行业、公司规模和岗位采集间隔，并兼容受控聊天输入框、页面内多个发送入口、BFCache 采集恢复及后台档案与 BOSS 登录身份核对；
+- 后台一次性配对码、短期本地令牌与 WebSocket v1.0 动作协议；
+- 按关键词导航 BOSS 搜索页、遍历岗位卡片、懒加载、职位去重和结构化收集；
+- 本地原子分析后生成企业/岗位/问候语确认清单；
+- 自动化任务认领、runner 心跳、动作幂等和审计报告；
 - 从本地服务读取默认简历首页图片，并注入当前 BOSS 聊天的图片控件；
-- 图片发送前本地预览与明确确认；
-- 可拖拽、可折叠的紧凑操作面板，折叠后仍保留“加载”和“发送”按钮；
-- Skill 可在展开或折叠状态下稳定调用 `.load` / `.send` 操作入口；
-- Boss 职位详情 DOM 采集与变更监听源码已保留，测试版暂不启动；
-- 扩展到本地 FastAPI 服务的消息链路源码已保留，测试版仅启用默认简历图片接口；
+- 简历图片支持自动发送、发送前确认和不发送三种策略；
+- 可拖拽、可折叠的统一悬浮控制台，集中显示本地连接、配对和发送设置；
+- 收集和投递都通过统一扩展的白名单动作协议完成；
 - SQLite 职位版本快照；
 - 职位快照跟进弹窗，以及沟通/面试兼容汇总字段；
 - 带原文证据位置的 JD 学历与名校背景解析；
@@ -63,9 +108,11 @@
 - 可选择的简历模板、网页预览与 A4 PDF 示例；
 - Python 测试及扩展类型、生产构建检查。
 
-## Chrome 扩展：简历图片测试版
+## Chrome 扩展：统一协议预览版
 
-当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压其中的 `job-search-assistant-chrome-mv3.zip` 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
+> 第一次安装、不熟悉 Chrome 开发者模式的用户，请直接阅读[《Chrome 插件下载安装指南（新手版）》](docs/CHROME_EXTENSION_INSTALL.md)。该文档从下载 ZIP、解压、加载、配对到验证逐步说明，并列出了常见错误。
+
+当 push 包含 `apps/extension/**` 下的文件变更时，`Build Chrome Extension` 工作流会自动检查、测试并构建 `@job-search-assistant/extension`，随后生成名为 `job-search-assistant-chrome-mv3` 的 Actions artifact。推送 `v*` 版本标签时，同一工作流还会创建对应的 GitHub Release，并把 `job-search-assistant-chrome-mv3.zip` 上传到 Release Assets，供普通用户长期下载。其他目录的普通修改不会触发扩展构建；需要时也可以从 Actions 页面手动运行。下载并解压 ZIP 后，即可在 Chrome 开发者模式中加载；npm workspace 名不会出现在面向用户的安装包名称中。
 
 先构建并在 Chrome 中加载产物：
 
@@ -76,19 +123,30 @@ npm run build:extension
 1. 打开 `chrome://extensions` 并启用“开发者模式”。
 2. 点击“加载已解压的扩展程序”，选择 `apps/extension/.output/chrome-mv3`。
 3. 每次重新构建后，在扩展卡片上点击“重新加载”，随后刷新 BOSS 页面。
-4. 打开 BOSS“消息”页并选中目标联系人。
-5. 点击“仅加载图片预览”；这一步不会触碰 BOSS 上传控件。
-6. 核对图片和当前联系人后，点击“确认并发送给当前联系人”。BOSS 会在图片注入后立即发送，不会再出现第二个确认弹窗。
+4. 打开管理后台：首次启动会引导创建一个管理员账号（此后账号统一由管理员在“用户管理”中创建）。登录后在“安装向导”的“统一浏览器扩展”中生成 6 位配对码。配对码属于生成它的账号，扩展后续采集的职位会记到该用户名下。
+5. 打开 BOSS 页面，在右下角“自动投递控制台”中输入配对码并确认显示“本地服务已连接”。
+6. 在同一控制台中选择简历图片策略：`自动发送`、`发送前确认` 或 `不发送`。
+7. 点击 Chrome 工具栏中的扩展图标时，只会定位并展开这个统一控制台，不再出现第二套配置表单。
 
-如果不需要本地构建，也可以进入 GitHub 仓库的 **Actions → Build Chrome Extension → Artifacts**，下载 `job-search-assistant-chrome-mv3`，解压 ZIP 后选择解压目录加载。
+启动职位采集前，必须另外打开一个已登录的 BOSS 职位搜索标签页，确认页面能看到职位列表，并在采集完成前保持该标签页打开。管理后台显示“自动流程排队中”时，任务可能正在等待扩展确认 BOSS 登录状态；登录检查最长等待 30 秒。若随后提示未登录或检查超时，请回到 BOSS 搜索页完成登录、刷新页面，再在后台重新采集。当前推荐扩展版本为 `0.4.15`；后台会在采集前比较个人档案姓名与 BOSS 页面账号，明确不一致时立即阻止任务。首次使用默认只试投 1 个岗位，核对身份、企业、职位和问候语后再扩大数量。
 
-面板可以拖拽到页面其他位置；点击标题栏的 `−` 可折叠，折叠状态仍提供“加载”和“发送”按钮。拖拽时请按住标题栏空白区域，按钮点击不会触发拖动。
+创建自动投递任务前，可以在管理后台“自动投递 → 本次采集筛选”中单独指定搜索关键词、城市、求职类型、薪资待遇、工作经验、学历、公司行业和公司规模。这些条件只保存到本次任务快照，不会覆盖个人档案；留空或选择“不限”时不向 BOSS 搜索地址追加对应条件。公司行业暂按 BOSS 地址中的数字编码填写，多个编码用英文逗号分隔。
+
+“岗位采集间隔”控制扩展读取相邻两个岗位之间的等待时间，可设置为 `0–30` 秒，默认 `2` 秒。建议真实采集使用 `2–5` 秒；间隔越长，单批任务允许的执行时间也会同步增加。已经保存到本地的同一 BOSS 岗位会按平台岗位 ID 去重，不会重复新增快照。
+
+如果不需要本地构建，普通用户应进入 [GitHub Releases](https://github.com/a764506248/Job-Search-Assistant/releases/latest)，在最新版本底部的 **Assets** 中下载 `job-search-assistant-chrome-mv3.zip`；也可以使用[最新版本直接下载链接](https://github.com/a764506248/Job-Search-Assistant/releases/latest/download/job-search-assistant-chrome-mv3.zip)。下载后解压 ZIP，再在 Chrome 中选择解压目录加载。
+
+开发测试构建仍可从仓库的 **Actions → Build Chrome Extension → 对应运行记录 → Artifacts** 下载 `job-search-assistant-chrome-mv3`。Actions Artifact 需要登录 GitHub 且默认只保留 30 天，不应作为面向普通用户的长期下载地址。
+
+控制台可以拖拽到页面其他位置；点击标题栏的 `−` 可折叠。配置保存在 Chrome 本地扩展存储中，重新打开 BOSS 页面后仍然生效。
 
 默认图片来自 `GET http://127.0.0.1:8765/v1/resumes/default-image`。管理后台必须已选定默认简历图片；自动投递还需显式开启“随投递发送简历图片”，该开关默认关闭。
 
 ## 通信链路验证
 
-完整模式下，页面主世界脚本读取 Boss DOM，通过 `CustomEvent` 把结构化职位交给内容脚本；内容脚本校验载荷后，以 HTTP JSON 调用本地 FastAPI，服务最终写入 SQLite。当前图片测试版不会注入该主世界采集脚本，只挂载简历图片操作面板。
+自动化任务通过本地 WebSocket 向扩展发送白名单动作。扩展在 BOSS 搜索页遍历岗位卡片并读取详情，将结构化职位作为动作结果返回；本地服务负责保存 SQLite 快照、分析匹配度和生成问候语。用户确认企业清单后，runner 才会发送打开岗位、打开沟通、身份校验、问候语和简历图片等投递动作。问候语动作会自动执行；只有启用“随投递发送简历图片”时才会执行图片动作，并遵循悬浮控制台中的发送策略。
+
+采集按每批 5 个岗位持续执行，直到达到“候选采集上限”或扩展确认当前关键词结果已耗尽。单批成功不代表整次采集完成；临时消息通道错误会由扩展和本地服务重试，不能把 5 个部分结果直接当成用户设置的完整上限。
 
 ```bash
 npm run test:extension
@@ -96,36 +154,32 @@ cd apps/local-service
 UV_CACHE_DIR=.cache/uv uv run pytest -q
 ```
 
-自动化测试覆盖 DOM 字段提取、页面事件载荷校验、HTTP 路径/请求体/本地令牌，以及 FastAPI 写入 SQLite 和重复快照去重。真实 Boss 登录页面仍需安装构建后的扩展进行现场冒烟测试。
+自动化测试覆盖 DOM 字段提取、页面事件载荷校验、HTTP 路径/请求体/本地令牌，FastAPI 写入 SQLite 和重复快照去重，以及登录鉴权与按用户隔离的读写（`tests/conftest.py` 会为每个测试客户端准备一个已登录账号）。真实 Boss 登录页面仍需安装构建后的扩展进行现场冒烟测试。
 
 ## 本地管理后台
 
-首次使用前请先阅读 [安装、前置依赖与首次启动](docs/SETUP.md)。特别注意：首次启动需要联网下载 Embedding 模型；Docker 中访问宿主机模型服务不能使用 `127.0.0.1`；浏览器扩展必须加载构建产物 `.output/chrome-mv3`，不能直接加载源码目录。
+首次使用前请先阅读 [安装、前置依赖与首次启动](docs/SETUP.md)。浏览器扩展必须加载构建产物 `.output/chrome-mv3`，不能直接加载源码目录。
 
 ```bash
 docker compose up -d --build
 ```
 
-启动后打开 <http://127.0.0.1:8765>。Compose 会同时启动基于 Vue 3 + Ant Design Vue 的独立 Web 前端、FastAPI 本地服务与 Embedding 服务。Web 容器通过同源 `/v1` 反向代理访问 FastAPI，因此扩展、Skill 和已有接口地址仍保持 `http://127.0.0.1:8765` 不变。SQLite 文件继续通过 `apps/local-service/data:/data` 挂载到服务容器，现有数据无需迁移。
+启动后打开 <http://127.0.0.1:8765>。Compose 会启动基于 Vue 3 + Ant Design Vue 的独立 Web 前端、FastAPI 本地服务和同镜像的自动投递 runner。Web 容器通过同源 `/v1` 反向代理访问 FastAPI，统一扩展连接地址为 `http://127.0.0.1:8765`。SQLite 文件继续通过 `apps/local-service/data:/data` 挂载到服务容器，现有数据无需迁移。
 
 ### 直接使用已发布镜像
 
-仓库通过 GitHub Actions 将 Web、本地 API 和 Embedding 服务分别发布到 GHCR。三个镜像不是让用户分别手动启动的；推荐使用仓库提供的 `docker-compose.release.yml` 一次性拉取、编排和启动：
+仓库通过 GitHub Actions 将 Web 与本地 API 两个镜像发布到 GHCR；推荐使用仓库提供的 `docker-compose.release.yml` 一次性拉取、编排和启动：
 
 #### Docker 地址
 
 - 管理后台：<http://127.0.0.1:8765>
 - 本地 API：<http://127.0.0.1:8765/v1>
-- Embedding 健康检查：<http://127.0.0.1:8766/health>
 - GHCR 镜像命名空间：`ghcr.io/a764506248`
 
 | Compose 服务 | 完整 GHCR 镜像地址 | 作用 | 对外端口 |
 |---|---|---|---|
 | `web` | `ghcr.io/a764506248/job-search-assistant-web:latest` | Vue 管理后台，并将同源 `/v1` 请求反向代理到本地 API | `127.0.0.1:8765` |
 | `local-service` | `ghcr.io/a764506248/job-search-assistant-local-service:latest` | FastAPI、SQLite、简历处理、规则与投递记录 | 仅 Compose 内部访问 |
-| `embedding` | `ghcr.io/a764506248/job-search-assistant-embedding:latest` | 本地向量模型和语义检索 | `127.0.0.1:8766` |
-
-![Docker Compose 三容器部署架构](docs/assets/docker-deployment.svg)
 
 无需克隆源码或在本机编译：
 
@@ -135,16 +189,16 @@ docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 ```
 
-启动后检查三个容器是否健康：
+启动后检查服务是否健康：
 
 ```bash
 docker compose -f docker-compose.release.yml ps
 docker compose -f docker-compose.release.yml logs -f
 ```
 
-管理后台访问 <http://127.0.0.1:8765>。首次启动时 `embedding` 会下载模型，因此健康检查可能需要一段时间；后续启动会复用 Docker Volume 中的模型。
+服务器公网部署请使用 `docker-compose.server.yml`，它拉取固定 GHCR 版本镜像、启动 `automation-runner`，并将业务数据保存在同级 `deploy-data/`。发布流程和回滚命令见 [`docs/DEPLOY_SERVER.md`](docs/DEPLOY_SERVER.md)。不要把服务器凭据或 `deploy-data/` 提交到 Git。
 
-运行数据保存在 Compose 文件同级的 `data/`，Embedding 模型保存在名为 `embedding-models` 的 Docker Volume 中。更新或重建容器不会删除这些数据。更新镜像并重启：
+管理后台访问 <http://127.0.0.1:8765>。运行数据保存在 Compose 文件同级的 `data/`，更新或重建容器不会删除这些数据。更新镜像并重启：
 
 ```bash
 docker compose -f docker-compose.release.yml pull
@@ -157,21 +211,19 @@ docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml down
 ```
 
-可以通过 `JSA_IMAGE_TAG` 固定三个镜像使用同一个版本标签，避免长期跟随 `latest`：
+可以通过 `JSA_IMAGE_TAG` 固定镜像使用同一个版本标签，避免长期跟随 `latest`：
 
 ```bash
 JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml pull
 JSA_IMAGE_TAG=v1.0.0 docker compose -f docker-compose.release.yml up -d
 ```
 
-除非你正在调试某个服务，否则不建议分别执行三个 `docker run`：容器间 DNS、依赖顺序、健康检查、SQLite 目录和模型 Volume 都已经由 Compose 配置好。
+除非你正在调试某个服务，否则不建议分别执行 `docker run`：容器间 DNS、依赖顺序、健康检查和 SQLite 目录都已经由 Compose 配置好。
 
-GHCR 的三个镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Docker 只包含管理后台、本地 API 和 Embedding 服务；Chrome 扩展、BOSS Skill 及 Kimi WebBridge 仍需安装在用户浏览器和本机环境中，它们不会被打包进这三个服务镜像。
+GHCR 的镜像包必须设置为 Public，未公开时匿名 `docker compose pull` 会返回拒绝访问。Compose 使用本地 API 镜像额外启动轻量 runner 服务，因此两个镜像会看到三个容器。Chrome 扩展仍需安装在用户浏览器中，扩展不会被打包进服务镜像。
 
-当前可以管理个人档案、项目、简历资料、匹配规则、模型配置和职位快照；所有修改都会持久化到本地 SQLite。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将识别结果分别写入个人档案、项目库和简历库，随后自动重建向量索引。“简历模板”提供投递版式选择、网页预览和 PDF 示例，“向量知识库”可使用 768 维的 `jinaai/jina-embeddings-v2-base-zh` 重建本地索引并测试语义检索。
+当前可以管理个人档案、项目、简历资料、匹配规则、模型配置、职位快照和账号权限（管理员可见“用户管理”）；所有修改都会持久化到本地 SQLite（设置 `JSA_DATABASE_URL` 时使用 PostgreSQL）。“简历库”支持导入 PDF、DOCX、TXT 和 Markdown 文件，并将确认后的识别结果写入个人档案、项目库和简历库。“简历模板”提供投递版式选择、网页预览和 PDF 示例。岗位分析直接从这些本地结构化资料进行关键词匹配，不需要向量数据库或额外模型服务。
 
 职位快照的“跟进”入口已经改为弹窗。当前弹窗仍通过旧版 `has_communicated`、`has_interview` 等字段保存快速摘要；PRD 目标是迁移到“求职申请 + 追加阶段事件 + 时间线”，相关数据库表和 API 尚未完成，详见 [数据模型与接口约定](docs/DATA_MODEL.md#19-投递反馈闭环)。
 
-Embedding 服务运行在 Docker 中，仅监听 `127.0.0.1:8766`。模型文件保存在 Docker 持久化卷，首次启动需要下载，后续启动会直接复用。原始资料、文本分片和向量都保存在本机。
-
-> 当前安全状态：模型 API Key 保存在本地 SQLite 中，接口列表不会返回明文，但尚未接入系统密钥链；`JSA_LOCAL_TOKEN` 也尚未形成完整的服务端认证闭环。请勿将 `apps/local-service/data` 提交到 Git、发送给他人，或把 `8765` 暴露到局域网和公网。
+> 当前安全状态：登录已由 JWT 会话闭环，所有业务数据按账号隔离，未登录请求统一返回 401；浏览器扩展通过配对令牌绑定到生成配对码的账号。模型 API Key 仍保存在本地数据库中，接口列表不会返回明文，但尚未接入系统密钥链。请勿将 `apps/local-service/data`（或服务器 `deploy-data/`）提交到 Git、发送给他人，或把 `8765` 暴露到局域网和公网。

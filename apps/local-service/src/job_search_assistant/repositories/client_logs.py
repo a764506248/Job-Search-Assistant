@@ -2,6 +2,8 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+
+from ..database import db_connect, ensure_column, recreate_index
 from typing import Any
 
 
@@ -11,11 +13,12 @@ class ClientLogRepository:
 
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS client_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
                     source TEXT NOT NULL,
                     level TEXT NOT NULL,
                     event TEXT NOT NULL,
@@ -28,21 +31,25 @@ class ClientLogRepository:
                 )
                 """
             )
-            connection.execute(
+            ensure_column(connection, "client_logs", "user_id", "INTEGER NOT NULL DEFAULT 1")
+            recreate_index(
+                connection,
+                "idx_client_logs_received",
                 """CREATE INDEX IF NOT EXISTS idx_client_logs_received
-                ON client_logs(received_at DESC)"""
+                ON client_logs(user_id, received_at DESC)""",
             )
 
-    def create(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create(self, data: dict[str, Any], *, user_id: int) -> dict[str, Any]:
         self.initialize()
         received_at = datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             cursor = connection.execute(
                 """INSERT INTO client_logs(
-                    source, level, event, message, page_url, platform_job_id,
+                    user_id, source, level, event, message, page_url, platform_job_id,
                     details_json, occurred_at, received_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
                 (
+                    user_id,
                     data["source"],
                     data["level"],
                     data["event"],
@@ -57,12 +64,14 @@ class ClientLogRepository:
             log_id = int(cursor.lastrowid)
         return {"id": log_id, **data, "received_at": received_at}
 
-    def list_recent(self, limit: int) -> list[dict[str, Any]]:
+    def list_recent(self, limit: int, *, user_id: int) -> list[dict[str, Any]]:
         self.initialize()
-        with sqlite3.connect(self.database_path) as connection:
+        with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT * FROM client_logs ORDER BY received_at DESC, id DESC LIMIT ?", (limit,)
+                """SELECT * FROM client_logs WHERE user_id = ?
+                ORDER BY received_at DESC, id DESC LIMIT ?""",
+                (user_id, limit),
             ).fetchall()
         return [
             {

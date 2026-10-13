@@ -1,15 +1,100 @@
 <template>
-  <div class="view active-view">
+  <div class="view active-view page-stack">
     <div class="intro-card">
       <div><span class="pill">本地优先</span><h2>你的求职数据，由你自己掌控</h2><p>扩展采集到的 Boss 职位会进入这里。项目库、简历和匹配规则都在本机统一管理。</p></div>
       <div class="privacy-stamp"><span>LOCAL</span><small>不上传产品服务器</small></div>
     </div>
+
+    <section class="next-action-card" :class="{ ready: nextStep.ready }">
+      <div>
+        <span>{{ nextStep.ready ? '下一步' : '首次使用还差一步' }}</span>
+        <h2>{{ nextStep.title }}</h2>
+        <p>{{ nextStep.description }}</p>
+      </div>
+      <a-button type="primary" @click="router.push(nextStep.path)">{{ nextStep.action }} →</a-button>
+    </section>
+
     <div class="metric-grid" aria-label="数据概览">
-      <article class="metric-card"><span>职位快照</span><strong>{{ jobs.length }}</strong><small>已保存的 JD 版本</small></article>
-      <article class="metric-card"><span>公司数量</span><strong>{{ companies }}</strong><small>当前资料涉及的公司</small></article>
-      <article class="metric-card"><span>今日采集</span><strong>{{ todayCount }}</strong><small>今天新增的职位快照</small></article>
-      <article class="metric-card accent-card"><span>知识库状态</span><strong>本地运行</strong><small>资料与向量保存在本机</small></article>
+      <article class="metric-card">
+        <span>职位快照</span>
+        <strong>{{ summary.totalJobs }}</strong>
+        <small>累计 {{ summary.totalCompanies }} 家公司</small>
+      </article>
+      <article class="metric-card">
+        <span>累计投递</span>
+        <strong>{{ summary.deliveredTotal }}</strong>
+        <small>失败 {{ summary.failedTotal }} · 成功率 {{ summary.successRate }}%</small>
+      </article>
+      <article class="metric-card">
+        <span>今日投递</span>
+        <strong>{{ summary.deliveredToday }}</strong>
+        <small>今日采集 {{ summary.capturedToday }} · 昨日采集 {{ summary.capturedYesterday }}</small>
+      </article>
+      <article class="metric-card accent-card">
+        <span>沟通进展</span>
+        <strong>{{ summary.communicated }} / {{ summary.interview }}</strong>
+        <small>已沟通 / 已约面</small>
+      </article>
     </div>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">LAST 7 DAYS</p><h2>近 7 天每日数据</h2></div>
+        <a-button type="link" @click="router.push('/metrics')">查看指标 →</a-button>
+      </div>
+      <p class="trend-legend">
+        <span><i class="dot dot-capture"></i>新增采集</span>
+        <span><i class="dot dot-delivery"></i>成功投递</span>
+      </p>
+      <div class="trend-canvas">
+        <div
+          class="trend-chart"
+          :class="{ 'is-flat': !weekHasData }"
+          role="img"
+          aria-label="近 7 天采集与投递趋势"
+        >
+          <div v-for="day in week" :key="day.date" class="trend-col">
+            <div class="trend-bars">
+              <span
+                class="bar bar-capture"
+                :style="{ height: barHeight(day.captured) }"
+                :title="`${day.label} 采集 ${day.captured} 条`"
+              ></span>
+              <span
+                class="bar bar-delivery"
+                :style="{ height: barHeight(day.delivered) }"
+                :title="`${day.label} 投递 ${day.delivered} 次（失败 ${day.failed}）`"
+              ></span>
+            </div>
+            <div class="trend-values">
+              <span :class="{ 'is-empty': !day.captured }">{{ day.captured }}</span>
+              <span :class="{ 'is-empty': !day.delivered }">{{ day.delivered }}</span>
+            </div>
+            <span class="trend-label">{{ day.label }}</span>
+          </div>
+        </div>
+        <p v-if="!weekHasData" class="trend-empty-hint">近 7 天还没有采集或投递记录</p>
+      </div>
+      <p class="trend-footnote">{{ sourceText }}</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">RECENT DELIVERIES</p><h2>最近投递</h2></div></div>
+      <div v-if="loading" class="library-empty">正在读取投递数据…</div>
+      <div v-else-if="!recentDeliveries.length" class="empty-state">
+        <span class="empty-icon">▶</span>
+        <h3>还没有投递记录</h3>
+        <p>在「自动投递」里跑一次任务，投递结果会按天统计到这里。</p>
+      </div>
+      <div v-else class="job-list">
+        <article v-for="record in recentDeliveries" :key="record.id" class="job-row">
+          <div><h3>{{ record.title }}</h3><p>{{ record.companyName }}</p></div>
+          <span class="status-tag" :class="isSuccessStatus(record.status) ? 'is-active' : 'is-inactive'">{{ statusText(record.status) }}</span>
+          <time class="job-time">{{ formatTime(record.appliedAt) }}</time>
+        </article>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-heading"><div><p class="eyebrow">RECENT CAPTURES</p><h2>最近采集的职位</h2></div><a-button type="link" @click="router.push('/jobs')">查看全部 →</a-button></div>
       <div v-if="loading" class="library-empty">正在读取职位数据…</div>
@@ -17,7 +102,7 @@
       <div v-else class="job-list">
         <article v-for="job in jobs.slice(0, 5)" :key="job.id" class="job-row">
           <div><h3>{{ job.title }}</h3><p>{{ job.companyName }}</p></div>
-          <span class="job-meta">{{ job.salaryText || '薪资未识别' }} · {{ job.location || '地点未识别' }}</span>
+          <span class="job-meta">{{ formatSalary(job.salaryText) }} · {{ job.location || '地点未识别' }}</span>
           <time class="job-time">{{ formatTime(job.capturedAt) }}</time>
         </article>
       </div>
@@ -28,24 +113,99 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
 import { api } from '../../services/api'
+import { useMetrics, isSuccessStatus, deliveryStatusText } from '../../composables/useMetrics'
 import { useRefresh } from '../../composables/useRefresh'
-import { formatTime } from '../../utils/format'
-import type { StoredJob } from '../../types'
+import { formatSalary, formatTime } from '../../utils/format'
+import type { SetupStatus } from '../../types'
 
 const router = useRouter()
-const jobs = ref<StoredJob[]>([])
-const loading = ref(false)
-const companies = computed(() => new Set(jobs.value.map((job) => job.companyName)).size)
-const todayCount = computed(() => jobs.value.filter((job) => new Date(job.capturedAt).toDateString() === new Date().toDateString()).length)
+const { loading, jobs, summary, daily, recentDeliveries, load } = useMetrics()
+const setup = ref<SetupStatus>()
 
-async function load() {
-  loading.value = true
-  try { jobs.value = (await api.jobs()).items }
-  catch (error) { message.error((error as Error).message) }
-  finally { loading.value = false }
+const nextStep = computed(() => {
+  const blocker = setup.value?.checks.find(check => check.blocking && check.status !== 'ready')
+  if (blocker) return {
+    ready: false,
+    title: blocker.label,
+    description: blocker.message,
+    action: blocker.actionLabel || '立即处理',
+    path: blocker.actionPath || '/setup',
+  }
+  if (!summary.value.deliveredTotal) return {
+    ready: true,
+    title: '完成第一次安全试投',
+    description: '建议先分析少量职位，只确认并投递 1 个，检查身份、企业、问候语和简历是否正确。',
+    action: '开始试投',
+    path: '/automation',
+  }
+  return {
+    ready: true,
+    title: '继续处理今天的求职计划',
+    description: '创建任务后会先采集和分析，只有你确认的企业才会进入投递。',
+    action: '创建任务',
+    path: '/automation',
+  }
+})
+
+const week = computed(() => daily(7))
+const weekHasData = computed(() =>
+  week.value.some((day) => day.captured || day.delivered || day.failed),
+)
+const maxValue = computed(() => Math.max(1, ...week.value.flatMap((day) => [day.captured, day.delivered])))
+
+function barHeight(value: number) {
+  if (!value) return '0%'
+  return `${Math.max(6, Math.round((value / maxValue.value) * 100))}%`
 }
 
-useRefresh(load)
+const sourceText = computed(() => {
+  if (summary.value.deliverySource === 'records') return '数据来源：投递明细记录'
+  if (summary.value.deliverySource === 'runs') return '数据来源：投递任务汇总'
+  return '暂无投递数据'
+})
+
+function statusText(status: string) {
+  return deliveryStatusText[status] || status
+}
+
+async function loadOverview() {
+  const [, setupResult] = await Promise.allSettled([load(), api.setupStatus()])
+  if (setupResult.status === 'fulfilled') setup.value = setupResult.value
+}
+
+useRefresh(loadOverview)
 </script>
+
+<style scoped>
+.next-action-card {
+  padding: 20px 24px;
+  border: 1px solid #edc9a0;
+  border-radius: 14px;
+  background: #fff8ed;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.next-action-card.ready {
+  border-color: #b4dccc;
+  background: #f3faf7;
+}
+
+.next-action-card span {
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.next-action-card h2 { margin: 5px 0; }
+.next-action-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+.next-action-card .ant-btn { flex: 0 0 auto; }
+
+@media (max-width: 660px) {
+  .next-action-card { align-items: stretch; flex-direction: column; }
+}
+</style>
