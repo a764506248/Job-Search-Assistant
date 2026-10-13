@@ -104,7 +104,8 @@ async function loadShellContext() {
   try {
     const health = await api.health()
     service.online = true
-    service.text = `本地服务 ${health.version}`
+    const serviceVersion = health.version.startsWith('v') ? health.version : `v${health.version}`
+    service.text = `本地服务 ${serviceVersion}`
   } catch {
     service.online = false
     service.text = '本地服务连接失败'

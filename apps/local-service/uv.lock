@@ -264,7 +264,7 @@ wheels = [
 
 [[package]]
 name = "job-search-assistant-local"
-version = "0.1.0"
+version = "0.4.29"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

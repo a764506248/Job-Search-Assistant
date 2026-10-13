@@ -84,5 +84,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_APP_VERSION=${{ github.ref_name }}
+            JSA_APP_VERSION=${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
