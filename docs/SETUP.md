@@ -1,8 +1,8 @@
 # 安装、前置依赖与首次启动
 
-本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。默认自动化链路只需要 Docker 本地服务、统一 Chrome 扩展和经用户确认的简历；不需要安装 BOSS Skill 或 Kimi WebBridge。
+本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。自动化链路只需要 Docker 本地服务、统一 Chrome 扩展和经用户确认的简历。
 
-> 统一扩展负责搜索、职位收集和投递页面 I/O，本地服务负责保存、规则、本地资料匹配、模型分析和任务状态；用户确认企业清单后才允许投递。启动后问候语由扩展自动发送，简历图片按统一悬浮控制台中的策略执行。Kimi + Skill 旧链路仅作为可选回退。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
+> 统一扩展负责搜索、职位收集和投递页面 I/O，本地服务负责保存、规则、本地资料匹配、模型分析和任务状态；用户确认企业清单后才允许投递。启动后问候语由扩展自动发送，简历图片按统一悬浮控制台中的策略执行。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
 
 ## 0. 一键安装器
 
@@ -50,7 +50,6 @@ Windows PowerShell：
 | 简历 AI 识别、项目提取、问候语和定制材料 | 管理后台中配置并验证可用的大模型 |
 | 统一 Chrome 扩展自动化 | 本地服务、Chrome、已登录 BOSS；本地构建扩展时才需要 Node.js 22+ 与 npm |
 | 职位收集与分析 | 统一扩展在线、搜索关键词、已确认简历、可用模型与匹配规则 |
-| 旧版 Skill/Kimi 回退（可选） | BOSS Skill、Kimi Browser Extension/WebBridge；不影响默认链路就绪状态 |
 | 网页样式一致的 PDF 导出 | FastAPI 运行环境内可执行的 Chromium；否则自动降级 ReportLab |
 
 ## 2. 基础环境
@@ -209,73 +208,9 @@ macOS Finder 默认隐藏以 `.` 开头的目录。如果选择目录时看不�
 
 扩展依赖 `https://www.zhipin.com/*` 和 `http://127.0.0.1/*` 权限，通过后台脚本读取 `GET /v1/resumes/default-image`，不需要开启 Chrome 的“允许访问文件网址”。若页面中未出现面板、找不到聊天图片控件或图片未发送，应停止自动投递并检查扩展是否已重新加载、本地服务是否在线以及 BOSS 页面结构是否变化。
 
-## 5. 旧版 Skill 与 Kimi 回退（可选）
+## 5. PDF 与文件依赖
 
-本节只适用于需要复现旧版流程或执行新旧链路对照测试的开发者。默认安装、职位收集、企业确认和投递均不调用 Skill，也不连接 Kimi WebBridge；未安装或未连接它们不会阻塞向导和任务启动。
-
-旧版回退中，Kimi 负责页面读取、联系人/岗位点击和问候语发送，BOSS Skill 负责流程编排，项目扩展负责默认简历图片注入，本地 API 仍负责档案、规则、本地资料匹配、职位快照、材料决策和投递记录。
-
-### 5.1 安装 Kimi 浏览器扩展
-
-官方下载地址：
-
-<https://www.kimi.com/products/kimi-browser-extension>
-
-安装后确认扩展已经连接本机 WebBridge daemon。可使用以下命令检查：
-
-```bash
-~/.kimi-webbridge/bin/kimi-webbridge status
-```
-
-输出中的 `running` 和 `extension_connected` 都应为 `true`。Kimi 仅作为浏览器动作执行层，不能绕过本地 API 自行决定是否投递。
-
-### 5.2 安装项目内 Skill
-
-仓库内版本位于：
-
-```text
-skills/boss-zhipin-assistant/
-```
-
-复制到 Codex Skill 目录并创建本机连接配置：
-
-```bash
-mkdir -p ~/.codex/skills/@user_f5c8032a
-cp -R skills/boss-zhipin-assistant ~/.codex/skills/@user_f5c8032a/
-cp ~/.codex/skills/@user_f5c8032a/boss-zhipin-assistant/user_profile.example.json \
-  ~/.codex/skills/@user_f5c8032a/boss-zhipin-assistant/user_profile.json
-```
-
-`user_profile.json` 只保存账号校验、城市编码、浏览器会话和本地服务地址等连接信息。目标岗位、城市、薪资阈值、匹配规则、默认问候语和简历图片开关，应在管理后台维护并通过 `/v1/automation/config` 读取。
-
-安装后可以验证 Skill 结构：
-
-```bash
-python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
-  ~/.codex/skills/@user_f5c8032a/boss-zhipin-assistant
-```
-
-### 5.3 旧版回退运行条件
-
-前置条件：
-
-- Kimi Browser Extension 已安装并连接；
-- WebBridge daemon 可通过 `http://127.0.0.1:10086` 访问；
-- Chrome 中已登录 BOSS；
-- `boss-zhipin-deliver` Skill v5.10.0 或更高版本已安装；
-- 项目自带 Chrome 扩展 v0.4.15 或更高版本已加载并刷新 BOSS 页面；
-- Skill 的本地服务地址为 `http://127.0.0.1:8765`；
-- 已在后台配置个人档案、匹配规则、默认问候语和模型；
-- 发送简历图片前，已重新导入 PDF、生成第一页图片并选为默认投递图片；
-- `GET /v1/automation/config` 返回 `defaultResumeImageAvailable=true`；需要随投递发送时，还必须由用户明确设置 `sendResumeImage=true`。
-
-这些条件只影响旧版回退。Kimi 与项目扩展同时存在时，Kimi 不再调用 WebBridge `upload` 上传本地图片；Skill 只通过扩展稳定的 `.load` / `.send` 入口触发图片流程，面板是否折叠、是否被拖动不影响调用。
-
-默认简历图片包含个人信息，自动发送默认关闭，必须由用户明确启用。真实投递前还需要完成一次受控的 BOSS 页面冒烟测试。
-
-## 6. PDF 与文件依赖
-
-### 6.1 简历导入
+### 5.1 简历导入
 
 支持 PDF、DOCX、TXT 和 Markdown，单文件最大 10 MB。PDF 首页图片由 PyMuPDF 在本地服务中生成，文件保存在：
 
@@ -285,13 +220,13 @@ apps/local-service/data/resume-images/
 
 旧简历如果是在首页图片功能加入之前导入的，数据库中没有原 PDF 文件，必须重新导入才能生成图片。
 
-### 6.2 PDF 导出
+### 5.2 PDF 导出
 
 服务会优先寻找运行环境内的 Chrome/Chromium，然后降级到 ReportLab。当前 Docker 镜像没有安装 Chromium，也不能直接执行 macOS 宿主机的 `/Applications/Google Chrome.app`，因此 Docker 部署通常使用 ReportLab。
 
 这意味着网页预览与 PDF 的字体、换行和分页可能不是像素级一致。要使用 Chromium 导出，需要把 Chromium 安装进本地服务镜像，并在容器内配置有效的 `JSA_CHROME_PATH`；仅把它设置成宿主机路径无效。
 
-## 7. 数据目录与备份
+## 6. 数据目录与备份
 
 需要备份的本地目录：
 
@@ -312,7 +247,7 @@ docker compose start local-service web
 
 不要把数据库和备份提交到 Git 或发送给其他人。
 
-## 8. 当前安全限制
+## 7. 当前安全限制
 
 当前实现与目标架构仍有一点差距：
 
@@ -327,7 +262,7 @@ docker compose start local-service web
 - 不要提交或分享 `apps/local-service/data`；
 - 不要在多人共用、不可信的系统账户中保存生产 API Key。
 
-## 9. 常见启动问题
+## 8. 常见启动问题
 
 | 现象 | 优先检查 |
 | --- | --- |

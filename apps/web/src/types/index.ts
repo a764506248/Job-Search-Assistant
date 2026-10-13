@@ -27,11 +27,8 @@ export interface SetupStatus {
 }
 
 export interface BrowserProbe {
-  webbridgeRunning: boolean
-  kimiExtensionConnected: boolean
   projectExtensionReady: boolean
   bossLoggedIn: boolean
-  skillVersion: string
   source: 'installer' | 'manual' | 'extension'
   checkedAt?: string
 }

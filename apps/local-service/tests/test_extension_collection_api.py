@@ -769,7 +769,7 @@ def test_collect_recovers_an_interrupted_collecting_state(tmp_path) -> None:
     ]
 
 
-def test_connected_unified_extension_makes_legacy_skill_optional(tmp_path) -> None:
+def test_connected_unified_extension_is_the_browser_runtime(tmp_path) -> None:
     hub = FakeConnectedBrowserHub()
     client = collection_client(tmp_path, hub)
 
@@ -781,9 +781,6 @@ def test_connected_unified_extension_makes_legacy_skill_optional(tmp_path) -> No
     assert checks["boss-login"]["status"] == "pending"
     assert checks["boss-login"]["blocking"] is False
     assert "自动确认" in checks["boss-login"]["message"]
-    assert checks["skill-version"]["status"] == "ready"
-    assert checks["skill-version"]["blocking"] is False
-    assert "不需要安装 Skill" in checks["skill-version"]["message"]
 
 
 def test_collection_uses_short_observable_batches_and_exclusions(tmp_path) -> None:

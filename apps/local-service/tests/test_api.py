@@ -156,15 +156,13 @@ def test_setup_status_reports_actionable_first_run_checks(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["overall"] == "blocked"
-    assert payload["total"] == 10
+    assert payload["total"] == 9
     checks = {item["key"]: item for item in payload["checks"]}
     assert checks["local-service"]["status"] == "ready"
     assert checks["model"]["status"] == "blocked"
     assert checks["resume"]["actionPath"] == "/resumes"
     assert checks["kimi-webbridge"]["status"] == "blocked"
     assert checks["boss-login"]["status"] == "pending"
-    assert checks["skill-version"]["status"] == "ready"
-    assert checks["skill-version"]["blocking"] is False
     assert checks["automation-runner"]["status"] == "blocked"
     assert payload["checkedAt"]
 
@@ -176,11 +174,8 @@ def test_browser_probe_is_persisted_and_updates_setup_checks(tmp_path) -> None:
     saved = client.post(
         "/v1/setup/browser/probe",
         json={
-            "webbridgeRunning": True,
-            "kimiExtensionConnected": True,
             "projectExtensionReady": True,
             "bossLoggedIn": True,
-            "skillVersion": "5.10.0",
             "source": "manual",
         },
     )
@@ -194,8 +189,6 @@ def test_browser_probe_is_persisted_and_updates_setup_checks(tmp_path) -> None:
     assert checks["kimi-webbridge"]["status"] == "blocked"
     assert checks["project-extension"]["status"] == "ready"
     assert checks["boss-login"]["status"] == "ready"
-    assert checks["skill-version"]["status"] == "ready"
-    assert checks["skill-version"]["blocking"] is False
 
 
 def test_setup_test_run_never_executes_browser_actions(tmp_path) -> None:
@@ -1267,7 +1260,7 @@ def test_delivery_api_upserts_by_platform_job_id(tmp_path) -> None:
         "greetingText": "您好，方便沟通吗？",
         "detail": "问候语已发送",
         "appliedAt": "2026-09-29T09:00:00Z",
-        "metadata": {"source": "boss-zhipin-deliver"},
+        "metadata": {"source": "chrome-extension"},
     }
 
     first = client.post("/v1/deliveries", json=payload)

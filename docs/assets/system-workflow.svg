@@ -25,7 +25,7 @@
     <rect x="355" y="145" width="230" height="190" rx="18" fill="#fff"/>
     <rect x="355" y="145" width="230" height="48" rx="18" fill="#ede9fe"/><rect x="355" y="175" width="230" height="18" fill="#ede9fe"/>
     <text x="378" y="177" class="h">② 搜索与采集</text>
-    <text x="378" y="222" class="t">• Skill 编排关键词循环</text><text x="378" y="250" class="t">• WebBridge 控制 BOSS 页面</text><text x="378" y="278" class="t">• 懒加载岗位卡片</text><text x="378" y="306" class="t">• 原地点击并读取完整 JD</text>
+    <text x="378" y="222" class="t">• 本地服务编排关键词循环</text><text x="378" y="250" class="t">• Chrome 扩展控制 BOSS 页面</text><text x="378" y="278" class="t">• 懒加载岗位卡片</text><text x="378" y="306" class="t">• 原地点击并读取完整 JD</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -57,7 +57,7 @@
   <text x="120" y="390" class="tag" fill="#64748b">未达目标 → 下一批 / 下一关键词</text>
 
   <g transform="translate(55 635)"><circle cx="8" cy="-5" r="7" fill="#2563eb"/><text x="25" y="0" class="subtitle">业务事实源：本地 API + SQLite</text></g>
-  <g transform="translate(385 635)"><circle cx="8" cy="-5" r="7" fill="#7c3aed"/><text x="25" y="0" class="subtitle">浏览器 I/O：Kimi WebBridge</text></g>
+  <g transform="translate(385 635)"><circle cx="8" cy="-5" r="7" fill="#7c3aed"/><text x="25" y="0" class="subtitle">浏览器 I/O：统一 Chrome 扩展</text></g>
   <g transform="translate(700 635)"><circle cx="8" cy="-5" r="7" fill="#f97316"/><text x="25" y="0" class="subtitle">图片发送：项目 Chrome 扩展</text></g>
 
   <g filter="url(#shadow)">

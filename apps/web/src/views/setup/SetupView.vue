@@ -133,8 +133,8 @@ const activeStep = ref<GuideStepId>(1)
 const advancedUnlocked = ref(localStorage.getItem('jsa_onboarding_safe_test') === 'passed')
 let initialized = false
 
-const probe = ref<BrowserProbe>({ webbridgeRunning: false, kimiExtensionConnected: false, projectExtensionReady: false, bossLoggedIn: false, skillVersion: '', source: 'manual' })
-const browserKeys = new Set(['kimi-webbridge', 'project-extension', 'boss-login', 'skill-version'])
+const probe = ref<BrowserProbe>({ projectExtensionReady: false, bossLoggedIn: false, source: 'manual' })
+const browserKeys = new Set(['kimi-webbridge', 'project-extension', 'boss-login'])
 const browserChecks = computed(() => status.value?.checks.filter(check => browserKeys.has(check.key)) || [])
 const readyChecks = computed(() => status.value?.checks.filter(check => check.status === 'ready') || [])
 const issueChecks = computed(() => status.value?.checks.filter(check => check.status !== 'ready') || [])

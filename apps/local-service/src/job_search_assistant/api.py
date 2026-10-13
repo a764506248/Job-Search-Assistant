@@ -399,15 +399,11 @@ def create_router(
             )
 
     def save_extension_browser_probe(*, boss_logged_in: bool) -> None:
-        previous_probe = library_repository.get_setup_state("browser-probe") or {}
         library_repository.save_setup_state(
             "browser-probe",
             {
-                "webbridgeRunning": True,
-                "kimiExtensionConnected": True,
                 "projectExtensionReady": True,
                 "bossLoggedIn": boss_logged_in,
-                "skillVersion": str(previous_probe.get("skillVersion", "")),
                 "source": "extension",
             },
         )
@@ -727,20 +723,6 @@ def create_router(
             )
         )
 
-        skill_version = str(browser_probe.get("skillVersion", "")) if browser_probe else ""
-        checks.append(
-            SetupCheck(
-                key="skill-version",
-                label="旧版 BOSS Skill（可选）",
-                status="ready",
-                message=(
-                    f"检测到旧版 Skill v{skill_version}；新流程不会调用它"
-                    if skill_version
-                    else "新流程不需要安装 Skill；职位采集由统一 Chrome 扩展完成"
-                ),
-                blocking=False,
-            )
-        )
         priority = {"ready": 0, "warning": 1, "pending": 2, "blocked": 3}
         overall = max((check.status for check in checks), key=priority.__getitem__)
         return SetupStatusResponse(

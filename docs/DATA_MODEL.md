@@ -447,7 +447,7 @@ POST /v1/deliveries
 GET  /v1/deliveries
 ```
 
-本地服务不能持有 Boss 登录凭据。任务创建后，统一扩展通过白名单动作收集职位，本地服务逐条分析并把候选企业冻结到任务 `configSnapshot.plannedJobs`；只有用户提交所选 `selectedJobIds` 后，Docker runner 才能执行。任务、事件、幂等动作和中断恢复状态保存在 SQLite，实际页面 I/O 与默认简历图片注入均由统一扩展完成。BOSS Skill/Kimi 只属于旧版可选回退，不是该数据模型的运行时依赖。
+本地服务不能持有 Boss 登录凭据。任务创建后，统一扩展通过白名单动作收集职位，本地服务逐条分析并把候选企业冻结到任务 `configSnapshot.plannedJobs`；只有用户提交所选 `selectedJobIds` 后，Docker runner 才能执行。任务、事件、幂等动作和中断恢复状态保存在 SQLite，实际页面 I/O 与默认简历图片注入均由统一扩展完成。
 
 `POST /v1/automation/runs` 默认创建 `collection.status=pending` 并自动排队；`collection.phase` 按 `queued → searching → collecting → analyzing → awaiting_confirmation` 持久化阶段。`POST /v1/automation/runs/{id}/collect` 为幂等恢复/重试入口，只排队后台任务；它不直接触发 runner 或任何发送动作。
 

@@ -97,11 +97,8 @@ class SetupStatusResponse(ApiModel):
 
 
 class BrowserProbeRequest(ApiModel):
-    webbridge_running: bool = False
-    kimi_extension_connected: bool = False
     project_extension_ready: bool = False
     boss_logged_in: bool = False
-    skill_version: str = ""
     source: Literal["installer", "manual", "extension"] = "manual"
 
 
