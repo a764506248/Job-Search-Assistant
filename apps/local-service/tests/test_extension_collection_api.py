@@ -467,7 +467,7 @@ def test_new_run_recollects_historical_jobs_that_were_never_contacted(
                 "jobType": "1901",
                 "salary": "406,999,404",
                 "experience": "106,104",
-                "degree": "203,999,202",
+                "degree": "206,999,205",
                 "industry": "100021",
                 "scale": "304,999,302",
             },

@@ -558,6 +558,7 @@ async function createRun() {
     const run = await api.createAutomationRun(targetCount.value, {
       candidateLimit: normalizedCandidateLimit,
       collectionIntervalMs: Math.round(normalizedIntervalSeconds * 1_000),
+      collectionFilterSchemaVersion: 2,
       collectionFilters: normalizedFilters,
       ...(keywords.length ? { searchKeywords: keywords } : {}),
       ...(collectionCityCode.value ? { cityCode: collectionCityCode.value } : {}),

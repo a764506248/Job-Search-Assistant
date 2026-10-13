@@ -152,6 +152,7 @@ export interface AutomationCollectionFilters {
 export interface AutomationCollectionConfig {
   candidateLimit: number
   collectionIntervalMs: number
+  collectionFilterSchemaVersion?: number
   collectionFilters: AutomationCollectionFilters
   searchKeywords?: string[]
   cityCode?: string

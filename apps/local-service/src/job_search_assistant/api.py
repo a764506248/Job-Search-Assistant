@@ -155,6 +155,16 @@ BOSS_MULTI_FILTER_CODES = {
     "scale": ("301", "302", "303", "304", "305", "306"),
 }
 BOSS_SALARY_CODES = ("402", "403", "404", "405", "406", "407")
+BOSS_FILTER_SCHEMA_VERSION = 2
+LEGACY_DEGREE_CODE_MAP = {
+    "202": "209",
+    "203": "208",
+    "204": "206",
+    "205": "202",
+    "206": "203",
+    "207": "204",
+    "208": "205",
+}
 
 
 def extension_supports_collection(version: object) -> bool:
@@ -2421,6 +2431,14 @@ def create_router(
                 str(raw_collection_filters.get(key, "")).strip(),
             )
         }
+        if (
+            config.get("collectionFilterSchemaVersion") != BOSS_FILTER_SCHEMA_VERSION
+            and "degree" in collection_filters
+        ):
+            collection_filters["degree"] = ",".join(
+                LEGACY_DEGREE_CODE_MAP.get(code, code)
+                for code in collection_filters["degree"].split(",")
+            )
         for filter_key, allowed_codes in BOSS_MULTI_FILTER_CODES.items():
             if filter_key not in collection_filters:
                 continue
