@@ -40,7 +40,7 @@ async function submit() {
     // 首次启动时先创建管理员，再走正常登录流程拿到令牌。
     if (needsSetup.value) await api.register(username.value, password.value)
     await api.login(username.value, password.value)
-    await router.replace('/')
+    await router.replace('/automation')
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '操作失败'
   } finally {

@@ -1,6 +1,6 @@
 <template>
   <a-config-provider :theme="theme">
-    <router-view v-if="route.name === 'login'" />
+    <router-view v-if="route.name === 'home' || route.name === 'login' || !route.name" />
     <a-layout v-else class="app-shell">
       <aside class="sidebar">
         <div class="brand">
@@ -45,7 +45,7 @@
 
 <script setup lang="ts">
 import { Modal } from 'ant-design-vue'
-import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../services/api'
 
@@ -78,14 +78,12 @@ const visibleNavigation = computed(() => isAdmin.value ? [...navigation, adminNa
 
 const pageTitle = computed(() => String(route.meta.title || '自动投递'))
 
-onMounted(async () => {
-  const redirectIfTokenMissing = () => {
-    if (route.name !== 'login' && !localStorage.getItem('jsa_access_token')) {
-      router.replace({ name: 'login' })
-    }
-  }
-  redirectIfTokenMissing()
-  authWatchTimer = window.setInterval(redirectIfTokenMissing, 500)
+function isPublicPage() {
+  return !route.name || route.name === 'home' || route.name === 'login'
+}
+
+async function loadShellContext() {
+  if (isPublicPage()) return
 
   try {
     const me = await api.me()
@@ -107,6 +105,18 @@ onMounted(async () => {
     service.online = false
     service.text = '本地服务连接失败'
   }
+}
+
+watch(() => route.name, loadShellContext, { immediate: true })
+
+onMounted(() => {
+  const redirectIfTokenMissing = () => {
+    if (!isPublicPage() && !localStorage.getItem('jsa_access_token')) {
+      router.replace({ name: 'login' })
+    }
+  }
+  redirectIfTokenMissing()
+  authWatchTimer = window.setInterval(redirectIfTokenMissing, 500)
 })
 
 onUnmounted(() => {

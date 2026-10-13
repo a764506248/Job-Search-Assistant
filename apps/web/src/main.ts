@@ -8,7 +8,8 @@ import { setUnauthorizedHandler } from './services/api'
 
 // JWT 改造后新增：任何接口返回 401 都视为会话失效，直接回登录页。
 setUnauthorizedHandler(() => {
-  if (router.currentRoute.value.name !== 'login') router.replace({ name: 'login' })
+  const routeName = router.currentRoute.value.name
+  if (routeName !== 'home' && routeName !== 'login') router.replace({ name: 'login' })
 })
 
 createApp(App)

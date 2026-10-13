@@ -4,8 +4,8 @@ import { api } from '../services/api'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', name: 'login', component: () => import('../views/auth/LoginView.vue'), meta: { title: '登录' } },
-    { path: '/', redirect: '/automation' },
+    { path: '/', name: 'home', component: () => import('../views/landing/LandingView.vue'), meta: { title: 'AI 求职助手', public: true } },
+    { path: '/login', name: 'login', component: () => import('../views/auth/LoginView.vue'), meta: { title: '登录', public: true } },
     { path: '/overview', name: 'overview', component: () => import('../views/dashboard/OverviewView.vue'), meta: { title: '工作台' } },
     { path: '/metrics', name: 'metrics', component: () => import('../views/metrics/MetricsView.vue'), meta: { title: '数据指标' } },
     { path: '/setup', name: 'setup', component: () => import('../views/setup/SetupView.vue'), meta: { title: '安装向导' } },
@@ -25,7 +25,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  if (to.name === 'login') return true
+  if (to.name === 'home' || to.name === 'login') return true
   if (!localStorage.getItem('jsa_access_token')) return { name: 'login' }
   try {
     const result = await api.me()
@@ -37,7 +37,9 @@ router.beforeEach(async (to) => {
 })
 
 router.afterEach((route) => {
-  document.title = `${String(route.meta.title || '自动投递')} · Job Search Assistant`
+  document.title = route.name === 'home'
+    ? 'Job Search Assistant · 更懂你的 AI 求职助手'
+    : `${String(route.meta.title || '自动投递')} · Job Search Assistant`
 })
 
 export default router
