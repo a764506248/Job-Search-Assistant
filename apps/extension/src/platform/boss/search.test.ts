@@ -7,7 +7,7 @@ describe('BOSS search URL', () => {
       jobType: '1901',
       salary: '404,405,406',
       experience: '104,105',
-      degree: '206,207',
+      degree: '203,204',
       industry: '100021,100020',
       scale: '302,303,304',
     }))
@@ -16,9 +16,9 @@ describe('BOSS search URL', () => {
       query: 'AI Agent',
       city: '101010100',
       jobType: '1901',
-      salary: '404,405,406',
+      salary: '406',
       experience: '104,105',
-      degree: '206,207',
+      degree: '203,204',
       industry: '100021,100020',
       scale: '302,303,304',
     })
@@ -30,5 +30,16 @@ describe('BOSS search URL', () => {
       scale: 'javascript:alert(1)',
       unknown: '123',
     })).toEqual({ salary: '406' })
+  })
+
+  it('keeps only one salary band because BOSS salary filtering is single-select', () => {
+    const url = new URL(buildBossSearchUrl('AI Agent', '101010100', {
+      salary: '405,406',
+      degree: '202,203',
+    }))
+
+    expect(url.searchParams.get('salary')).toBe('406')
+    expect(url.searchParams.get('degree')).toBe('202,203')
+    expect(normalizeBossSearchFilters({ salary: '405,406' })).toEqual({ salary: '406' })
   })
 })

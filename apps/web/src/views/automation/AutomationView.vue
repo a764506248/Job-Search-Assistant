@@ -15,7 +15,7 @@
         <label class="wide">搜索关键词<input v-model="searchKeywordsInput" placeholder="留空沿用个人档案；多个关键词用逗号分隔" /></label>
         <label>城市<select v-model="collectionCityCode"><option value="">沿用个人档案</option><option value="100010000">全国</option><option value="101010100">北京</option><option value="101020100">上海</option><option value="101280100">广州</option><option value="101280600">深圳</option><option value="101210100">杭州</option><option value="101270100">成都</option></select></label>
         <label>求职类型<select v-model="collectionFilters.jobType"><option value="">不限</option><option value="1901">全职</option><option value="1902">实习</option><option value="1903">兼职</option></select></label>
-        <label>薪资待遇<a-select v-model:value="salaryCodes" class="boss-multi-select" mode="multiple" :options="salaryOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
+        <label>薪资待遇<a-select v-model:value="salaryCode" class="boss-multi-select" :options="salaryOptions" placeholder="不限，单选" allow-clear /></label>
         <label>工作经验<a-select v-model:value="experienceCodes" class="boss-multi-select" mode="multiple" :options="experienceOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
         <label>学历要求<a-select v-model:value="degreeCodes" class="boss-multi-select" mode="multiple" :options="degreeOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
         <label>公司规模<a-select v-model:value="companyScaleCodes" class="boss-multi-select" mode="multiple" :options="companyScaleOptions" placeholder="不限，可多选" :max-tag-count="2" /></label>
@@ -245,13 +245,13 @@ const experienceOptions = [
   { value: '107', label: '10年以上' },
 ]
 const degreeOptions = [
-  { value: '202', label: '初中及以下' },
-  { value: '203', label: '中专/中技' },
-  { value: '204', label: '高中' },
-  { value: '205', label: '大专' },
-  { value: '206', label: '本科' },
-  { value: '207', label: '硕士' },
-  { value: '208', label: '博士' },
+  { value: '209', label: '初中及以下' },
+  { value: '208', label: '中专/中技' },
+  { value: '206', label: '高中' },
+  { value: '202', label: '大专' },
+  { value: '203', label: '本科' },
+  { value: '204', label: '硕士' },
+  { value: '205', label: '博士' },
 ]
 const companyScaleOptions = [
   { value: '301', label: '0–20人' },
@@ -262,7 +262,7 @@ const companyScaleOptions = [
   { value: '306', label: '10000人以上' },
 ]
 const companyScaleCodes = ref<string[]>([])
-const salaryCodes = ref<string[]>([])
+const salaryCode = ref<string>()
 const experienceCodes = ref<string[]>([])
 const degreeCodes = ref<string[]>([])
 const collectionFilters = ref<AutomationCollectionFilters>({
@@ -548,7 +548,7 @@ async function createRun() {
     const normalizedFilters = Object.fromEntries(
       Object.entries(collectionFilters.value).filter(([, value]) => value?.trim()),
     )
-    if (salaryCodes.value.length) normalizedFilters.salary = salaryCodes.value.join(',')
+    if (salaryCode.value) normalizedFilters.salary = salaryCode.value
     if (experienceCodes.value.length) normalizedFilters.experience = experienceCodes.value.join(',')
     if (degreeCodes.value.length) normalizedFilters.degree = degreeCodes.value.join(',')
     if (companyScaleCodes.value.length) normalizedFilters.scale = companyScaleCodes.value.join(',')

@@ -150,11 +150,11 @@ COLLECTION_FILTER_KEYS = (
     "scale",
 )
 BOSS_MULTI_FILTER_CODES = {
-    "salary": ("402", "403", "404", "405", "406", "407"),
     "experience": ("102", "103", "104", "105", "106", "107"),
-    "degree": ("202", "203", "204", "205", "206", "207", "208"),
+    "degree": ("209", "208", "206", "202", "203", "204", "205"),
     "scale": ("301", "302", "303", "304", "305", "306"),
 }
+BOSS_SALARY_CODES = ("402", "403", "404", "405", "406", "407")
 
 
 def extension_supports_collection(version: object) -> bool:
@@ -2430,6 +2430,17 @@ def create_router(
                 collection_filters[filter_key] = ",".join(normalized_codes)
             else:
                 collection_filters.pop(filter_key, None)
+        if "salary" in collection_filters:
+            selected_salary_codes = set(collection_filters["salary"].split(","))
+            normalized_salary_codes = [
+                code for code in BOSS_SALARY_CODES if code in selected_salary_codes
+            ]
+            if normalized_salary_codes:
+                # BOSS 薪资筛选是单选。兼容旧任务中的多值快照时，保留
+                # 最高薪资档，避免逗号参数被页面错误解析成无关档位。
+                collection_filters["salary"] = normalized_salary_codes[-1]
+            else:
+                collection_filters.pop("salary", None)
         contacted_job_ids = set(
             await run_in_threadpool(
                 automation_repository.list_successfully_contacted_job_ids,

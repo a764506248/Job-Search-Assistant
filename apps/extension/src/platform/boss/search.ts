@@ -19,7 +19,8 @@ export function buildBossSearchUrl(
   url.searchParams.set('query', query.trim())
   if (cityCode.trim()) url.searchParams.set('city', cityCode.trim())
   for (const key of BOSS_SEARCH_FILTER_KEYS) {
-    const value = String(filters[key] ?? '').trim()
+    const rawValue = String(filters[key] ?? '').trim()
+    const value = key === 'salary' ? rawValue.split(',').filter(Boolean).at(-1) ?? '' : rawValue
     if (value && /^\d+(?:,\d+)*$/.test(value)) url.searchParams.set(key, value)
   }
   return url.toString()
@@ -30,7 +31,10 @@ export function normalizeBossSearchFilters(value: unknown): BossSearchFilters {
   const source = value as Record<string, unknown>
   return Object.fromEntries(
     BOSS_SEARCH_FILTER_KEYS.flatMap((key) => {
-      const candidate = String(source[key] ?? '').trim()
+      const rawCandidate = String(source[key] ?? '').trim()
+      const candidate = key === 'salary'
+        ? rawCandidate.split(',').filter(Boolean).at(-1) ?? ''
+        : rawCandidate
       return candidate && /^\d+(?:,\d+)*$/.test(candidate) ? [[key, candidate]] : []
     }),
   )
