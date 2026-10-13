@@ -117,7 +117,11 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
     return success(envelope, { extensionAlive: true, protocolVersion: BROWSER_PROTOCOL_VERSION })
   }
   const tabs = await browser.tabs.query({ url: ['https://zhipin.com/*', 'https://*.zhipin.com/*'] })
-  let tab = tabs.find(item => item.active) ?? tabs[0]
+  const requestedTabId = Number(envelope.payload.collectionTabId ?? 0)
+  let tab = envelope.action === 'collect_jobs' && requestedTabId
+    ? tabs.find(item => item.id === requestedTabId)
+    : undefined
+  tab ??= tabs.find(item => item.active) ?? tabs[0]
   if (!tab?.id && ['session_status', 'navigate_search'].includes(envelope.action)) {
     tab = await browser.tabs.create({ url: 'https://www.zhipin.com/', active: true })
     if (tab.id) await waitForTabReady(tab.id, 'https://www.zhipin.com/')
@@ -138,7 +142,7 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
         await browser.tabs.update(tab.id, { url })
         await ready
       }
-      return success(envelope, { navigationCompleted: true, url })
+      return success(envelope, { navigationCompleted: true, url, tabId: tab.id })
     }
     if (envelope.action === 'open_job') {
       const url = new URL(String(envelope.payload.url ?? ''))
@@ -153,9 +157,23 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
       }
       return success(envelope, { navigationCompleted: true, url: url.toString() })
     }
+    let searchPageRecovered = false
+    if (envelope.action === 'collect_jobs') {
+      const searchUrl = safeBossSearchUrl(envelope.payload.searchUrl)
+      if (searchUrl && !sameNavigationTarget(tab.url, searchUrl)) {
+        const ready = waitForTabReady(tab.id, searchUrl)
+        await browser.tabs.update(tab.id, { url: searchUrl })
+        await ready
+        searchPageRecovered = true
+      }
+    }
     try {
       const result = await sendBrowserActionToTab(tab.id, envelope)
-      return { requestId: envelope.requestId, ...result }
+      return {
+        requestId: envelope.requestId,
+        ...result,
+        evidence: { ...result.evidence, searchPageRecovered },
+      }
     }
     catch (error) {
       if (
@@ -194,6 +212,20 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
   }
   catch (error) {
     return failure(envelope, error instanceof Error ? error.message : String(error))
+  }
+}
+
+function safeBossSearchUrl(value: unknown): string | undefined {
+  try {
+    const url = new URL(String(value ?? ''))
+    return url.protocol === 'https:'
+      && /(^|\.)zhipin\.com$/.test(url.hostname)
+      && url.pathname.startsWith('/web/geek/jobs')
+      ? url.toString()
+      : undefined
+  }
+  catch {
+    return undefined
   }
 }
 

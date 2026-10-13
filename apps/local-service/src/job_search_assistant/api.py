@@ -2319,7 +2319,7 @@ def create_router(
                 scheduled_collection_run_ids.discard(run_id)
 
     async def collect_and_analyze_automation_jobs(run_id: int, user_id: int | None = None) -> AutomationRun:
-        """Collect through the extension, then analyze locally without any send action."""
+        """Collect through the extension and analyze each completed batch locally."""
         run = automation_run(run_id)
         if user_id is None:
             user_id = run_owner_id(run_id)
@@ -2782,6 +2782,7 @@ def create_router(
                 },
             )
             halt_collection = False
+            collection_incomplete = False
             for keyword in keywords:
                 ensure_collection_active(run_id)
                 if len(captured) >= candidate_limit or halt_collection:
@@ -2842,6 +2843,10 @@ def create_router(
                     )
                     continue
 
+                search_url = str(navigation.evidence.get("url", "")).strip()
+                collection_tab_id = navigation.evidence.get("tabId")
+                collection_scroll_position = 0
+
                 batch_number = 0
                 while len(captured) < candidate_limit:
                     ensure_collection_active(run_id)
@@ -2858,7 +2863,11 @@ def create_router(
                         run_id,
                         "collecting",
                         details={
-                            "phase": "collecting",
+                            "phase": (
+                                "collecting_and_analyzing"
+                                if analysis_started
+                                else "collecting"
+                            ),
                             "currentKeyword": keyword,
                             "collectedCount": len(captured),
                             "batchNumber": batch_number,
@@ -2892,6 +2901,9 @@ def create_router(
                                         "limit": batch_limit,
                                         "excludeJobIds": excluded_job_ids,
                                         "itemIntervalMs": collection_interval_ms,
+                                        "searchUrl": search_url,
+                                        "collectionTabId": collection_tab_id,
+                                        "scrollPosition": collection_scroll_position,
                                     },
                                     deadline_ms=batch_deadline_ms,
                                 )
@@ -2969,9 +2981,16 @@ def create_router(
                             },
                         )
                         halt_collection = True
+                        collection_incomplete = True
                         break
 
                     raw_jobs = collection.evidence.get("jobs", [])
+                    try:
+                        collection_scroll_position = max(
+                            0, int(collection.evidence.get("scrollPosition", 0) or 0)
+                        )
+                    except (TypeError, ValueError):
+                        collection_scroll_position = 0
                     if collection.status != "success" or not isinstance(raw_jobs, list):
                         reason = collection.error or "没有读取到完整职位"
                         browser_errors.append(f"{keyword}：{reason}")
@@ -3032,7 +3051,11 @@ def create_router(
                         run_id,
                         "collecting",
                         details={
-                            "phase": "collecting",
+                            "phase": (
+                                "collecting_and_analyzing"
+                                if analysis_started
+                                else "collecting"
+                            ),
                             "currentKeyword": keyword,
                             "collectedCount": len(captured),
                             "skippedCount": skipped_count,
@@ -3152,6 +3175,22 @@ def create_router(
                 "currentKeyword": None,
                 "completedAt": datetime.now(UTC).isoformat(),
             }
+            if collection_incomplete:
+                failed_run = automation_repository.update_collection(
+                    run_id,
+                    "failed",
+                    planned_jobs=planned_jobs,
+                    details={
+                        **details,
+                        "phase": "failed",
+                        "partial": True,
+                        "outcome": "partial_failure",
+                        "message": "搜索页恢复失败，本次只保留部分采集结果，未进入投递清单",
+                        "error": browser_errors[-1] if browser_errors else "职位采集未完整完成",
+                        "failedAt": datetime.now(UTC).isoformat(),
+                    },
+                )
+                return AutomationRun.model_validate(failed_run)
             if not planned_jobs:
                 no_matches_run = automation_repository.update_collection(
                     run_id,

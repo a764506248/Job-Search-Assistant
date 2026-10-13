@@ -175,7 +175,11 @@ class FakeConnectedBrowserHub:
             return {
                 "requestId": f"navigate-{run_id}",
                 "status": "success",
-                "evidence": {"query": payload.get("query")},
+                "evidence": {
+                    "query": payload.get("query"),
+                    "url": "https://www.zhipin.com/web/geek/jobs?query=AI",
+                    "tabId": 7,
+                },
             }
         if action == "collect_jobs":
             raw_excluded = payload.get("excludeJobIds", [])
@@ -197,6 +201,7 @@ class FakeConnectedBrowserHub:
                     "collectedCount": len(batch),
                     "skipped": [],
                     "exhausted": len(available) <= limit,
+                    "scrollPosition": 240,
                 },
             }
         raise AssertionError(f"unexpected browser action during collection: {action}")
@@ -242,6 +247,7 @@ class TimeoutAfterFirstBatchHub(FakeConnectedBrowserHub):
                     "collectedCount": 1,
                     "skipped": [],
                     "exhausted": False,
+                    "scrollPosition": 240,
                 },
             }
         self.calls.append(
@@ -811,6 +817,9 @@ def test_collection_stops_after_first_batch_reaches_delivery_target(tmp_path) ->
         "limit": 5,
         "excludeJobIds": [],
         "itemIntervalMs": 2000,
+        "searchUrl": "https://www.zhipin.com/web/geek/jobs?query=AI",
+        "collectionTabId": 7,
+        "scrollPosition": 0,
     }
     assert collect_calls[0]["deadlineMs"] == 70_000
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
@@ -831,10 +840,12 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     collection = run["configSnapshot"]["collection"]
     collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
 
-    assert collection["status"] == "ready"
-    assert collection["phase"] == "awaiting_confirmation"
+    assert collection["status"] == "failed"
+    assert collection["phase"] == "failed"
+    assert collection["outcome"] == "partial_failure"
     assert collection["collectedCount"] == 1
     assert collection["partial"] is True
+    assert "未进入投递清单" in collection["message"]
     assert any(
         "扩展采集单批职位超时，请适当降低岗位采集间隔" in error
         for error in collection["browserErrors"]
@@ -843,6 +854,11 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     assert len(collect_calls) == 3
     assert collect_calls[1]["payload"]["excludeJobIds"] == ["retained-job"]
     assert collect_calls[2]["payload"]["excludeJobIds"] == ["retained-job"]
+    assert collect_calls[1]["payload"]["scrollPosition"] == 240
+    assert collect_calls[1]["payload"]["collectionTabId"] == 7
+    assert collect_calls[1]["payload"]["searchUrl"].startswith(
+        "https://www.zhipin.com/web/geek/jobs"
+    )
     assert client.get("/v1/jobs").json()["total"] == 1
 
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]

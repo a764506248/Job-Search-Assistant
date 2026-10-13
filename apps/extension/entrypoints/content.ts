@@ -11,7 +11,7 @@ import {
 } from '../src/features/confirmation/greeting'
 import type { BrowserActionEnvelope, BrowserActionResult } from '../src/automation/protocol'
 import { captureBossJob } from '../src/platform/boss/capture'
-import { collectBossSearchJobs } from '../src/platform/boss/collection'
+import { collectBossSearchJobs, readBossSearchScrollPosition } from '../src/platform/boss/collection'
 import { readBossSessionStatus } from '../src/platform/boss/session'
 import {
   deliveredMessageStatusCount,
@@ -77,6 +77,7 @@ async function handleBrowserAction(
       itemIntervalMs,
       excludeJobIds,
       timeBudgetMs,
+      scrollPosition: Number(envelope.payload.scrollPosition ?? 0),
     })
     const evidence = {
       jobs: result.jobs,
@@ -87,6 +88,7 @@ async function handleBrowserAction(
       timeBudgetReached: result.timeBudgetReached,
       detectedCardCount: result.detectedCardCount,
       pageState: result.pageState,
+      scrollPosition: readBossSearchScrollPosition(document),
       partial: result.timeBudgetReached || result.jobs.length >= limit,
     }
     const collectionError = {

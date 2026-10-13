@@ -1,3 +1,5 @@
+import pytest
+
 from job_search_assistant.database import CompatRow
 from job_search_assistant.repositories import AutomationRepository
 from job_search_assistant.repositories.automation import _row_as_dict
@@ -29,6 +31,23 @@ def test_automation_run_persists_transitions_and_events(tmp_path) -> None:
     assert running["started_at"]
     assert paused["status"] == "paused"
     assert [event["sequence"] for event in repository.list_events(run["id"])] == [1, 2, 3, 4, 5]
+
+
+def test_user_can_delete_only_an_inactive_owned_run(tmp_path) -> None:
+    repository = AutomationRepository(tmp_path / "jobs.sqlite3")
+    inactive = repository.create_run({}, 1, user_id=2)
+    repository.update_collection(inactive["id"], "cancelled", details={"phase": "cancelled"})
+    active = repository.create_run({}, 1, user_id=2)
+    repository.update_collection(active["id"], "collecting", details={"phase": "collecting"})
+
+    repository.delete_run(inactive["id"], user_id=2)
+
+    with pytest.raises(KeyError):
+        repository.get_run(inactive["id"])
+    with pytest.raises(ValueError, match="active automation collection"):
+        repository.delete_run(active["id"], user_id=2)
+    with pytest.raises(KeyError):
+        repository.delete_run(active["id"], user_id=1)
 
 
 def test_plan_confirmation_is_server_owned_and_issues_runner_capability(tmp_path) -> None:
