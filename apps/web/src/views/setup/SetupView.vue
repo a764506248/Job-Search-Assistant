@@ -93,7 +93,7 @@
       <div class="setup-browser-content">
         <div class="browser-pairing-card">
           <h3>{{ browserProtocol?.connected ? '统一 Chrome 扩展已连接' : '在 BOSS 页面完成配对' }}</h3>
-          <p>{{ browserProtocol?.connected ? `扩展 ${browserProtocol.extensionVersion || ''} 已接入本地服务，协议 ${browserProtocol.protocolVersion}。` : '先生成配对码，再打开已登录的 BOSS 页面，在右下角扩展控制台输入。配对码仅用于连接本机服务。' }}</p>
+          <p>{{ browserProtocol?.connected ? `扩展 ${browserProtocol.extensionVersion || ''} 已接入本地服务，协议 ${browserProtocol.protocolVersion}。` : '先生成配对码，再点击 Chrome 工具栏中的扩展图标，在弹窗中输入服务地址和配对码。配对码仅用于连接本机服务。' }}</p>
           <strong v-if="pairing && !browserProtocol?.connected" class="browser-pairing-code">{{ pairing.code }}</strong>
           <div class="browser-pairing-actions"><a-button type="primary" :href="extensionDownloadUrl" target="_blank" rel="noopener noreferrer">下载最新版插件</a-button><a-button v-if="!browserProtocol?.connected" :loading="pairingLoading" @click="createPairing">生成配对码</a-button><a-button :loading="loading" @click="load">重新检测</a-button></div>
           <p v-if="browserMessage" class="browser-pairing-message">{{ browserMessage }}</p>
@@ -157,7 +157,7 @@ const issueCount = computed(() => issueChecks.value.length)
 const checkReady = (key: string) => status.value?.checks.some(check => check.key === key && check.status === 'ready') || false
 
 const guideSteps = computed(() => [
-  { id: 1 as GuideStepId, title: '安装并连接插件', short: '连接已登录的 BOSS 页面', description: '安装统一 Chrome 扩展，通过六位配对码连接本地服务，并确认当前 BOSS 账号身份。', complete: Boolean(browserProtocol.value?.connected) && checkReady('boss-login'), statusTitle: '等待插件连接', statusText: browserProtocol.value?.connected ? '扩展已连接，请继续确认 BOSS 账号身份。' : '生成配对码后，在 BOSS 页面右下角控制台输入。' },
+  { id: 1 as GuideStepId, title: '安装并连接插件', short: '连接已登录的 BOSS 页面', description: '安装统一 Chrome 扩展，通过六位配对码连接本地服务，并确认当前 BOSS 账号身份。', complete: Boolean(browserProtocol.value?.connected) && checkReady('boss-login'), statusTitle: '等待插件连接', statusText: browserProtocol.value?.connected ? '扩展已连接，请继续确认 BOSS 账号身份。' : '生成配对码后，在 Chrome 工具栏的扩展弹窗中输入。' },
   { id: 2 as GuideStepId, title: '导入并确认简历', short: '核对识别结果再写入', description: '上传现有简历，让系统在本机完成结构化识别；核对姓名、目标岗位和项目经历后再确认。', complete: checkReady('resume'), statusTitle: '等待确认简历', statusText: '未确认的识别结果不会进入后续职位分析与材料生成。' },
   { id: 3 as GuideStepId, title: '配置模型', short: '保存并完成连接测试', description: '选择模型服务，填写接口地址与密钥，然后执行连接测试。密钥只保存在你的本地服务中。', complete: checkReady('model'), statusTitle: '等待模型验证', statusText: '只有通过连接测试的模型才会用于 AI 分析。' },
 ])
