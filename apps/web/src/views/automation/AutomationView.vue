@@ -3,7 +3,7 @@
     <section class="automation-command panel">
       <div><p class="eyebrow">ONE-CLICK AUTOMATION</p><h2>自动投递任务</h2><p>启动一次，系统会自动完成扩展采集和本地分析；准备流程只在企业清单确认处暂停，确认后自动进入投递。</p></div>
       <label>计划投递数<input v-model.number="targetCount" type="number" min="1" max="100" /><small>首次建议只投 1 个</small></label>
-      <label>最多分析职位数<input v-model.number="candidateLimit" type="number" :min="targetCount" max="200" /><small>筛选后通过数可能少于此数</small></label>
+      <label>最多采集职位数<input v-model.number="candidateLimit" type="number" :min="targetCount" max="200" /><small>采集完成后统一分析，通过数可能更少</small></label>
       <a-button type="primary" :disabled="launchDisabled" :loading="creating" @click="createRun">{{ launchButtonText }}</a-button>
     </section>
     <section class="automation-collection-settings panel" aria-label="本次采集筛选">
@@ -12,6 +12,7 @@
         <span>岗位间隔 {{ collectionIntervalSeconds }} 秒</span>
       </header>
       <div class="automation-filter-grid">
+        <label class="wide">BOSS 职位搜索链接（可选）<input v-model.trim="collectionSearchUrl" type="url" placeholder="https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&scale=301,302" /></label>
         <label class="wide">搜索关键词<input v-model="searchKeywordsInput" placeholder="留空沿用个人档案；多个关键词用逗号分隔" /></label>
         <label>城市<select v-model="collectionCityCode"><option value="">沿用个人档案</option><option value="100010000">全国</option><option value="101010100">北京</option><option value="101020100">上海</option><option value="101280100">广州</option><option value="101280600">深圳</option><option value="101210100">杭州</option><option value="101270100">成都</option></select></label>
         <label>求职类型<select v-model="collectionFilters.jobType"><option value="">不限</option><option value="1901">全职</option><option value="1902">实习</option><option value="1903">兼职</option></select></label>
@@ -22,7 +23,7 @@
         <label>公司行业编码<input v-model="collectionFilters.industry" inputmode="numeric" placeholder="可选；多个编码用逗号分隔" /></label>
         <label>岗位采集间隔（秒）<input v-model.number="collectionIntervalSeconds" type="number" min="0" max="30" step="0.5" /></label>
       </div>
-      <p>扩展会把筛选条件写入 BOSS 搜索地址；每次打开并读取一个岗位后，按这里设置的间隔再处理下一个岗位。建议设置 2–5 秒。</p>
+      <p>填写 BOSS 搜索链接时，将直接使用该页面的搜索条件，优先于下方关键词和筛选项；每次打开并读取一个岗位后，按这里设置的间隔再处理下一个岗位。建议设置 2–5 秒。</p>
     </section>
     <section class="automation-pipeline panel" aria-label="自动投递流程">
       <template v-for="(stage, index) in pipelineStages" :key="stage.id">
@@ -85,7 +86,7 @@
             </div>
             <div class="automation-progress-metrics" aria-label="实时处理统计">
               <div><span>采集</span><strong>{{ collection?.collectedCount || 0 }}</strong><small>候选职位</small></div>
-              <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>与采集流水处理</small></div>
+              <div :class="{ active: isAnalyzing }"><span>分析</span><strong>{{ collection?.analyzedCount || 0 }}</strong><small>采集完成后处理</small></div>
               <div><span>通过</span><strong>{{ collection?.approvedCount || 0 }}</strong><small>进入待确认</small></div>
               <div v-if="collection?.existingExcludedCount"><span>投递排除</span><strong>{{ collection.existingExcludedCount }}</strong><small>已联系岗位</small></div>
             </div>
@@ -226,6 +227,7 @@ import type { AutomationCollectionFilters, AutomationCollectionState, Automation
 const targetCount = ref(1)
 const candidateLimit = ref(10)
 const searchKeywordsInput = ref('')
+const collectionSearchUrl = ref('')
 const collectionCityCode = ref('')
 const collectionIntervalSeconds = ref(2)
 const salaryOptions = [
@@ -444,6 +446,7 @@ const optionNames = (value: unknown, options: Array<{ value: string; label: stri
 }
 const searchConditionSummary = (run: AutomationRun) => {
   const config = run.configSnapshot
+  if (config.collectionSearchUrl) return `搜索条件：指定 BOSS 链接 ${config.collectionSearchUrl}`
   const filters = (config.collectionFilters || collectionFor(run)?.collectionFilters || {}) as AutomationCollectionFilters
   const keywords = Array.isArray(config.searchKeywords) ? config.searchKeywords.join('、') : '沿用个人档案'
   const city = cityNames[String(config.cityCode || '')] || '沿用个人档案'
@@ -539,6 +542,19 @@ async function load() {
 
 async function createRun() {
   if (launchDisabled.value) return
+  const directUrl = collectionSearchUrl.value.trim()
+  if (directUrl) {
+    try {
+      const parsed = new URL(directUrl)
+      if (parsed.protocol !== 'https:' || !['www.zhipin.com', 'zhipin.com'].includes(parsed.hostname)
+        || parsed.pathname !== '/web/geek/jobs' || parsed.username || parsed.password || parsed.port) {
+        throw new Error('invalid BOSS URL')
+      }
+    } catch {
+      message.warning('请粘贴 BOSS 职位搜索结果页的 HTTPS 链接')
+      return
+    }
+  }
   const industry = collectionFilters.value.industry?.trim() || ''
   if (industry && !/^\d+(?:,\d+)*$/.test(industry)) {
     message.warning('公司行业编码只能填写数字；多个编码请使用英文逗号分隔')
@@ -563,6 +579,7 @@ async function createRun() {
       collectionIntervalMs: Math.round(normalizedIntervalSeconds * 1_000),
       collectionFilterSchemaVersion: 2,
       collectionFilters: normalizedFilters,
+      ...(directUrl ? { collectionSearchUrl: directUrl } : {}),
       ...(keywords.length ? { searchKeywords: keywords } : {}),
       ...(collectionCityCode.value ? { cityCode: collectionCityCode.value } : {}),
     })
@@ -624,7 +641,7 @@ function maybeRecoverAutomaticFlow(runList: AutomationRun[]) {
     : { attempts: 0, nextAttemptAt: 0, observedUpdatedAt }
   recoveryStates.set(candidate.id, recovery)
   const age = runUpdatedAge(candidate)
-  const minimumAge = state?.status === 'collecting' ? COLLECTION_STALE_AFTER_MS : 2_000
+  const minimumAge = COLLECTION_STALE_AFTER_MS
   if (!Number.isFinite(age) || age < minimumAge) return
   if (recovery.attempts >= COLLECTION_RECOVERY_MAX_ATTEMPTS || Date.now() < recovery.nextAttemptAt) return
   recovery.attempts += 1

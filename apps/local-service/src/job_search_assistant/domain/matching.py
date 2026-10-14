@@ -45,7 +45,7 @@ def build_automatic_match(
 
     decision = evaluate_material_strategy(
         DecisionRequest(
-            job_text=request.job_text,
+            job_text="\n".join(part for part in [request.title, request.job_text] if part),
             suitability_score=suitability,
             customization_confidence=confidence,
             minimum_suitability_score=request.minimum_suitability_score,

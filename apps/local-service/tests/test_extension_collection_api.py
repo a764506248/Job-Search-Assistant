@@ -177,7 +177,7 @@ class FakeConnectedBrowserHub:
                 "status": "success",
                 "evidence": {
                     "query": payload.get("query"),
-                    "url": "https://www.zhipin.com/web/geek/jobs?query=AI",
+                    "url": payload.get("searchUrl") or "https://www.zhipin.com/web/geek/jobs?query=AI",
                     "tabId": 7,
                 },
             }
@@ -259,6 +259,47 @@ class TimeoutAfterFirstBatchHub(FakeConnectedBrowserHub):
             }
         )
         raise BrowserProtocolError("browser action timed out: collect_jobs")
+
+
+class WrongPageAfterFirstBatchHub(FakeConnectedBrowserHub):
+    async def dispatch(
+        self, *, run_id: int, user_id: int, action: str,
+        payload: dict[str, object], deadline_ms: int,
+    ) -> dict[str, object]:
+        if action == "collect_jobs" and any(
+            call["action"] == "collect_jobs" for call in self.calls
+        ):
+            self.calls.append({"runId": run_id, "action": action,
+                               "payload": payload, "deadlineMs": deadline_ms})
+            return {"requestId": f"wrong-page-{run_id}", "status": "blocked",
+                    "error": "当前页面不是 BOSS 职位搜索结果页", "evidence": {"jobs": []}}
+        return await super().dispatch(
+            run_id=run_id, user_id=user_id, action=action,
+            payload=payload, deadline_ms=deadline_ms,
+        )
+
+
+class ExhaustedAfterFirstBatchHub(FakeConnectedBrowserHub):
+    async def dispatch(
+        self, *, run_id: int, user_id: int, action: str,
+        payload: dict[str, object], deadline_ms: int,
+    ) -> dict[str, object]:
+        if action == "collect_jobs" and any(
+            call["action"] == "collect_jobs" for call in self.calls
+        ):
+            self.calls.append({"runId": run_id, "action": action,
+                               "payload": payload, "deadlineMs": deadline_ms})
+            return {"requestId": f"exhausted-{run_id}", "status": "blocked",
+                    "error": "搜索结果页已加载，但没有读取到完整职位详情",
+                    "evidence": {"jobs": [], "pageState": "ready",
+                                 "exhausted": True, "timeBudgetReached": False}}
+        response = await super().dispatch(
+            run_id=run_id, user_id=user_id, action=action,
+            payload=payload, deadline_ms=deadline_ms,
+        )
+        if action == "collect_jobs":
+            response["evidence"]["exhausted"] = False
+        return response
 
 
 class AlwaysTimeoutHub(FakeConnectedBrowserHub):
@@ -595,7 +636,7 @@ def test_automatic_pipeline_deduplicates_analyzes_and_never_sends(tmp_path) -> N
         for event in events
         if event["eventType"] == "collection-stage-changed"
     ]
-    assert phases == ["searching", "collecting", "awaiting_confirmation"]
+    assert phases == ["searching", "collecting", "analyzing", "awaiting_confirmation"]
 
     calls_before_idempotent_retry = len(hub.calls)
     retry = client.post(f"/v1/automation/runs/{created['id']}/collect")
@@ -662,6 +703,37 @@ def test_all_rule_rejected_jobs_are_a_reviewed_no_matches_outcome(tmp_path) -> N
     assert [event["payload"]["attemptId"] for event in terminal_events] == [1, 2]
 
 
+def test_ai_product_target_accepts_ai_native_fullstack_but_keeps_salary_gate(tmp_path) -> None:
+    product_jd = (
+        "使用 AI 编程工具进行产品快速原型开发与迭代；"
+        "独立完成从需求到上线的全栈开发；参与产品设计讨论。"
+    )
+    accepted = captured_job(
+        "ai-native-product", "产品公司",
+        title="AI全栈工程师（AI Native）", description=product_jd,
+    )
+    rejected = captured_job(
+        "ai-native-low-salary", "低薪公司",
+        title="AI全栈工程师（AI Native）", description=product_jd,
+    )
+    rejected["salaryText"] = "10-15K"
+    client = collection_client(tmp_path, FakeConnectedBrowserHub([accepted, rejected]))
+    response = client.put("/v1/profile", json={
+        "data": {"targetRoles": "AI Agent 开发工程师, AI 产品", "minimumSalaryK": 20},
+    })
+    assert response.status_code == 200
+
+    created = create_pending_run(client, target_count=2, candidate_limit=2)
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    reviewed = {job["jobId"]: job for job in run["configSnapshot"]["collection"]["reviewedJobs"]}
+
+    assert run["configSnapshot"]["collection"]["status"] == "ready"
+    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == ["ai-native-product"]
+    assert reviewed["ai-native-product"]["outcome"] == "approved"
+    assert reviewed["ai-native-low-salary"]["outcome"] == "rule_rejected"
+    assert any("最低薪资" in reason for reason in reviewed["ai-native-low-salary"]["reasons"])
+
+
 def test_single_job_analysis_failure_keeps_approved_jobs_and_allows_confirmation(
     tmp_path, monkeypatch
 ) -> None:
@@ -722,6 +794,28 @@ def test_collection_continues_past_old_three_times_target_until_match(tmp_path) 
     assert run["configSnapshot"]["plannedJobs"][0]["greeting"]
     assert len(collect_calls) == 5
     assert all(call["payload"]["limit"] <= 3 for call in collect_calls)
+
+
+def test_collection_finishes_before_analysis_and_analysis_stops_at_target(tmp_path) -> None:
+    jobs = [captured_job(f"candidate-{index}", f"公司{index}") for index in range(6)]
+    hub = FakeConnectedBrowserHub(jobs)
+    client = collection_client(tmp_path, hub)
+
+    created = create_pending_run(client, target_count=1, candidate_limit=6)
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    event_types = [event["eventType"] for event in events]
+
+    assert collection["status"] == "ready"
+    assert collection["collectedCount"] == 6
+    assert collection["analyzedCount"] == 1
+    assert collection["approvedCount"] == 1
+    assert len([call for call in hub.calls if call["action"] == "collect_jobs"]) == 2
+    assert event_types.index("analysis-started") > max(
+        index for index, event_type in enumerate(event_types)
+        if event_type == "collection-batch-finished"
+    )
 
 
 def test_pipeline_stops_at_confirmation_then_only_selected_jobs_can_start(tmp_path) -> None:
@@ -828,7 +922,7 @@ def test_connected_unified_extension_is_the_browser_runtime(tmp_path) -> None:
     assert "自动确认" in checks["boss-login"]["message"]
 
 
-def test_collection_stops_after_small_batches_reach_delivery_target(tmp_path) -> None:
+def test_collection_reaches_candidate_cap_before_limited_analysis(tmp_path) -> None:
     jobs = [captured_job(f"batch-job-{index}", f"公司{index}") for index in range(12)]
     hub = FakeConnectedBrowserHub(jobs)
     client = collection_client(tmp_path, hub)
@@ -839,10 +933,10 @@ def test_collection_stops_after_small_batches_reach_delivery_target(tmp_path) ->
     collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
 
     assert collection["status"] == "ready"
-    assert collection["collectedCount"] == 6
+    assert collection["collectedCount"] == 12
     assert collection["analyzedCount"] == 4
     assert collection["approvedCount"] == 4
-    assert len(collect_calls) == 2
+    assert len(collect_calls) == 4
     assert collect_calls[0]["payload"] == {
         "limit": 3,
         "excludeJobIds": [],
@@ -854,14 +948,14 @@ def test_collection_stops_after_small_batches_reach_delivery_target(tmp_path) ->
     assert collect_calls[0]["deadlineMs"] == 66_000
     events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
     batch_events = [event for event in events if event["eventType"] == "collection-batch-finished"]
-    assert [event["payload"]["collectedCount"] for event in batch_events] == [3, 6]
-    assert [event["payload"]["newCount"] for event in batch_events] == [3, 3]
+    assert [event["payload"]["collectedCount"] for event in batch_events] == [3, 6, 9, 12]
+    assert [event["payload"]["newCount"] for event in batch_events] == [3, 3, 3, 3]
     checks = {item["key"]: item for item in client.get("/v1/setup/status").json()["checks"]}
     assert checks["boss-login"]["status"] == "ready"
     assert checks["boss-login"]["blocking"] is False
 
 
-def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> None:
+def test_collection_timeout_analyzes_retained_batches_without_delivery(tmp_path) -> None:
     hub = TimeoutAfterFirstBatchHub([captured_job("retained-job", "保留公司")])
     client = collection_client(tmp_path, hub)
     created = create_pending_run(client, target_count=2)
@@ -875,12 +969,14 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     assert collection["outcome"] == "partial_failure"
     assert collection["collectedCount"] == 1
     assert collection["partial"] is True
-    assert "未进入投递清单" in collection["message"]
+    assert "不会自动投递" in collection["message"]
+    assert collection["analyzedCount"] == 1
+    assert len(collection["reviewedJobs"]) == 1
     assert any(
         "扩展采集单批职位超时，请适当降低岗位采集间隔" in error
         for error in collection["browserErrors"]
     )
-    assert [job["jobId"] for job in run["configSnapshot"]["plannedJobs"]] == ["retained-job"]
+    assert run["configSnapshot"]["plannedJobs"] == []
     assert len(collect_calls) == 3
     assert collect_calls[1]["payload"]["excludeJobIds"] == ["retained-job"]
     assert collect_calls[2]["payload"]["excludeJobIds"] == ["retained-job"]
@@ -898,6 +994,65 @@ def test_collection_timeout_keeps_and_analyzes_completed_batches(tmp_path) -> No
     assert timeout_event["payload"]["retainedCount"] == 1
     assert timeout_event["payload"]["error"] == "扩展采集单批职位超时，请适当降低岗位采集间隔"
     assert any(event["eventType"] == "collection-batch-retrying" for event in events)
+
+
+def test_exhausted_search_after_saved_batch_still_analyzes(tmp_path) -> None:
+    hub = ExhaustedAfterFirstBatchHub([
+        captured_job(f"exhausted-{index}", f"公司{index}") for index in range(3)
+    ])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=5)
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    assert collection["status"] == "ready"
+    assert collection["collectedCount"] == 3
+    assert collection["analyzedCount"] == 3
+    assert collection["approvedCount"] == 3
+
+
+def test_direct_boss_search_url_is_used_without_rebuilding_filters(tmp_path) -> None:
+    supplied_url = "https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&scale=301,302"
+    hub = FakeConnectedBrowserHub([captured_job("direct-job", "直链公司")], version="0.4.32")
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(
+        client, target_count=1,
+        extra_config={"collectionSearchUrl": supplied_url, "searchKeywords": []},
+    )
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    assert run["configSnapshot"]["collection"]["status"] == "ready"
+    assert run["configSnapshot"]["collectionSearchUrl"] == supplied_url
+    navigation = next(call for call in hub.calls if call["action"] == "navigate_search")
+    collection = next(call for call in hub.calls if call["action"] == "collect_jobs")
+    assert navigation["payload"]["searchUrl"] == supplied_url
+    assert collection["payload"]["searchUrl"] == supplied_url
+
+
+def test_direct_boss_search_url_rejects_non_search_destinations(tmp_path) -> None:
+    hub = FakeConnectedBrowserHub(version="0.4.32")
+    client = collection_client(tmp_path, hub)
+    response = client.post("/v1/automation/runs", json={
+        "targetCount": 1,
+        "config": {"collectionSearchUrl": "https://www.zhipin.com.evil.test/web/geek/jobs"},
+    })
+    assert response.status_code == 422
+    assert not hub.calls
+
+
+def test_wrong_page_after_partial_collection_is_not_ready_for_delivery(tmp_path) -> None:
+    hub = WrongPageAfterFirstBatchHub([
+        captured_job("first-job", "甲公司"),
+        captured_job("second-job", "乙公司"),
+        captured_job("third-job", "丙公司"),
+        captured_job("fourth-job", "丁公司"),
+    ])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=5)
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    assert collection["status"] == "failed"
+    assert collection["outcome"] == "partial_failure"
+    assert collection["collectedCount"] == 3
+    assert "当前页面不是 BOSS 职位搜索结果页" in collection["error"]
 
 
 def test_collection_retries_a_transient_batch_timeout(tmp_path) -> None:

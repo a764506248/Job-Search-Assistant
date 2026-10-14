@@ -10,6 +10,22 @@ export const BOSS_SEARCH_FILTER_KEYS = [
 export type BossSearchFilterKey = typeof BOSS_SEARCH_FILTER_KEYS[number]
 export type BossSearchFilters = Partial<Record<BossSearchFilterKey, string>>
 
+export function normalizeBossSearchUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  try {
+    const url = new URL(value.trim())
+    if (url.protocol !== 'https:'
+      || !['www.zhipin.com', 'zhipin.com'].includes(url.hostname)
+      || url.pathname !== '/web/geek/jobs'
+      || url.username || url.password || url.port) return undefined
+    url.hash = ''
+    return url.toString()
+  }
+  catch {
+    return undefined
+  }
+}
+
 export function buildBossSearchUrl(
   query: string,
   cityCode: string,

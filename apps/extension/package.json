@@ -1,7 +1,7 @@
 {
   "name": "@job-search-assistant/extension",
   "private": true,
-  "version": "0.4.31",
+  "version": "0.4.33",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {

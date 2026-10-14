@@ -154,6 +154,7 @@ export interface AutomationCollectionConfig {
   collectionIntervalMs: number
   collectionFilterSchemaVersion?: number
   collectionFilters: AutomationCollectionFilters
+  collectionSearchUrl?: string
   searchKeywords?: string[]
   cityCode?: string
 }

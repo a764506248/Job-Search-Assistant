@@ -1,5 +1,5 @@
-from job_search_assistant.domain import DecisionRequest, evaluate_material_strategy
-from job_search_assistant.domain.models import MaterialStrategy, RiskRuleInput, RuleAction
+from job_search_assistant.domain import DecisionRequest, build_automatic_match, evaluate_material_strategy
+from job_search_assistant.domain.models import AutomaticJobMatchRequest, MaterialStrategy, RiskRuleInput, RuleAction
 
 
 def test_high_match_uses_custom_materials() -> None:
@@ -86,3 +86,28 @@ def test_score_penalty_can_trigger_default_materials() -> None:
     assert result.should_deliver is True
     assert result.effective_suitability_score == 70
     assert result.material_strategy == MaterialStrategy.DEFAULT
+
+
+def test_custom_rule_can_match_job_title_and_block_rule_still_wins() -> None:
+    result = build_automatic_match(
+        AutomaticJobMatchRequest(
+            title="AI Native 全栈工程师（外包）",
+            job_text="负责产品开发与迭代",
+            rules=[
+                RiskRuleInput(
+                    id="ai-product", name="AI 产品", patterns=["AI Native"],
+                    action=RuleAction.USE_DEFAULT_MATERIALS,
+                ),
+                RiskRuleInput(
+                    id="outsourcing", name="外包", patterns=["外包"],
+                    action=RuleAction.BLOCK_DELIVERY,
+                ),
+            ],
+        ),
+        [],
+    )
+
+    assert {match.rule_id for match in result.decision.rule_matches} == {
+        "ai-product", "outsourcing",
+    }
+    assert result.decision.should_deliver is False

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { buildBossSearchUrl, normalizeBossSearchFilters } from './search'
+import { buildBossSearchUrl, normalizeBossSearchFilters, normalizeBossSearchUrl } from './search'
 
 describe('BOSS search URL', () => {
+  it('preserves a user supplied BOSS results URL and rejects other destinations', () => {
+    const supplied = 'https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&scale=301,302'
+    expect(normalizeBossSearchUrl(supplied)).toBe(supplied)
+    expect(normalizeBossSearchUrl('https://www.zhipin.com/job_detail/123.html')).toBeUndefined()
+    expect(normalizeBossSearchUrl('https://www.zhipin.com.evil.test/web/geek/jobs')).toBeUndefined()
+    expect(normalizeBossSearchUrl('http://www.zhipin.com/web/geek/jobs')).toBeUndefined()
+  })
   it('applies the task-scoped collection filters', () => {
     const url = new URL(buildBossSearchUrl('AI Agent', '101010100', {
       jobType: '1901',

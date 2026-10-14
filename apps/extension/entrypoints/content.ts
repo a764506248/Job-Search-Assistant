@@ -98,7 +98,7 @@ async function handleBrowserAction(
       loading: '搜索结果页加载超时，未检测到职位卡片',
       ready: '搜索结果页已加载，但没有读取到完整职位详情',
     }[result.pageState]
-    return result.jobs.length
+    return result.jobs.length || (result.pageState === 'ready' && result.exhausted && !result.timeBudgetReached)
       ? {
           status: 'success',
           evidence,

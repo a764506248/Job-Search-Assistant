@@ -4,7 +4,7 @@ import LibraryManager, { type FieldDefinition } from '../../components/library/L
 import { actionLabel } from '../../utils/format'
 import type { LibraryRecord } from '../../types'
 const fields: FieldDefinition[] = [
-  { key: 'pattern', label: '关键词或语义描述', placeholder: '985, 211, 第一学历' },
+  { key: 'pattern', label: '匹配关键词（按原文查找，逗号分隔）', placeholder: '例如：985, 211, 第一学历；新投递方向请在个人档案的目标岗位中添加' },
   { key: 'action', label: '命中后动作', type: 'select', defaultValue: 'notify', options: [
     { value: 'notify', label: '仅提醒' }, { value: 'reduce_score', label: '降低匹配分' }, { value: 'use_default_materials', label: '使用默认材料继续投递' }, { value: 'block_delivery', label: '禁止投递' },
   ] },

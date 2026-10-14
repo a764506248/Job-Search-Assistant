@@ -4,7 +4,7 @@ import {
   type BrowserActionEnvelope,
   type BrowserActionResult,
 } from '../src/automation/protocol'
-import { buildBossSearchUrl, normalizeBossSearchFilters } from '../src/platform/boss/search'
+import { buildBossSearchUrl, normalizeBossSearchFilters, normalizeBossSearchUrl } from '../src/platform/boss/search'
 import {
   canReloadAndRetryAction,
   reloadContentScriptAndRetryOnce,
@@ -149,10 +149,13 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
   if (!tab?.id) return failure(envelope, '没有找到可操作的 BOSS 页面')
   try {
     if (envelope.action === 'navigate_search') {
+      const suppliedUrl = envelope.payload.searchUrl
+      const directUrl = normalizeBossSearchUrl(suppliedUrl)
+      if (suppliedUrl && !directUrl) return failure(envelope, '只能使用 BOSS 职位搜索结果页的 HTTPS 链接')
       const query = String(envelope.payload.query ?? '').trim()
       const city = String(envelope.payload.cityCode ?? '').trim()
-      if (!query) return failure(envelope, '搜索关键词不能为空')
-      const url = buildBossSearchUrl(
+      if (!directUrl && !query) return failure(envelope, '搜索关键词不能为空')
+      const url = directUrl ?? buildBossSearchUrl(
         query,
         city,
         normalizeBossSearchFilters(envelope.payload.filters),
@@ -179,7 +182,7 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
     }
     let searchPageRecovered = false
     if (envelope.action === 'collect_jobs') {
-      const searchUrl = safeBossSearchUrl(envelope.payload.searchUrl)
+      const searchUrl = normalizeBossSearchUrl(envelope.payload.searchUrl)
       if (searchUrl && !sameNavigationTarget(tab.url, searchUrl)) {
         const ready = waitForTabReady(tab.id, searchUrl)
         await browser.tabs.update(tab.id, { url: searchUrl })
@@ -232,20 +235,6 @@ async function executeBrowserAction(envelope: BrowserActionEnvelope): Promise<Br
   }
   catch (error) {
     return failure(envelope, error instanceof Error ? error.message : String(error))
-  }
-}
-
-function safeBossSearchUrl(value: unknown): string | undefined {
-  try {
-    const url = new URL(String(value ?? ''))
-    return url.protocol === 'https:'
-      && /(^|\.)zhipin\.com$/.test(url.hostname)
-      && url.pathname.startsWith('/web/geek/jobs')
-      ? url.toString()
-      : undefined
-  }
-  catch {
-    return undefined
   }
 }
 
