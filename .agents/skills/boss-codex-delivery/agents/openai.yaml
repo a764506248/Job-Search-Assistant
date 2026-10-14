@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOSS Codex 单岗投递"
+  short_description: "通过 Agent API 和 iPhone Use 串行分析并投递 BOSS 岗位"
+  default_prompt: "读取默认 Codex 投递配置，逐个分析 BOSS 岗位并按计划安全投递。"
