@@ -14,28 +14,33 @@
         <div>
           <p class="eyebrow">LIVE PROGRESS</p>
           <h3 id="codex-progress-title">Codex 投递进度</h3>
-          <p class="progress-subtitle">从岗位扫描、匹配分析到投递结果，集中查看每一步。</p>
+          <p class="progress-subtitle">仅显示最近 20 次任务；点击任务查看统计与岗位明细。</p>
         </div>
         <a-button :loading="loading" @click="loadAll">刷新进度</a-button>
       </div>
       <div v-if="runs.length" class="run-list">
-        <article v-for="(run, index) in runs" :key="run.id" class="run-card" :class="{ 'run-card-current': index === 0 }">
-          <div class="run-head">
-            <div><span class="run-label">{{ index === 0 ? '最近任务' : '历史任务' }}</span><strong>任务 #{{ run.id }}</strong></div>
+        <article v-for="(run, index) in runs" :key="run.id" class="run-card" :class="{ 'run-card-current': index === 0, 'run-card-open': expandedRunId === run.id }">
+          <button type="button" class="run-summary" :aria-expanded="expandedRunId === run.id" @click="toggleRun(run.id)">
+            <span class="run-identity"><strong>#{{ run.id }} · {{ run.configSnapshot?.name || '手机投递' }}</strong><small>{{ formatRunTime(run.createdAt) }}</small></span>
+            <span class="run-count">投递 <strong>{{ run.deliveredCount }}/{{ run.targetDeliveryCount }}</strong></span>
+            <span class="run-count">扫描 {{ run.scannedCount }} · 分析 {{ run.analyzedCount }}</span>
             <span class="run-status" :class="`run-status-${run.status}`">{{ statusText(run.status) }}</span>
-          </div>
-          <div class="run-progress-heading"><span>成功投递</span><strong>{{ run.deliveredCount }} <small>/ {{ run.targetDeliveryCount }}</small></strong></div>
-          <div class="progress-track" role="progressbar" :aria-valuenow="progress(run)" aria-valuemin="0" aria-valuemax="100" :aria-label="`任务 ${run.id} 投递进度`"><span :style="{ width: progress(run) + '%' }"></span></div>
-          <div class="metrics">
-            <span><strong>{{ run.scannedCount }}</strong><small>已扫描</small></span>
-            <span><strong>{{ run.analyzedCount }}</strong><small>已分析</small></span>
-            <span><strong>{{ run.eligibleCount }}</strong><small>符合要求</small></span>
-            <span><strong>{{ run.skippedCount }}</strong><small>已跳过</small></span>
-            <span><strong>{{ run.failedCount }}</strong><small>失败</small></span>
-          </div>
-          <div class="run-footer">
-            <small>{{ run.currentSourceTab || '尚未进入列表' }} · {{ run.currentStage }}<template v-if="run.stopReason"> · {{ run.stopReason }}</template></small>
-            <a-button size="small" @click="loadRunDetail(run.id)">查看岗位明细</a-button>
+            <span class="run-chevron" aria-hidden="true">{{ expandedRunId === run.id ? '⌃' : '⌄' }}</span>
+          </button>
+          <div v-if="expandedRunId === run.id" class="run-expanded">
+            <div class="run-progress-heading"><span>成功投递</span><strong>{{ run.deliveredCount }} <small>/ {{ run.targetDeliveryCount }}</small></strong></div>
+            <div class="progress-track" role="progressbar" :aria-valuenow="progress(run)" aria-valuemin="0" aria-valuemax="100" :aria-label="`任务 ${run.id} 投递进度`"><span :style="{ width: progress(run) + '%' }"></span></div>
+            <div class="metrics">
+              <span><strong>{{ run.scannedCount }}</strong><small>已扫描</small></span>
+              <span><strong>{{ run.analyzedCount }}</strong><small>已分析</small></span>
+              <span><strong>{{ run.eligibleCount }}</strong><small>符合要求</small></span>
+              <span><strong>{{ run.skippedCount }}</strong><small>已跳过</small></span>
+              <span><strong>{{ run.failedCount }}</strong><small>失败</small></span>
+            </div>
+            <div class="run-footer">
+              <small>{{ run.currentSourceTab || '尚未进入列表' }} · {{ run.currentStage }}<template v-if="run.stopReason"> · {{ run.stopReason }}</template></small>
+              <a-button size="small" @click="loadRunDetail(run.id)">查看岗位明细</a-button>
+            </div>
           </div>
         </article>
       </div>
@@ -50,7 +55,7 @@
         <div class="section-title"><h4>任务 #{{ selectedRun.id }} 岗位明细</h4><a-button size="small" @click="selectedRun = null">关闭</a-button></div>
         <article v-for="step in selectedRun.steps || []" :key="step.id" class="step-card">
           <div class="run-head"><strong>{{ step.snapshot?.title || step.platformJobId }}</strong><span>{{ step.status }}</span></div>
-          <p>{{ step.snapshot?.companyName || '公司待补充' }} · {{ step.sourceTab || '未知来源' }} · 匹配 {{ step.score ?? '—' }} 分</p>
+          <p>{{ step.snapshot?.companyName || '公司待补充' }} · {{ step.sourceTab || '未知来源' }} · 资料相似度 {{ step.score ?? '—' }} 分</p>
           <p v-if="step.decisionReasons.length">{{ step.decisionReasons.join('；') }}</p>
           <blockquote v-if="step.greeting">{{ step.greeting }}</blockquote>
           <small v-if="step.errorMessage" class="step-error">{{ step.errorMessage }}</small>
@@ -92,9 +97,22 @@
         <div><p class="eyebrow">MOBILE FILTERS</p><h3>手机筛选与投递计划</h3></div>
         <a-button type="primary" html-type="submit" :loading="saving">保存配置</a-button>
       </div>
+      <div class="config-toolbar">
+        <div class="config-toolbar-actions">
+          <label>选择投递方案
+            <select :value="config.id ?? ''" @change="selectConfig(($event.target as HTMLSelectElement).value)">
+              <option value="">新方案（未保存）</option>
+              <option v-for="item in configs" :key="item.id" :value="item.id">{{ item.name }}{{ item.isDefault ? ' · 默认' : '' }}</option>
+            </select>
+          </label>
+          <a-button html-type="button" @click="newConfig">新建方案</a-button>
+        </div>
+        <p class="config-toolbar-note">保存后可通过 Agent Key 选择方案；历史任务保留创建时的配置快照。</p>
+      </div>
 
-      <div class="field-grid">
+      <div class="field-grid config-fields">
         <label class="wide">配置名称<input v-model.trim="config.name" required /></label>
+        <label class="choice wide"><input v-model="config.isDefault" type="checkbox" />设为默认投递方案</label>
         <fieldset class="wide">
           <legend>来源页签（按勾选顺序由 Codex 处理）</legend>
           <label v-for="tab in sourceTabOptions" :key="tab" class="choice">
@@ -139,7 +157,7 @@
         <label>目标成功投递数<input v-model.number="config.targetDeliveryCount" type="number" min="1" max="100" required /></label>
         <label>最大扫描职位数<input v-model.number="config.maxScanCount" type="number" min="1" max="1000" required /></label>
         <label>岗位处理间隔（秒）<input v-model.number="config.intervalSeconds" type="number" min="1" max="60" step="0.5" /></label>
-        <label>最低匹配分<input v-model.number="config.minimumScore" type="number" min="0" max="100" /></label>
+        <label>最低资料相似度<input v-model.number="config.minimumScore" type="number" min="0" max="100" /></label>
         <label>最低问候语置信度<input v-model.number="config.minimumCustomizationConfidence" type="number" min="0" max="100" /></label>
         <label>确认模式
           <select v-model="config.confirmationMode"><option value="automatic">符合后自动投递</option><option value="per_job">每岗确认</option></select>
@@ -185,7 +203,9 @@ const multipleGroups: Array<{ key: MultiKey; label: string; options: PlatformOpt
 ]
 
 const keys = ref<AgentKeyRecord[]>([])
+const configs = ref<CodexDeliveryConfig[]>([])
 const runs = ref<CodexDeliveryRun[]>([])
+const expandedRunId = ref<number | null>(null)
 const selectedRun = ref<CodexDeliveryRun | null>(null)
 const resumes = ref<LibraryRecord[]>([])
 const newPlaintextKey = ref('')
@@ -231,18 +251,45 @@ async function loadAll() {
       api.agentKeys(), api.codexDeliveryConfigs(), api.codexDeliveryRuns(), api.library('resumes'),
     ])
     keys.value = keyResult.items
+    configs.value = configResult.items
     runs.value = runResult.items
     resumes.value = resumeResult.items
+    if (expandedRunId.value !== null && !runs.value.some(run => run.id === expandedRunId.value)) expandedRunId.value = null
     if (configResult.items.length) {
-      Object.assign(config, defaultConfig(), configResult.items[0])
-      keywordText.value = config.keywords.join('，')
-      intentionText.value = config.jobIntentions.map(item => item.label).join('，')
-      recommendedTagText.value = config.recommendedTags.map(item => item.label).join('，')
-      bossActivityLabel.value = config.bossActivity?.label || '全部'
-      salaryLabel.value = config.salaryCode || '全部'
+      loadConfig(configResult.items.find(item => item.id === config.id) || configResult.items[0])
     }
   } catch (error) { message.error((error as Error).message) }
   finally { loading.value = false }
+}
+
+function loadConfig(value: CodexDeliveryConfig) {
+  Object.assign(config, defaultConfig(), value)
+  keywordText.value = config.keywords.join('，')
+  intentionText.value = config.jobIntentions.map(item => item.label).join('，')
+  recommendedTagText.value = config.recommendedTags.map(item => item.label).join('，')
+  bossActivityLabel.value = config.bossActivity?.label || '全部'
+  salaryLabel.value = config.salaryMode === 'custom' ? '自定义薪资' : config.salaryCode || '全部'
+}
+
+function newConfig() {
+  loadConfig({ ...defaultConfig(), name: `新投递方案 ${configs.value.length + 1}`, isDefault: !configs.value.length })
+  delete config.id
+}
+
+function selectConfig(value: string) {
+  if (!value) { newConfig(); return }
+  const selected = configs.value.find(item => item.id === Number(value))
+  if (selected) loadConfig(selected)
+}
+
+function toggleRun(id: number) {
+  expandedRunId.value = expandedRunId.value === id ? null : id
+  if (selectedRun.value?.id !== expandedRunId.value) selectedRun.value = null
+}
+
+function formatRunTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 async function saveConfig() {
@@ -257,7 +304,9 @@ async function saveConfig() {
     config.salaryMode = salaryLabel.value === '全部' ? 'all' : salaryLabel.value === '自定义薪资' ? 'custom' : 'preset'
     config.salaryCode = ['全部', '自定义薪资'].includes(salaryLabel.value) ? null : salaryLabel.value
     if (config.salaryMode !== 'custom') { config.salaryMinK = null; config.salaryMaxK = null }
-    Object.assign(config, await api.saveCodexDeliveryConfig({ ...config }))
+    const saved = await api.saveCodexDeliveryConfig({ ...config })
+    loadConfig(saved)
+    configs.value = await api.codexDeliveryConfigs().then(result => result.items)
     message.success('Codex 投递配置已保存')
   } catch (error) { message.error((error as Error).message) }
   finally { saving.value = false }
@@ -325,12 +374,17 @@ useRefresh(loadAll)
 .progress-empty-icon { display: flex; flex: 0 0 auto; align-items: center; padding-left: 10px; }
 .progress-empty-icon span { display: grid; place-items: center; width: 42px; height: 42px; margin-left: -10px; border: 2px solid #f5faf7; border-radius: 50%; background: #d7eee2; color: #236a52; font-size: 11px; font-weight: 800; }
 .progress-empty-icon span:nth-child(2) { background: #bce1d0; }.progress-empty-icon span:nth-child(3) { background: #237757; color: #fff; }
+.config-toolbar { display: grid; gap: 10px; padding: 18px 22px; background: var(--surface-soft); border-bottom: 1px solid var(--line); }
+.config-toolbar-actions { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+.config-toolbar-actions label { flex: 0 1 340px; min-width: min(100%, 220px); }
+.config-toolbar-actions .ant-btn { flex: none; }
+.config-toolbar-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .connection-grid, .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .connection-grid, .key-list, .config-panel > .field-grid, .config-panel > .filter-groups { margin-left: 22px; margin-right: 22px; }
-.connection-grid, .config-panel > .field-grid:first-of-type { margin-top: 20px; }
+.connection-grid, .config-panel > .config-fields { margin-top: 20px; }
 .config-panel > .field-grid:last-child, .key-list { margin-bottom: 22px; }
-label { display: grid; gap: 7px; color: #32453d; font-weight: 600; }
-input:not([type='checkbox']), textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #cad8d1; border-radius: 9px; padding: 10px 12px; background: #fff; color: #1e3028; font: inherit; }
+label { display: grid; gap: 5px; color: #32453d; font-size: 12px; font-weight: 600; }
+input:not([type='checkbox']), textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #cad8d1; border-radius: 8px; padding: 8px 10px; background: #fff; color: #1e3028; font: inherit; font-size: 13px; }
 input:focus, textarea:focus, select:focus { outline: 2px solid #bce1d2; border-color: #176b55; }
 .connection-help { border-radius: 12px; background: #f6f8f7; padding: 14px; display: grid; gap: 5px; color: #617069; }
 .connection-help strong { color: #20342b; }
@@ -341,34 +395,45 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #bce1d2; border-c
 .key-row div { display: grid; }.key-row span { color: #708078; }
 .status-ready { color: #176b55 !important; }.status-muted { color: #9b6f6f !important; }
 .wide { grid-column: 1 / -1; }
-fieldset { border: 1px solid #dce7e1; border-radius: 12px; padding: 13px; }
-legend { padding: 0 6px; font-weight: 700; color: #2b4037; }
-.choice { display: inline-flex; align-items: center; gap: 7px; margin: 6px 16px 6px 0; font-weight: 500; }
-.filter-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+fieldset { border: 1px solid #dce7e1; border-radius: 9px; padding: 8px 11px; min-width: 0; }
+legend { padding: 0 5px; font-size: 13px; font-weight: 700; color: #2b4037; }
+.choice { display: inline-flex; align-items: center; gap: 5px; margin: 3px 12px 3px 0; font-size: 12px; font-weight: 500; }
+.choice input { accent-color: var(--brand); }
+.filter-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; margin-bottom: 14px; }
 .plan-grid { padding-top: 18px; border-top: 1px solid #e5ece8; }
-.run-list { display: grid; gap: 0; }.run-card { min-width: 0; border-top: 1px solid var(--line); padding: 17px 22px; background: #fff; }
+.run-list { display: grid; gap: 0; }.run-card { min-width: 0; border-top: 1px solid var(--line); background: #fff; }
 .run-card:first-child { border-top: 0; }
-.run-card-current { background: var(--brand-soft); }
+.run-card-current { background: #f5faf7; }
+.run-card-open { background: var(--brand-soft); }
+.run-summary { width: 100%; display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(90px, .6fr) minmax(150px, 1fr) auto 18px; align-items: center; gap: 12px; padding: 13px 22px; border: 0; background: transparent; text-align: left; cursor: pointer; font-size: 12px; }
+.run-summary:hover { background: rgba(23, 107, 85, .05); }
+.run-summary:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+.run-identity { min-width: 0; display: grid; gap: 2px; }
+.run-identity strong { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.run-identity small, .run-count { color: var(--muted); font-size: 11px; }
+.run-count strong { color: var(--brand-deep); font-size: 13px; }
+.run-chevron { color: var(--muted); font-size: 18px; line-height: 1; }
+.run-expanded { padding: 0 22px 14px; }
 .run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .run-head > div { display: flex; align-items: center; gap: 10px; }
 .run-label { color: #65917b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .run-status { padding: 5px 10px; border-radius: 999px; background: #e4f4eb; color: #176b55; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .run-status-failed, .run-status-uncertain { background: #fff0eb; color: #a34f38; }
 .run-status-stopped, .run-status-paused { background: #f0f2f1; color: #63746b; }
-.run-progress-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 18px; color: #50675a; font-size: 12px; }
+.run-progress-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; color: #50675a; font-size: 11px; }
 .run-progress-heading strong { color: #174b38; font-size: 22px; line-height: 1; }.run-progress-heading small { color: #8aa296; font-size: 13px; }
-.progress-track { height: 9px; margin: 9px 0 18px; border-radius: 99px; background: #e8f1eb; overflow: hidden; }
+.progress-track { height: 6px; margin: 7px 0 12px; border-radius: 99px; background: #e8f1eb; overflow: hidden; }
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2b9470, #75c6a1); transition: width .35s ease; }
-.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-.metrics span { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
-.metrics strong { color: #214e3a; font-size: 18px; }.metrics small { color: #71867a; font-size: 11px; }
+.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.metrics span { display: flex; align-items: baseline; gap: 5px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.metrics strong { color: #214e3a; font-size: 14px; }.metrics small { color: #71867a; font-size: 11px; }
 .empty-copy { color: #77867f; }
 .run-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 13px; border-top: 1px solid #ecf1ed; }
 .run-footer small { min-width: 0; color: #73877b; overflow-wrap: anywhere; }
 .step-panel { padding: 18px 22px; border-top: 1px solid var(--line); }.step-panel h4 { margin: 0; }
 .step-card { padding: 13px; margin-top: 10px; border: 1px solid #e2eae6; border-radius: 10px; }.step-card p { margin: 7px 0; color: #55685f; }
 .step-card blockquote { margin: 8px 0 0; padding: 10px 12px; border-left: 3px solid #2a8b6f; background: #f3f9f6; }.step-error { color: #b34444; }
-@media (max-width: 860px) { .connection-grid, .field-grid, .filter-groups { grid-template-columns: 1fr; }.wide { grid-column: auto; }.secret-box { grid-template-columns: 1fr; }.metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 600px) { .notice-card { padding: 18px; }.codex-delivery-view .panel-heading { padding: 16px 18px; align-items: flex-start; }.progress-title h3 { font-size: 18px; }.progress-empty { align-items: flex-start; flex-direction: column; gap: 12px; margin: 16px 18px; padding: 16px; }.run-card { padding: 16px 18px; }.connection-grid, .key-list, .config-panel > .field-grid, .config-panel > .filter-groups { margin-left: 18px; margin-right: 18px; }.secret-box { margin-left: 18px; margin-right: 18px; }.step-panel { padding: 16px 18px; }.metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.run-footer { align-items: flex-start; flex-direction: column; }.run-footer .ant-btn { align-self: flex-end; } }
+@media (max-width: 860px) { .connection-grid, .field-grid, .filter-groups { grid-template-columns: 1fr; }.wide { grid-column: auto; }.secret-box { grid-template-columns: 1fr; }.run-summary { grid-template-columns: minmax(140px, 1fr) auto auto; }.run-summary .run-count:nth-of-type(3) { display: none; }.metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .notice-card { padding: 18px; }.codex-delivery-view .panel-heading { padding: 16px 18px; align-items: flex-start; }.progress-title h3 { font-size: 18px; }.progress-empty { align-items: flex-start; flex-direction: column; gap: 12px; margin: 16px 18px; padding: 16px; }.run-summary { grid-template-columns: minmax(110px, 1fr) auto 18px; gap: 7px; padding: 12px 18px; }.run-summary .run-count { display: none; }.run-expanded { padding: 0 18px 14px; }.config-toolbar { padding: 16px 18px; }.config-toolbar-actions { align-items: stretch; }.config-toolbar-actions label { flex: 1 1 100%; min-width: 0; }.config-toolbar-actions .ant-btn { align-self: flex-start; }.connection-grid, .key-list, .config-panel > .field-grid, .config-panel > .filter-groups { margin-left: 18px; margin-right: 18px; }.secret-box { margin-left: 18px; margin-right: 18px; }.step-panel { padding: 16px 18px; }.metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.run-footer { align-items: flex-start; flex-direction: column; }.run-footer .ant-btn { align-self: flex-end; } }
 @media (prefers-reduced-motion: reduce) { .progress-track span { transition: none; } }
 </style>

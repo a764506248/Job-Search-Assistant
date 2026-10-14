@@ -99,11 +99,6 @@ export function mountBrowserControlPanel(doc: Document): void {
       .body { padding:13px }.panel.collapsed { width:218px }.panel.collapsed .body { display:none }
       .status { display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:#fff0df;color:#8b5719 }
       .status.ready { background:#def5e9;color:#0a6a4e }.dot { width:8px;height:8px;border-radius:50%;background:currentColor }
-      .pairing { margin-top:11px }.pairing.hidden { display:none }
-      label { display:block;margin:0 0 5px;color:#52645c;font-size:11px }
-      .service-url { width:100%;box-sizing:border-box;margin-bottom:7px;padding:8px 10px;border:1px solid #bcd2c8;border-radius:8px;font:12px/1.2 inherit }
-      .pair-row { display:flex;gap:7px }.pair-row input { min-width:0;flex:1;padding:9px 10px;border:1px solid #bcd2c8;border-radius:8px;font:700 16px/1 monospace;letter-spacing:.18em }
-      .primary { padding:9px 12px;background:#087f5f;color:white }.primary:disabled { opacity:.5;cursor:wait }
       .section { margin-top:12px;padding-top:12px;border-top:1px solid #dce8e2 }
       .section-title { margin:0 0 8px;font-size:12px;font-weight:700;color:#31483e }
       .setting { display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-top:8px }
@@ -119,12 +114,6 @@ export function mountBrowserControlPanel(doc: Document): void {
       </header>
       <div class="body">
         <div class="status"><span class="dot"></span><span class="status-text">正在检查本地连接…</span></div>
-        <div class="pairing">
-          <label for="service-url">服务地址（本地或线上域名）</label>
-          <input id="service-url" class="service-url" inputmode="url" placeholder="http://127.0.0.1:8765">
-          <label for="pair-code">本地后台显示的 6 位配对码</label>
-          <div class="pair-row"><input id="pair-code" inputmode="numeric" maxlength="6" placeholder="000000"><button class="primary pair">连接</button></div>
-        </div>
         <div class="section">
           <p class="section-title">发送策略</p>
           <div class="setting"><div class="setting-text"><strong>问候语</strong><span>页面确认投递清单后执行</span></div><span class="pill">自动发送</span></div>
@@ -132,7 +121,7 @@ export function mountBrowserControlPanel(doc: Document): void {
             <select class="resume-mode" aria-label="简历图片发送策略"><option value="automatic">自动发送</option><option value="confirm">发送前确认</option><option value="off">不发送</option></select>
           </div>
         </div>
-        <p class="hint">配置保存在本机扩展中。自动发送仍只处理你在本地页面确认过的企业与岗位。</p>
+        <p class="hint">点击浏览器顶部的扩展图标输入服务地址和配对码。自动发送仍只处理你在本地页面确认过的企业与岗位。</p>
       </div>
     </section>`
   doc.documentElement.append(host)
@@ -142,10 +131,6 @@ export function mountBrowserControlPanel(doc: Document): void {
   const toggle = shadow.querySelector<HTMLButtonElement>('.toggle')!
   const status = shadow.querySelector<HTMLElement>('.status')!
   const statusText = shadow.querySelector<HTMLElement>('.status-text')!
-  const pairing = shadow.querySelector<HTMLElement>('.pairing')!
-  const code = shadow.querySelector<HTMLInputElement>('#pair-code')!
-  const serviceUrl = shadow.querySelector<HTMLInputElement>('#service-url')!
-  const pair = shadow.querySelector<HTMLButtonElement>('.pair')!
   const resumeMode = shadow.querySelector<HTMLSelectElement>('.resume-mode')!
   let settings = { ...DEFAULT_SETTINGS }
 
@@ -173,42 +158,12 @@ export function mountBrowserControlPanel(doc: Document): void {
       statusText.textContent = result.connected
         ? `${result.serviceUrl ?? '服务'} 已连接 · 协议 ${result.protocolVersion}`
         : '尚未连接服务，请检查地址与配对码'
-      pairing.classList.remove('hidden')
     }
     catch {
       status.classList.remove('ready')
       statusText.textContent = '扩展后台暂时不可用，请重新加载扩展'
-      pairing.classList.remove('hidden')
     }
   }
-  pair.addEventListener('click', async () => {
-    const value = code.value.trim()
-    if (!/^\d{6}$/.test(value)) {
-      statusText.textContent = '请输入 6 位配对码'
-      return
-    }
-    pair.disabled = true
-    statusText.textContent = '正在连接…'
-    try {
-      await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value, serviceUrl: serviceUrl.value })
-      const deadline = Date.now() + 10_000
-      while (Date.now() < deadline) {
-        const result = await browser.runtime.sendMessage({ type: 'job-search-assistant:connection-status' }) as { connected: boolean }
-        if (result.connected) {
-          code.value = ''
-          await refreshStatus()
-          return
-        }
-        await new Promise(resolve => setTimeout(resolve, 250))
-      }
-      statusText.textContent = '连接仍在进行中，请稍候；配对码已提交，无需重复输入'
-    }
-    catch (error) { statusText.textContent = error instanceof Error ? error.message : String(error) }
-    finally { pair.disabled = false }
-  })
-  void browser.storage.local.get('browserServiceUrl').then((stored) => {
-    serviceUrl.value = typeof stored.browserServiceUrl === 'string' ? stored.browserServiceUrl : 'http://127.0.0.1:8765'
-  })
   void readAutomationSettings().then((value) => {
     settings = value
     resumeMode.value = settings.resumeSendMode

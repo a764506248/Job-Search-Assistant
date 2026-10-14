@@ -1,8 +1,12 @@
 from conftest import authenticate
 from fastapi.testclient import TestClient
 
+from job_search_assistant.codex_delivery.eligibility import (
+    education_block_reason,
+    incomplete_title_reason,
+    missing_linux_evidence_reason,
+)
 from job_search_assistant.main import create_app
-from job_search_assistant.codex_delivery.eligibility import education_block_reason
 
 
 def config_payload(**overrides: object) -> dict:
@@ -231,6 +235,41 @@ def test_codex_configs_keys_and_runs_are_isolated_per_user(tmp_path) -> None:
     )
 
 
+def test_run_list_shows_only_latest_20_for_current_user(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    run_ids = [
+        client.post("/v1/agent/runs", json={}, headers=agent_headers(key)).json()["id"]
+        for _ in range(22)
+    ]
+    listed = client.get("/v1/codex-delivery/runs").json()["items"]
+    assert [run["id"] for run in listed] == list(reversed(run_ids[-20:]))
+    assert client.get(f"/v1/codex-delivery/runs/{run_ids[0]}").status_code == 200
+
+
+def test_other_user_config_update_cannot_change_own_default_or_select_foreign_resume(
+    tmp_path,
+) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    first_config = client.post("/v1/codex-delivery/configs", json=config_payload()).json()
+    resume = client.post(
+        "/v1/library/resumes", json={"name": "首个用户简历", "data": {"content": "测试"}}
+    ).json()
+
+    authenticate(client, "codex-isolation-second", "password123")
+    own_config = client.post("/v1/codex-delivery/configs", json=config_payload()).json()
+    forbidden = client.put(
+        f"/v1/codex-delivery/configs/{first_config['id']}",
+        json=config_payload(name="越权设默认", isDefault=True),
+    )
+    assert forbidden.status_code == 404
+    assert client.get("/v1/codex-delivery/configs").json()["items"][0]["id"] == own_config["id"]
+    assert client.post(
+        "/v1/codex-delivery/configs", json=config_payload(resumeId=resume["id"])
+    ).status_code == 422
+
+
 def test_uncertain_result_stops_run_without_recording_delivery(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     client.post("/v1/codex-delivery/configs", json=config_payload())
@@ -301,7 +340,10 @@ def test_education_requirement_blocks_delivery_despite_high_similarity(tmp_path)
     assert analyzed.status_code == 200
     assert analyzed.json()["shouldDeliver"] is False
     assert analyzed.json()["match"]["decision"]["shouldDeliver"] is False
-    assert any("硕士" in reason and "本科" in reason for reason in analyzed.json()["decisionReasons"])
+    assert any(
+        "硕士" in reason and "本科" in reason
+        for reason in analyzed.json()["decisionReasons"]
+    )
 
 
 def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> None:
@@ -315,3 +357,163 @@ def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> No
     assert education_block_reason(
         {"education": "硕士", "description": "负责 Agent 开发"}, profile
     ) == "岗位要求硕士及以上学历，个人档案为本科"
+
+
+def test_incomplete_phone_title_cannot_be_sent() -> None:
+    assert incomplete_title_reason({"title": "AI 智能体工程师（医疗方向"})
+    assert incomplete_title_reason({"title": "AI Agent 工程师..."})
+    assert incomplete_title_reason({"title": "AI Agent 工程师（医疗方向）"}) is None
+
+
+def test_required_linux_experience_needs_user_evidence() -> None:
+    snapshot = {"description": "任职要求：有Linux环境使用经验，熟悉Python。"}
+    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "RAG"]}])
+    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "Linux"]}]) is None
+    assert missing_linux_evidence_reason(
+        {"description": "有Linux环境使用经验者优先。"}, []
+    ) is None
+
+
+def test_required_linux_gap_blocks_codex_delivery_even_with_high_similarity(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.put("/v1/profile", json={"data": {"summary": "有 Python Agent 与 RAG 项目经验"}})
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "linux-required",
+            "snapshot": {
+                "title": "AI Agent 工程师",
+                "companyName": "示例科技",
+                "description": "负责 Agent 和 RAG 开发。任职要求：有Linux环境使用经验。",
+                "skills": ["Python", "RAG"],
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("Linux" in reason for reason in analyzed.json()["decisionReasons"])
+
+
+def test_codex_flow_blocks_below_matching_threshold(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.post(
+        "/v1/codex-delivery/configs",
+        json=config_payload(minimumScore=100, minimumCustomizationConfidence=100),
+    )
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "weak-evidence",
+            "snapshot": {
+                "title": "Go 工程师",
+                "companyName": "示例公司",
+                "description": "负责 Go 后端开发",
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("阈值" in reason for reason in analyzed.json()["decisionReasons"])
+
+
+def test_phone_flow_reuses_pc_snapshot_greeting_and_delivery_records(tmp_path) -> None:
+    generated_greeting = "您好，我做过真实的 Python Agent 项目，期待交流岗位需求。"
+
+    class GreetingSpy:
+        def __init__(self) -> None:
+            self.contexts: list[dict] = []
+
+        def generate(self, context: dict, model_record_id=None, *, user_id: int = 1) -> dict:
+            self.contexts.append(context)
+            return {"greeting": generated_greeting}
+
+    greeting_generator = GreetingSpy()
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", greeting_generator=greeting_generator)
+    )
+    client.put(
+        "/v1/profile",
+        json={"data": {"education": "学历：本科", "summary": "有真实 Python Agent 项目"}},
+    )
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "visible-fingerprint-1",
+            "snapshot": {
+                "title": "Python Agent 工程师",
+                "companyName": "测试科技",
+                "description": "负责 Python Agent 开发，要求本科及以上学历。",
+                "education": "本科",
+                "skills": ["Python", "Agent"],
+            },
+        },
+        headers=headers,
+    ).json()
+    snapshot_id = step["snapshot"]["pcSnapshotId"]
+    jobs = client.get("/v1/jobs").json()["items"]
+    assert any(job["id"] == snapshot_id and job["source"] == "codex-phone" for job in jobs)
+
+    analyzed = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["greeting"] == generated_greeting
+    assert greeting_generator.contexts[0]["profile"]["education"] == "学历：本科"
+    assert greeting_generator.contexts[0]["job"]["title"] == "Python Agent 工程师"
+    saved_job = next(
+        job for job in client.get("/v1/jobs").json()["items"] if job["id"] == snapshot_id
+    )
+    assert saved_job["generatedGreeting"] == analyzed.json()["greeting"]
+
+    prepared = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
+        json={
+            "platformJobId": "visible-fingerprint-1",
+            "observedTitle": "Python Agent 工程师",
+            "observedCompanyName": "测试科技",
+        },
+        headers=headers,
+    )
+    assert prepared.status_code == 200
+    result = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/result",
+        json={
+            "outcome": "delivered",
+            "idempotencyKey": "phone-flow-greeting-sent-1",
+            "evidence": {
+                "messageVisible": True,
+                "inputMethod": "first_common_phrase",
+                "sentText": "您好，我对这个岗位很感兴趣，期待与您沟通。",
+            },
+        },
+        headers=headers,
+    )
+    assert result.status_code == 200
+    saved_job = next(
+        job for job in client.get("/v1/jobs").json()["items"] if job["id"] == snapshot_id
+    )
+    assert saved_job["hasCommunicated"] is True
+    delivery = client.get("/v1/deliveries").json()["items"][0]
+    assert delivery["status"] == "delivered"
+    assert delivery["greetingText"] == "您好，我对这个岗位很感兴趣，期待与您沟通。"
+    assert delivery["metadata"]["source"] == "codex-phone"
+    assert delivery["metadata"]["evidence"]["inputMethod"] == "first_common_phrase"

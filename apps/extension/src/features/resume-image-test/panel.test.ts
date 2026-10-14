@@ -74,28 +74,12 @@ describe('browser control panel', () => {
     expect(await readAutomationSettings()).toMatchObject({ resumeSendMode: 'off' })
   })
 
-  it('waits for the first pairing handshake instead of asking for the code again', async () => {
-    let checks = 0
-    const sendMessage = vi.fn(async (message: { type: string }) => {
-      if (message.type === 'job-search-assistant:pair') return { ok: true }
-      checks += 1
-      return { connected: checks >= 4, protocolVersion: '1.0' }
-    })
-    vi.stubGlobal('browser', {
-      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
-      storage: { local: { get: vi.fn(async () => ({})), set: vi.fn() } },
-    })
+  it('keeps pairing out of the BOSS page panel', () => {
     mountBrowserControlPanel(document)
     const shadow = document.querySelector('#job-search-assistant-control-host')?.shadowRoot
-    const code = shadow?.querySelector<HTMLInputElement>('#pair-code')
-    if (!code) throw new Error('pairing input missing')
-    code.value = '123456'
-    shadow?.querySelector<HTMLButtonElement>('.pair')?.click()
-    await vi.waitFor(() => {
-      expect(shadow?.querySelector('.status')?.classList.contains('ready')).toBe(true)
-    }, { timeout: 2000 })
-    expect(code.value).toBe('')
-    expect(sendMessage.mock.calls.filter(([message]) => message.type === 'job-search-assistant:pair')).toHaveLength(1)
+    expect(shadow?.querySelector('#service-url')).toBeNull()
+    expect(shadow?.querySelector('#pair-code')).toBeNull()
+    expect(shadow?.textContent).toContain('浏览器顶部的扩展图标')
   })
 
   it('drags the panel from its header but ignores header buttons', () => {

@@ -217,7 +217,7 @@ export interface StoredJob {
   recruiterActiveText?: string | null
   recruiterActivity: 'online' | 'just_now' | 'today' | 'within_3_days' | 'this_week' | 'this_month' | 'older' | 'unknown'
   capturedAt: string
-  source: 'dom' | 'page-state' | 'manual'
+  source: 'dom' | 'page-state' | 'manual' | 'codex-phone'
   hasCommunicated: boolean
   hasInterview: boolean
   generatedGreeting?: string
@@ -226,7 +226,7 @@ export interface StoredJob {
   resumeOptimization?: string
 }
 
-export type DeliveryStatus = 'delivered' | 'greeting_sent' | 'failed' | 'skipped' | 'blocked' | 'fatal_limit'
+export type DeliveryStatus = 'delivered' | 'greeting_sent' | 'failed' | 'skipped' | 'blocked' | 'fatal_limit' | 'uncertain'
 
 export interface DeliveryRecord {
   id: number

@@ -36,13 +36,13 @@ Key、验证码、密码和会话信息不得写入项目文件、长期日志�
 2. 用 iPhone Use 打开 BOSS，按 `sourceTabs` 顺序进入推荐、附近、最新，并应用当前配置。动态筛选优先按 label 定位；code 只作辅助。
 3. 每次只处理一个可见职位：打开详情，采集标题、公司、完整 JD、薪资、经验、学历、公司规模、地点、技能、招聘者及活跃状态。不要为取得岗位 ID 使用分享或复制链接；若详情页未显示原生 ID，以这些可见字段生成稳定的本次去重指纹，并在快照中标记 `identitySource=visible-fingerprint`。
 4. 携带岗位标识、来源和列表位置调用 `jobs/check`；重复岗位直接跳过。
-5. 调用 `jobs/capture` 保存到本次步骤及 PC 端“职位快照”，再调用该步骤的 `analyze`。分析复用 PC 端的资料检索与问候语生成器；以接口返回的 `shouldDeliver`、决策理由及 `greeting` 为准，不自行拼接模板。若屏幕硬条件与个人档案明显冲突，或问候语截断、不实、语病明显，即使评分通过也记录跳过并报告问题。
+5. 调用 `jobs/capture` 保存到本次步骤及 PC 端“职位快照”，再调用该步骤的 `analyze`。分析复用 PC 端的资料检索与问候语生成器；接口分数只是资料检索相似度，不代表 JD 条件 100% 满足。逐项核对学历、经验、技术硬要求与资料证据；任一明确要求缺少证据时，即使 `shouldDeliver=true` 也不得发送，应记录跳过并报告缺口。问候语截断、不实或语病明显时同样跳过。
 6. `shouldDeliver=false` 时记录 `skipped` 并处理下一个岗位。
 7. `shouldDeliver=true` 且问候语可用时，发送前再次读取同一详情页标题、公司与岗位标识，调用 `jobs/{stepId}/prepare` 完成二次核对。API 返回 `opening_chat` 后：
    - 点击“立即沟通”；
-   - 输入 API 返回的 `greeting`；
-   - 发送；
-   - 只有看到可验证的已发送消息或成功状态，才以 `evidence.messageVisible=true` 记录 `delivered`。
+   - 按以下顺序准备单条消息，前一种无法得到可核对的完整草稿时才进入下一种：① 用 iPhone Use `pua_type_text` 一次输入 API 返回的完整 `greeting`，优先定位输入框；若定位不到，先点击可见输入框再无 selector 输入。输入不完整时先读回已有内容，只补缺失部分，不重发全文。② 尝试已授权的 Mac→iPhone 通用剪贴板：仅在内存中暂存 Mac 原纯文本剪贴板，复制完整 `greeting`，在 iPhone 聊天输入框点原生“粘贴”，从手机读回草稿，然后恢复 Mac 剪贴板；不要复制职位分享链接。③ 若前两种均失败，打开 BOSS“常用语”，检查第一条的完整内容；仅在它适用于当前岗位、没有不实或敏感信息时使用第一条。若不可用，不发送，记录 `failed` 并说明原因。
+   - 发送前核对当前会话对应的招聘者/岗位以及完整文案。`pua_type_text` 与粘贴须读回输入框草稿；常用语须在点击前读清第一条全文，并确认选择它是填入草稿还是直接发送。若直接发送，只有上述核对完成后才点一次；不得为了测试发送或重复点击。
+   - 发送后确认消息确实出现在当前会话；回传 `evidence.messageVisible=true`、`evidence.inputMethod`（`pua_type_text`、`universal_clipboard` 或 `first_common_phrase`）及 `evidence.sentText`（实际发送全文）。第三种文案不等于 PC 端生成的 `greeting` 时，不得声称发送了生成文案；API 仍保留原生成文案供对照。
 8. 通过 `jobs/{stepId}/result` 回传结果；接口同步 PC 端职位快照跟进和投递记录。结果明确失败记录 `failed`；无法确认是否已经发送则记录 `uncertain`，不得自动重发。
 9. 每个 result 使用稳定且唯一的 `idempotencyKey`。API 返回任务终态后立即停止。
 

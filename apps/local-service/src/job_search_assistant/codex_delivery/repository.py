@@ -234,6 +234,13 @@ class CodexDeliveryRepository:
         now = datetime.now(UTC).isoformat()
         values = self._config_values(payload)
         with db_connect(self.database_path) as connection:
+            if config_id is not None:
+                owned = connection.execute(
+                    "SELECT 1 FROM codex_delivery_configs WHERE id = ? AND user_id = ?",
+                    (config_id, user_id),
+                ).fetchone()
+                if owned is None:
+                    raise KeyError(config_id)
             if payload["is_default"]:
                 connection.execute(
                     "UPDATE codex_delivery_configs SET is_default = 0 WHERE user_id = ?",
@@ -325,13 +332,14 @@ class CodexDeliveryRepository:
             run_id = int(cursor.lastrowid)
         return self.get_run(run_id, user_id=user_id)
 
-    def list_runs(self, user_id: int) -> list[dict[str, Any]]:
+    def list_runs(self, user_id: int, *, limit: int = 20) -> list[dict[str, Any]]:
         self.initialize()
+        limit = max(1, min(limit, 20))
         with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT * FROM codex_delivery_runs WHERE user_id = ? ORDER BY id DESC",
-                (user_id,),
+                "SELECT * FROM codex_delivery_runs WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+                (user_id, limit),
             ).fetchall()
         return [self._run_row(row) for row in rows]
 
@@ -348,8 +356,9 @@ class CodexDeliveryRepository:
             result = self._run_row(row)
             if include_steps:
                 steps = connection.execute(
-                    "SELECT * FROM codex_delivery_job_steps WHERE run_id = ? ORDER BY id",
-                    (run_id,),
+                    """SELECT * FROM codex_delivery_job_steps
+                    WHERE run_id = ? AND user_id = ? ORDER BY id""",
+                    (run_id, user_id),
                 ).fetchall()
                 result["steps"] = [self._step_row(step) for step in steps]
             return result
@@ -461,6 +470,23 @@ class CodexDeliveryRepository:
                     current_stage = 'analyzing', updated_at = ? WHERE id = ? AND user_id = ?""",
                     (now, run_id, user_id),
                 )
+        return self.get_step(step_id, user_id=user_id)
+
+    def link_job_snapshot(
+        self, user_id: int, run_id: int, step_id: int, snapshot_id: int
+    ) -> dict[str, Any]:
+        step = self.get_step(step_id, user_id=user_id)
+        if step["runId"] != run_id or step["status"] != "captured":
+            raise ValueError("岗位未采集，不能关联职位快照")
+        snapshot = dict(step["snapshot"] or {})
+        snapshot["pcSnapshotId"] = snapshot_id
+        now = datetime.now(UTC).isoformat()
+        with db_connect(self.database_path) as connection:
+            connection.execute(
+                """UPDATE codex_delivery_job_steps SET snapshot_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?""",
+                (self._json(snapshot), now, step_id, user_id),
+            )
         return self.get_step(step_id, user_id=user_id)
 
     def prepare_job(

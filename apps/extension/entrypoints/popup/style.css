@@ -5,6 +5,13 @@ main { padding: 22px; }
 h1 { margin: 6px 0 12px; font-size: 22px; }
 .status { padding: 10px 12px; border-radius: 10px; background: #fff2df; color: #8b581b; font-size: 13px; }
 .status.ready { background: #def6eb; color: #0b6a4f; }
+.pairing { margin-top: 16px; }
+label { display: block; margin: 0 0 5px; color: #52645c; font-size: 11px; }
+input { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #bcd2c8; border-radius: 8px; background: white; color: #16251f; font: 13px/1.2 inherit; }
+#service-url { margin-bottom: 11px; }
+.pair-row { display: flex; gap: 7px; }
+#pair-code { min-width: 0; flex: 1; font: 700 16px/1 monospace; letter-spacing: .18em; }
+#pair { flex: none; width: auto; margin: 0; padding: 9px 14px; }
 button { width: 100%; margin-top: 14px; padding: 11px; border: 0; border-radius: 9px; background: #087f5f; color: white; font-weight: 700; cursor: pointer; }
 button:disabled { opacity: .55; cursor: wait; }
 .hint { margin: 14px 0 0; color: #718079; font-size: 11px; line-height: 1.55; }

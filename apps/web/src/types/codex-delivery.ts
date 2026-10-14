@@ -50,6 +50,7 @@ export type AgentKeyRecord = {
 
 export type CodexDeliveryRun = {
   id: number
+  configSnapshot: CodexDeliveryConfig
   status: string
   currentStage: string
   currentSourceTab: string | null

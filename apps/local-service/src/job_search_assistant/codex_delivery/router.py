@@ -1,16 +1,33 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ..auth_token import verify_token
 from ..domain import build_automatic_match
-from ..domain.models import AutomaticJobMatchRequest, RiskRuleInput, RuleAction
+from ..domain.models import (
+    AutomaticJobMatchRequest,
+    CapturedJob,
+    DeliveryRecordInput,
+    RiskRuleInput,
+    RuleAction,
+)
 from ..knowledge import KnowledgeSearchService
-from ..repositories import AuthRepository, LibraryRepository
-from .eligibility import education_block_reason
+from ..project_extraction import GreetingGenerator
+from ..repositories import (
+    AuthRepository,
+    DeliveryRepository,
+    JobRepository,
+    LibraryRepository,
+)
+from .eligibility import (
+    education_block_reason,
+    incomplete_title_reason,
+    missing_linux_evidence_reason,
+)
 from .models import (
     AgentKeyCreate,
     AgentRunCreate,
@@ -29,6 +46,9 @@ def create_codex_delivery_router(
     auth_repository: AuthRepository,
     library_repository: LibraryRepository,
     knowledge_search: KnowledgeSearchService,
+    job_repository: JobRepository,
+    delivery_repository: DeliveryRepository,
+    greeting_generator: GreetingGenerator,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1")
 
@@ -68,6 +88,14 @@ def create_codex_delivery_router(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Codex 投递任务不存在") from error
 
+    def validate_resume(payload: DeliveryConfigInput, user_id: int) -> None:
+        if payload.resume_id is None:
+            return
+        try:
+            library_repository.get("resumes", payload.resume_id, user_id=user_id)
+        except KeyError as error:
+            raise HTTPException(status_code=422, detail="所选简历不存在或不属于当前账号") from error
+
     @router.get("/agent-keys")
     def list_agent_keys(request: Request) -> dict[str, Any]:
         user = web_user(request)
@@ -97,7 +125,9 @@ def create_codex_delivery_router(
     @router.post("/codex-delivery/configs", status_code=status.HTTP_201_CREATED)
     def create_config(payload: DeliveryConfigInput, request: Request) -> dict[str, Any]:
         user = web_user(request)
-        return repository.save_config(int(user["id"]), payload.model_dump(by_alias=False))
+        user_id = int(user["id"])
+        validate_resume(payload, user_id)
+        return repository.save_config(user_id, payload.model_dump(by_alias=False))
 
     @router.put("/codex-delivery/configs/{config_id}")
     def update_config(
@@ -105,6 +135,7 @@ def create_codex_delivery_router(
     ) -> dict[str, Any]:
         user = web_user(request)
         try:
+            validate_resume(payload, int(user["id"]))
             return repository.save_config(
                 int(user["id"]), payload.model_dump(by_alias=False), config_id=config_id
             )
@@ -217,7 +248,34 @@ def create_codex_delivery_router(
                 payload.source_tab,
                 payload.list_position,
             )
-            return repository.capture_job(user_id, run_id, int(step["id"]), payload.snapshot)
+            saved = repository.capture_job(user_id, run_id, int(step["id"]), payload.snapshot)
+            pc_job_id = f"codex-phone:{payload.platform_job_id}"
+            snapshot = payload.snapshot
+            captured = CapturedJob(
+                platform="boss",
+                platform_job_id=pc_job_id,
+                url=f"codex-phone://run/{run_id}/job/{step['id']}",
+                title=str(snapshot["title"]).strip(),
+                company_name=str(snapshot["companyName"]).strip(),
+                company_size=_optional_text(snapshot.get("companySize")),
+                location=_optional_text(snapshot.get("location")),
+                work_address=_optional_text(snapshot.get("workAddress")),
+                salary_text=_optional_text(snapshot.get("salaryText")),
+                experience=_optional_text(snapshot.get("experience")),
+                education=_optional_text(snapshot.get("education")),
+                description=str(snapshot["description"]).strip(),
+                skills=_string_list(snapshot.get("skills")),
+                recruiter_name=_optional_text(snapshot.get("recruiterName")),
+                recruiter_title=_optional_text(snapshot.get("recruiterTitle")),
+                recruiter_active_text=_optional_text(snapshot.get("recruiterActiveText")),
+                captured_at=datetime.now(UTC),
+                source="codex-phone",
+            )
+            job_repository.save_many([captured], user_id=user_id)
+            pc_snapshot = job_repository.get_by_platform_job_id(
+                "boss", pc_job_id, user_id=user_id
+            )
+            return repository.link_job_snapshot(user_id, run_id, int(saved["id"]), pc_snapshot.id)
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -279,26 +337,70 @@ def create_codex_delivery_router(
             evidence,
         )
         profile = library_repository.get_profile(user_id=user_id)
-        education_reason = education_block_reason(snapshot, profile)
-        if education_reason:
+        materials = [
+            profile,
+            library_repository.list("projects", user_id=user_id),
+            library_repository.list("resumes", user_id=user_id),
+        ]
+        block_reasons = [
+            reason
+            for reason in (
+                education_block_reason(snapshot, profile),
+                incomplete_title_reason(snapshot),
+                missing_linux_evidence_reason(snapshot, materials),
+            )
+            if reason
+        ]
+        if match.suitability_score < run["configSnapshot"]["minimumScore"]:
+            block_reasons.append("岗位适合度未达 Codex 投递阈值")
+        if (
+            match.customization_confidence
+            < run["configSnapshot"]["minimumCustomizationConfidence"]
+        ):
+            block_reasons.append("材料定制可信度未达 Codex 投递阈值")
+        if block_reasons:
             decision = match.decision.model_copy(
                 update={
                     "should_deliver": False,
-                    "reasons": [*match.decision.reasons, education_reason],
+                    "reasons": [*match.decision.reasons, *block_reasons],
                 }
             )
             match = match.model_copy(update={"decision": decision})
-        title = str(snapshot.get("title", "该岗位"))
-        company = str(snapshot.get("companyName", "贵司"))
-        greeting = run["configSnapshot"].get("fallbackGreeting", "")
-        if run["configSnapshot"].get("greetingStrategy") == "custom":
-            skill = next(
-                (str(item) for item in snapshot.get("skills", []) if str(item).strip()), "相关技术"
-            )
-            greeting = (
-                f"您好，我对{company}的{title}岗位很感兴趣。我的经历与岗位中的{skill}方向较匹配，"
-                "希望有机会进一步沟通，谢谢。"
-            )
+        pc_job_id = f"codex-phone:{step['platformJobId']}"
+        try:
+            pc_job = job_repository.get_by_platform_job_id("boss", pc_job_id, user_id=user_id)
+        except KeyError as error:
+            raise HTTPException(status_code=409, detail="职位快照未同步，不能分析") from error
+        greeting = pc_job.generated_greeting
+        if not greeting:
+            default_greeting = str(profile.get("defaultGreeting") or "").strip()
+            if run["configSnapshot"].get("greetingStrategy") == "custom":
+                context = {
+                    "job": pc_job.model_dump(mode="json", by_alias=True),
+                    "profile": profile,
+                    "localEvidence": [
+                        item.model_dump(mode="json", by_alias=True) for item in match.evidence
+                    ],
+                    "defaultGreeting": default_greeting,
+                    "match": {
+                        "suitabilityScore": match.suitability_score,
+                        "customizationConfidence": match.customization_confidence,
+                        "materialStrategy": match.decision.material_strategy,
+                    },
+                }
+                try:
+                    generated = greeting_generator.generate(context, user_id=user_id)
+                    greeting = str(generated["greeting"]).strip()
+                except (RuntimeError, KeyError, TypeError):
+                    greeting = default_greeting or (
+                        f"您好，我对贵司的{pc_job.title}岗位很感兴趣，"
+                        "希望有机会进一步沟通，谢谢。"
+                    )
+            if not greeting:
+                greeting = str(run["configSnapshot"].get("fallbackGreeting") or "").strip()
+            if not greeting:
+                greeting = f"您好，我对贵司的{pc_job.title}岗位很感兴趣，希望进一步沟通，谢谢。"
+            job_repository.update_generated_greeting(pc_job.id, greeting, user_id=user_id)
         try:
             saved = repository.save_analysis(
                 user_id,
@@ -338,6 +440,59 @@ def create_codex_delivery_router(
                 payload.evidence,
                 payload.error_message,
             )
+            snapshot = step.get("snapshot") or {}
+            pc_job_id = f"codex-phone:{step['platformJobId']}"
+            try:
+                pc_job = job_repository.get_by_platform_job_id(
+                    "boss", pc_job_id, user_id=user_id
+                )
+            except KeyError as error:
+                raise HTTPException(
+                    status_code=409, detail="职位快照未同步，不能记录结果"
+                ) from error
+            delivery_repository.upsert(
+                DeliveryRecordInput(
+                    platform="boss",
+                    platform_job_id=pc_job_id,
+                    title=pc_job.title,
+                    company_name=pc_job.company_name,
+                    salary_text=pc_job.salary_text,
+                    location=pc_job.location,
+                    recruiter_name=pc_job.recruiter_name,
+                    status=payload.outcome,
+                    decision="deliver" if step["shouldDeliver"] else "skip",
+                    reason=payload.error_message or _optional_text(payload.evidence.get("reason")),
+                    greeting_text=(
+                        _optional_text(payload.evidence.get("sentText"))
+                        if payload.outcome == "delivered"
+                        else None
+                    ) or step.get("greeting"),
+                    detail=f"Codex 手机投递运行 #{run_id}，岗位步骤 #{step_id}",
+                    applied_at=datetime.now(UTC),
+                    metadata={
+                        "source": "codex-phone",
+                        "runId": run_id,
+                        "stepId": step_id,
+                        "snapshotId": snapshot.get("pcSnapshotId"),
+                        "outcome": payload.outcome,
+                        "evidence": payload.evidence,
+                    },
+                ),
+                user_id=user_id,
+            )
+            if payload.outcome == "delivered":
+                job_repository.update_tracking(
+                    pc_job.id,
+                    {
+                        "has_communicated": True,
+                        "has_interview": pc_job.has_interview,
+                        "generated_greeting": step.get("greeting"),
+                        "resume_variant": pc_job.resume_variant,
+                        "generated_resume_id": pc_job.generated_resume_id,
+                        "resume_optimization": pc_job.resume_optimization,
+                    },
+                    user_id=user_id,
+                )
             return {"step": step, "run": repository.get_run(run_id, user_id=user_id)}
         except KeyError as error:
             raise HTTPException(status_code=404, detail="岗位步骤不存在") from error
@@ -369,6 +524,11 @@ def _string_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return [item.strip() for item in re.split(r"[,，|\n;/；]+", str(value or "")) if item.strip()]
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _matching_rules(repository: LibraryRepository, user_id: int) -> list[RiskRuleInput]:

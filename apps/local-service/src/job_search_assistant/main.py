@@ -106,6 +106,9 @@ def create_app(
             auth_repository,
             library_repository,
             knowledge_search,
+            job_repository,
+            delivery_repository,
+            resolved_greeting_generator,
         )
     )
     return application
