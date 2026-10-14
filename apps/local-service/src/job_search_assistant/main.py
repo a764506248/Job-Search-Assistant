@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import __version__
 from .api import create_router
 from .automation.browser_protocol import BrowserConnectionHub
+from .codex_delivery import CodexDeliveryRepository, create_codex_delivery_router
 from .config import settings
 from .knowledge import KnowledgeSearchService
 from .project_extraction import (
@@ -23,8 +24,8 @@ from .project_extraction import (
     ProjectExtractor,
 )
 from .repositories import (
-    AutomationRepository,
     AuthRepository,
+    AutomationRepository,
     ClientLogRepository,
     DeliveryRepository,
     JobRepository,
@@ -97,6 +98,14 @@ def create_app(
             automation_repository,
             resolved_browser_hub,
             auth_repository,
+        )
+    )
+    application.include_router(
+        create_codex_delivery_router(
+            CodexDeliveryRepository(resolved_database_path),
+            auth_repository,
+            library_repository,
+            knowledge_search,
         )
     )
     return application

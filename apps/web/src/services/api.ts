@@ -21,6 +21,7 @@ import type {
   SetupTestRunResult,
   StoredJob,
 } from '../types'
+import type { AgentKeyRecord, CodexDeliveryConfig, CodexDeliveryRun } from '../types/codex-delivery'
 
 export type AdminUser = {
   id: number
@@ -141,6 +142,18 @@ export const api = {
   updateRecord: (kind: string, id: number, name: string, data: Record<string, any>) => request<LibraryRecord>(`/v1/library/${kind}/${id}`, json('PUT', { name, data })),
   deleteRecord: (kind: string, id: number) => request<void>(`/v1/library/${kind}/${id}`, { method: 'DELETE' }),
   testModel: (id: number) => request<{ message: string; latencyMs: number }>(`/v1/library/models/${id}/test`, { method: 'POST' }),
+  agentKeys: () => request<{ items: AgentKeyRecord[] }>('/v1/agent-keys'),
+  createAgentKey: (name: string, expiresInDays = 90) => request<{ key: AgentKeyRecord; plaintext: string }>(
+    '/v1/agent-keys',
+    json('POST', { name, scopes: ['agent:read', 'agent:run'], expiresInDays }),
+  ),
+  revokeAgentKey: (id: number) => request<{ key: AgentKeyRecord }>(`/v1/agent-keys/${id}`, { method: 'DELETE' }),
+  codexDeliveryConfigs: () => request<{ items: CodexDeliveryConfig[] }>('/v1/codex-delivery/configs'),
+  saveCodexDeliveryConfig: (config: CodexDeliveryConfig) => config.id
+    ? request<CodexDeliveryConfig>(`/v1/codex-delivery/configs/${config.id}`, json('PUT', config))
+    : request<CodexDeliveryConfig>('/v1/codex-delivery/configs', json('POST', config)),
+  codexDeliveryRuns: () => request<{ items: CodexDeliveryRun[] }>('/v1/codex-delivery/runs'),
+  codexDeliveryRun: (id: number) => request<CodexDeliveryRun>(`/v1/codex-delivery/runs/${id}`),
   importResume: (file: File, modelRecordId?: number) => {
     const body = new FormData()
     body.append('file', file)
