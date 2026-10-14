@@ -74,6 +74,8 @@ export interface CapturedJob {
   skills: string[]
   recruiterName?: string
   recruiterTitle?: string
+  recruiterActiveText?: string
+  recruiterActivity?: 'online' | 'just_now' | 'today' | 'within_3_days' | 'this_week' | 'this_month' | 'older' | 'unknown'
   capturedAt: string
   source: 'dom' | 'page-state'
 }

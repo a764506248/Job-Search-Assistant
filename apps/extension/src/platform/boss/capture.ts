@@ -1,5 +1,6 @@
 import type { CapturedJob } from '@job-search-assistant/contracts'
 import { decodeBossSalaryText } from './salary'
+import { normalizeRecruiterActivity } from './recruiter-activity'
 
 export const CAPTURE_EVENT = '__job_search_assistant_boss_capture__'
 export const CAPTURE_DIAGNOSTIC_EVENT = '__job_search_assistant_boss_capture_diagnostic__'
@@ -40,6 +41,7 @@ const SELECTORS = {
   workAddress: ['.job-location .location-address', '.job-detail-box .location-address', '.location-address', '[class*="location-address"]'],
   recruiterName: ['.boss-info-attr .name', '.job-boss-info .name'],
   recruiterTitle: ['.boss-info-attr .boss-info-label', '.job-boss-info .boss-title'],
+  recruiterActiveText: ['.job-detail-box .job-boss-info .boss-active-time', '.job-boss-info .boss-active-time'],
   tags: ['.job-detail-info .tag-list li', '.job-detail-header ul li', '.job-detail-box .job-tags span', '.job-banner .info-primary p .text-desc', '.info-primary p .text-desc'],
   skills: ['.job-detail-section .job-tags span', '.job-detail-box .job-tags span'],
 } as const
@@ -274,6 +276,7 @@ export function captureBossJob(
   const decodedSalaryLabels = uniqueLabels
     .map(label => decodeBossSalaryText(label))
     .filter((label): label is string => Boolean(label))
+  const recruiterActiveText = text(document, SELECTORS.recruiterActiveText)
   return {
     platform: 'boss',
     platformJobId: id,
@@ -294,6 +297,8 @@ export function captureBossJob(
     skills: texts(document, SELECTORS.skills),
     recruiterName: text(document, SELECTORS.recruiterName),
     recruiterTitle: text(document, SELECTORS.recruiterTitle),
+    recruiterActiveText,
+    recruiterActivity: normalizeRecruiterActivity(recruiterActiveText ?? ''),
     capturedAt: capturedAt.toISOString(),
     source: 'dom',
   }

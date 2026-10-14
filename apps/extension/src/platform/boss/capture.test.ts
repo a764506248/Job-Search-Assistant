@@ -21,6 +21,7 @@ describe('captureBossJob', () => {
       </section>
       <section class="job-location"><div class="location-address">上海市浦东新区张江路 88 号</div></section>
       <section class="boss-info-attr"><span class="name">李女士</span><span class="boss-info-label">招聘经理</span></section>
+      <section class="job-detail-box"><div class="job-boss-info"><span class="boss-active-time">今日活跃</span></div></section>
     `
 
     const result = captureBossJob(
@@ -42,9 +43,23 @@ describe('captureBossJob', () => {
       skills: ['Vue', 'TypeScript'],
       recruiterName: '李女士',
       recruiterTitle: '招聘经理',
+      recruiterActiveText: '今日活跃',
+      recruiterActivity: 'today',
       capturedAt: '2026-09-28T08:00:00.000Z',
       source: 'dom',
     })
+  })
+
+  it('keeps missing recruiter activity unknown instead of guessing from the card', () => {
+    document.body.innerHTML = `
+      <article class="job-card-wrapper active" data-jobid="job-unknown"></article>
+      <section class="job-detail-info"><h1 class="job-name">AI 工程师</h1></section>
+      <section class="job-detail-company"><span class="company-name">示例公司</span></section>
+      <section class="job-detail-section"><div class="job-sec-text">负责 AI 应用开发</div></section>
+    `
+    expect(captureBossJob(document, {
+      href: 'https://www.zhipin.com/web/geek/jobs', pathname: '/web/geek/jobs',
+    })).toMatchObject({ recruiterActivity: 'unknown' })
   })
 
   it('uses the selected list card job id as a fallback', () => {

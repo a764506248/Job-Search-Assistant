@@ -32,11 +32,12 @@ describe('collectBossSearchJobs', () => {
       <section class="job-detail-info"><h1 class="job-name"></h1><span class="salary"></span></section>
       <section class="job-detail-company"><span class="company-name"></span></section>
       <section class="job-detail-section"><div class="job-sec-text"></div></section>
+      <section class="job-detail-box"><div class="job-boss-info"><span class="boss-active-time"></span></div></section>
     `
     const cards = Array.from(document.querySelectorAll<HTMLElement>('.job-card-wrapper'))
     const details = [
-      ['AI Agent 工程师', '甲公司', '负责 Agent、Python 与工作流平台研发'],
-      ['RAG 工程师', '乙公司', '负责 RAG 检索、重排与知识库平台研发'],
+      ['AI Agent 工程师', '甲公司', '负责 Agent、Python 与工作流平台研发', '刚刚活跃'],
+      ['RAG 工程师', '乙公司', '负责 RAG 检索、重排与知识库平台研发', '3日内活跃'],
     ] as const
     cards.forEach((card, index) => card.addEventListener('click', (event) => {
       event.preventDefault()
@@ -46,6 +47,7 @@ describe('collectBossSearchJobs', () => {
       document.querySelector<HTMLElement>('.job-detail-info .job-name')!.textContent = detail[0]
       document.querySelector<HTMLElement>('.job-detail-company .company-name')!.textContent = detail[1]
       document.querySelector<HTMLElement>('.job-detail-section .job-sec-text')!.textContent = detail[2]
+      document.querySelector<HTMLElement>('.boss-active-time')!.textContent = detail[3]
     }))
 
     const result = await collectBossSearchJobs(
@@ -57,6 +59,8 @@ describe('collectBossSearchJobs', () => {
     expect(result.jobs).toHaveLength(2)
     expect(result.jobs.map(job => job.platformJobId)).toEqual(['job-1', 'job-2'])
     expect(result.jobs.map(job => job.companyName)).toEqual(['甲公司', '乙公司'])
+    expect(result.jobs.map(job => job.recruiterActiveText)).toEqual(['刚刚活跃', '3日内活跃'])
+    expect(result.jobs.map(job => job.recruiterActivity)).toEqual(['just_now', 'within_3_days'])
     expect(result.jobs[1]!.url).toBe('https://www.zhipin.com/job_detail/job-2.html')
   })
 

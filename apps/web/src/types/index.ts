@@ -214,6 +214,8 @@ export interface StoredJob {
   skills: string[]
   recruiterName?: string
   recruiterTitle?: string
+  recruiterActiveText?: string | null
+  recruiterActivity: 'online' | 'just_now' | 'today' | 'within_3_days' | 'this_week' | 'this_month' | 'older' | 'unknown'
   capturedAt: string
   source: 'dom' | 'page-state' | 'manual'
   hasCommunicated: boolean

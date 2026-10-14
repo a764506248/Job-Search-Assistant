@@ -877,6 +877,8 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
                 "companyName": "示例公司",
                 "description": "负责 RAG 应用研发",
                 "skills": ["Python", "RAG"],
+                "recruiterActiveText": "今日活跃",
+                "recruiterActivity": "online",
                 "capturedAt": "2026-09-28T08:00:00Z",
                 "source": "dom",
             }
@@ -893,6 +895,8 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
             "experience": "5-10年",
             "education": "本科",
             "description": "负责 RAG 应用研发与 Agent 平台建设",
+            "recruiterActiveText": "3日内活跃",
+            "recruiterActivity": "online",
         }
     )
     second = client.post("/v1/jobs/capture", json=payload)
@@ -913,6 +917,8 @@ def test_capture_job_is_idempotent(tmp_path) -> None:
     assert item["experience"] == "5-10年"
     assert item["education"] == "本科"
     assert item["description"] == "负责 RAG 应用研发与 Agent 平台建设"
+    assert item["recruiterActiveText"] == "3日内活跃"
+    assert item["recruiterActivity"] == "within_3_days"
     snapshot_id = item["id"]
 
     deleted = client.delete(f"/v1/jobs/{snapshot_id}")

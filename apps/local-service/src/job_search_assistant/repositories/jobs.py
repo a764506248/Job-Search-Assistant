@@ -51,6 +51,8 @@ class JobRepository:
                     skills_json TEXT NOT NULL,
                     recruiter_name TEXT,
                     recruiter_title TEXT,
+                    recruiter_active_text TEXT,
+                    recruiter_activity TEXT NOT NULL DEFAULT 'unknown',
                     has_communicated INTEGER NOT NULL DEFAULT 0,
                     has_interview INTEGER NOT NULL DEFAULT 0,
                     generated_greeting TEXT,
@@ -75,6 +77,8 @@ class JobRepository:
             "resume_optimization": "TEXT",
             "company_size": "TEXT",
             "work_address": "TEXT",
+            "recruiter_active_text": "TEXT",
+            "recruiter_activity": "TEXT NOT NULL DEFAULT 'unknown'",
         }
         for name, definition in migrations.items():
             if name not in columns:
@@ -109,13 +113,14 @@ class JobRepository:
                     INSERT INTO job_postings (
                         user_id, platform, platform_job_id, url, title, company_name, company_size,
                         location, work_address, salary_text, experience, education, description,
-                        skills_json, recruiter_name, recruiter_title, captured_at,
+                        skills_json, recruiter_name, recruiter_title,
+                        recruiter_active_text, recruiter_activity, captured_at,
                         has_communicated, has_interview, generated_greeting,
                         resume_variant, generated_resume_id, resume_optimization,
                         source, content_hash
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     ON CONFLICT(user_id, platform, platform_job_id) DO UPDATE SET
                         url = excluded.url,
@@ -139,6 +144,8 @@ class JobRepository:
                         recruiter_title = COALESCE(
                             excluded.recruiter_title, job_postings.recruiter_title
                         ),
+                        recruiter_active_text = excluded.recruiter_active_text,
+                        recruiter_activity = excluded.recruiter_activity,
                         generated_greeting = CASE
                             WHEN excluded.content_hash != job_postings.content_hash
                                 THEN excluded.generated_greeting
@@ -169,6 +176,8 @@ class JobRepository:
                         json.dumps(job.skills, ensure_ascii=False),
                         job.recruiter_name,
                         job.recruiter_title,
+                        job.recruiter_active_text,
+                        job.recruiter_activity,
                         job.captured_at.isoformat(),
                         int(job.has_communicated),
                         int(job.has_interview),
@@ -245,11 +254,12 @@ class JobRepository:
                 INSERT INTO job_postings (
                     user_id, platform, platform_job_id, url, title, company_name, company_size,
                     location, work_address, salary_text, experience, education, description,
-                    skills_json, recruiter_name, recruiter_title, captured_at,
+                    skills_json, recruiter_name, recruiter_title,
+                    recruiter_active_text, recruiter_activity, captured_at,
                     has_communicated, has_interview, generated_greeting,
                     resume_variant, generated_resume_id, resume_optimization,
                     source, content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
                 """,
                 (
                     user_id,
@@ -268,6 +278,8 @@ class JobRepository:
                     json.dumps(job.skills, ensure_ascii=False),
                     job.recruiter_name,
                     job.recruiter_title,
+                    job.recruiter_active_text,
+                    job.recruiter_activity,
                     job.captured_at.isoformat(),
                     int(job.has_communicated),
                     int(job.has_interview),
@@ -460,6 +472,8 @@ class JobRepository:
             skills=json.loads(row["skills_json"]),
             recruiter_name=row["recruiter_name"],
             recruiter_title=row["recruiter_title"],
+            recruiter_active_text=row["recruiter_active_text"],
+            recruiter_activity=row["recruiter_activity"],
             has_communicated=bool(row["has_communicated"]),
             has_interview=bool(row["has_interview"]),
             generated_greeting=row["generated_greeting"],

@@ -36,6 +36,43 @@ def test_repository_upserts_changed_content_into_stable_job_snapshot(tmp_path) -
     assert repository.count() == 0
 
 
+def test_repository_saves_and_refreshes_recruiter_activity(tmp_path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+    first = CapturedJob.model_validate(
+        make_job().model_copy(update={"recruiter_active_text": "刚刚活跃"}).model_dump()
+    )
+    repository.save_many([first])
+    stored = repository.get_by_platform_job_id("boss", "job-123")
+    assert stored.recruiter_active_text == "刚刚活跃"
+    assert stored.recruiter_activity == "just_now"
+
+    refreshed = CapturedJob.model_validate(
+        make_job().model_copy(update={"recruiter_active_text": "3日内活跃"}).model_dump()
+    )
+    repository.save_many([refreshed])
+    stored = repository.get_by_platform_job_id("boss", "job-123")
+    assert stored.recruiter_active_text == "3日内活跃"
+    assert stored.recruiter_activity == "within_3_days"
+
+    repository.save_many([make_job()])
+    assert repository.get_by_platform_job_id("boss", "job-123").recruiter_activity == "unknown"
+
+
+def test_repository_adds_activity_columns_to_existing_database(tmp_path) -> None:
+    database_path = tmp_path / "jobs.sqlite3"
+    repository = JobRepository(database_path)
+    repository.save_many([make_job()])
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("ALTER TABLE job_postings DROP COLUMN recruiter_active_text")
+        connection.execute("ALTER TABLE job_postings DROP COLUMN recruiter_activity")
+
+    upgraded = JobRepository(database_path)
+    upgraded.initialize()
+    stored = upgraded.get_by_platform_job_id("boss", "job-123")
+    assert stored.recruiter_active_text is None
+    assert stored.recruiter_activity == "unknown"
+
+
 def test_repository_runs_schema_initialization_only_once(tmp_path, monkeypatch) -> None:
     calls = 0
     original = jobs_repository_module.recreate_index

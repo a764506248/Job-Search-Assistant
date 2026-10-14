@@ -5,6 +5,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+from .recruiter_activity import normalize_recruiter_activity
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(
@@ -296,6 +298,11 @@ class CapturedJob(ApiModel):
     skills: list[str] = Field(default_factory=list)
     recruiter_name: str | None = None
     recruiter_title: str | None = None
+    recruiter_active_text: str | None = Field(default=None, max_length=100)
+    recruiter_activity: Literal[
+        "online", "just_now", "today", "within_3_days", "this_week",
+        "this_month", "older", "unknown",
+    ] = "unknown"
     has_communicated: bool = False
     has_interview: bool = False
     generated_greeting: str | None = Field(default=None, max_length=2000)
@@ -304,6 +311,12 @@ class CapturedJob(ApiModel):
     resume_optimization: str | None = Field(default=None, max_length=5000)
     captured_at: datetime
     source: Literal["dom", "page-state", "manual"]
+
+    @model_validator(mode="after")
+    def normalize_activity(self) -> "CapturedJob":
+        self.recruiter_active_text = self.recruiter_active_text.strip() if self.recruiter_active_text else None
+        self.recruiter_activity = normalize_recruiter_activity(self.recruiter_active_text)
+        return self
 
 
 class ManualJobInput(ApiModel):
