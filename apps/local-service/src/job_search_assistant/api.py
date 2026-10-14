@@ -2918,7 +2918,8 @@ def create_router(
                         )
                     collection: BrowserActionResponse | None = None
                     collection_error: BrowserProtocolError | None = None
-                    for batch_attempt in range(1, COLLECTION_BATCH_RETRY_COUNT + 2):
+                    max_batch_attempts = COLLECTION_BATCH_RETRY_COUNT + 1
+                    for batch_attempt in range(1, max_batch_attempts + 1):
                         ensure_collection_active(run_id)
                         try:
                             collection = BrowserActionResponse.model_validate(
@@ -2938,13 +2939,20 @@ def create_router(
                                 )
                             )
                             ensure_collection_active(run_id)
-                            if (
+                            page_state = collection.evidence.get("pageState")
+                            page_not_ready = (
+                                batch_number == 1
+                                and collection.status != "success"
+                                and not collection.evidence.get("jobs")
+                                and page_state in {"loading", "ready"}
+                            )
+                            retryable_channel = (
                                 collection.status != "success"
                                 and is_retryable_collection_channel_error(
                                     collection.error or ""
                                 )
-                                and batch_attempt <= COLLECTION_BATCH_RETRY_COUNT
-                            ):
+                            )
+                            if (page_not_ready or retryable_channel) and batch_attempt < max_batch_attempts:
                                 automation_repository.append_event(
                                     run_id,
                                     "collection-batch-retrying",
@@ -2958,6 +2966,8 @@ def create_router(
                                     },
                                 )
                                 collection = None
+                                if page_not_ready:
+                                    await asyncio.sleep(1)
                                 continue
                             collection_error = None
                             break

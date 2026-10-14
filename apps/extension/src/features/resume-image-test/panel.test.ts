@@ -42,7 +42,7 @@ describe('browser control panel', () => {
     const hosts = document.querySelectorAll('#job-search-assistant-control-host')
     expect(hosts).toHaveLength(1)
     expect(hosts[0]?.shadowRoot?.textContent).toContain('自动投递控制台')
-    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.4.15')
+    expect(hosts[0]?.shadowRoot?.textContent).toContain('v0.4.31')
     expect(hosts[0]?.shadowRoot?.textContent).toContain('自动发送')
     expect(hosts[0]?.shadowRoot?.textContent).not.toContain('仅加载图片预览')
   })
@@ -72,6 +72,30 @@ describe('browser control panel', () => {
     }
     await Promise.resolve()
     expect(await readAutomationSettings()).toMatchObject({ resumeSendMode: 'off' })
+  })
+
+  it('waits for the first pairing handshake instead of asking for the code again', async () => {
+    let checks = 0
+    const sendMessage = vi.fn(async (message: { type: string }) => {
+      if (message.type === 'job-search-assistant:pair') return { ok: true }
+      checks += 1
+      return { connected: checks >= 4, protocolVersion: '1.0' }
+    })
+    vi.stubGlobal('browser', {
+      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      storage: { local: { get: vi.fn(async () => ({})), set: vi.fn() } },
+    })
+    mountBrowserControlPanel(document)
+    const shadow = document.querySelector('#job-search-assistant-control-host')?.shadowRoot
+    const code = shadow?.querySelector<HTMLInputElement>('#pair-code')
+    if (!code) throw new Error('pairing input missing')
+    code.value = '123456'
+    shadow?.querySelector<HTMLButtonElement>('.pair')?.click()
+    await vi.waitFor(() => {
+      expect(shadow?.querySelector('.status')?.classList.contains('ready')).toBe(true)
+    }, { timeout: 2000 })
+    expect(code.value).toBe('')
+    expect(sendMessage.mock.calls.filter(([message]) => message.type === 'job-search-assistant:pair')).toHaveLength(1)
   })
 
   it('drags the panel from its header but ignores header buttons', () => {

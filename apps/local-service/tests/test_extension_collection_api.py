@@ -321,6 +321,35 @@ class TimeoutOnceHub(FakeConnectedBrowserHub):
         )
 
 
+class FirstSearchLoadHub(FakeConnectedBrowserHub):
+    async def dispatch(
+        self,
+        *,
+        run_id: int,
+        user_id: int,
+        action: str,
+        payload: dict[str, object],
+        deadline_ms: int,
+    ) -> dict[str, object]:
+        if action == "collect_jobs" and not any(
+            call["action"] == "collect_jobs" for call in self.calls
+        ):
+            self.calls.append({
+                "runId": run_id, "action": action,
+                "payload": payload, "deadlineMs": deadline_ms,
+            })
+            return {
+                "requestId": f"collect-{run_id}-loading",
+                "status": "blocked",
+                "error": "搜索结果页加载超时，未检测到职位卡片",
+                "evidence": {"jobs": [], "pageState": "loading", "scrollPosition": 0},
+            }
+        return await super().dispatch(
+            run_id=run_id, user_id=user_id, action=action,
+            payload=payload, deadline_ms=deadline_ms,
+        )
+
+
 class BackForwardCacheOnceHub(FakeConnectedBrowserHub):
     def __init__(self, jobs: list[dict[str, object]]) -> None:
         super().__init__(jobs)
@@ -889,6 +918,22 @@ def test_collection_retries_a_transient_batch_timeout(tmp_path) -> None:
         event for event in events if event["eventType"] == "collection-batch-retrying"
     )
     assert retry_event["payload"]["attempt"] == 2
+
+
+def test_first_collection_waits_for_search_cards_after_loading(tmp_path) -> None:
+    hub = FirstSearchLoadHub([captured_job("first-job", "首批公司")])
+    client = collection_client(tmp_path, hub)
+    created = create_pending_run(client, target_count=1)
+
+    run = client.get(f"/v1/automation/runs/{created['id']}").json()
+    collection = run["configSnapshot"]["collection"]
+    collect_calls = [call for call in hub.calls if call["action"] == "collect_jobs"]
+    assert collection["status"] == "ready"
+    assert collection["collectedCount"] == 1
+    assert len(collect_calls) == 2
+    assert collect_calls[1]["payload"]["scrollPosition"] == 0
+    events = client.get(f"/v1/automation/runs/{created['id']}/events").json()["items"]
+    assert any(event["eventType"] == "collection-batch-retrying" for event in events)
 
 
 def test_collection_retries_a_back_forward_cache_channel_closure(tmp_path) -> None:

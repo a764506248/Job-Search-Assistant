@@ -1,6 +1,6 @@
 [project]
 name = "job-search-assistant-local"
-version = "0.4.30"
+version = "0.4.31"
 description = "Local-first knowledge and decision service for Job Search Assistant"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"

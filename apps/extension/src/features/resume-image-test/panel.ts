@@ -83,7 +83,7 @@ export function mountBrowserControlPanel(doc: Document): void {
   if (doc.getElementById(HOST_ID)) return
   const host = doc.createElement('div')
   host.id = HOST_ID
-  host.dataset.version = '0.4.15'
+  host.dataset.version = '0.4.31'
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
     <style>
@@ -114,7 +114,7 @@ export function mountBrowserControlPanel(doc: Document): void {
     </style>
     <section class="panel">
       <header class="top">
-        <div class="brand"><strong>自动投递控制台</strong><span>JOB SEARCH ASSISTANT · v0.4.15</span></div>
+        <div class="brand"><strong>自动投递控制台</strong><span>JOB SEARCH ASSISTANT · v0.4.31</span></div>
         <button class="toggle" title="折叠" aria-label="折叠">−</button>
       </header>
       <div class="body">
@@ -191,8 +191,17 @@ export function mountBrowserControlPanel(doc: Document): void {
     statusText.textContent = '正在连接…'
     try {
       await browser.runtime.sendMessage({ type: 'job-search-assistant:pair', code: value, serviceUrl: serviceUrl.value })
-      await new Promise(resolve => setTimeout(resolve, 500))
-      await refreshStatus()
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline) {
+        const result = await browser.runtime.sendMessage({ type: 'job-search-assistant:connection-status' }) as { connected: boolean }
+        if (result.connected) {
+          code.value = ''
+          await refreshStatus()
+          return
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      statusText.textContent = '连接仍在进行中，请稍候；配对码已提交，无需重复输入'
     }
     catch (error) { statusText.textContent = error instanceof Error ? error.message : String(error) }
     finally { pair.disabled = false }

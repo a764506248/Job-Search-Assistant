@@ -41,29 +41,37 @@ export default defineBackground(() => {
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let keepaliveTimer: ReturnType<typeof setInterval> | undefined
   let retryMs = 1000
+  let connectionReady = false
+  let connectionGeneration = 0
 
   const connect = async () => {
     if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
+    const generation = connectionGeneration
     const stored = await browser.storage.local.get([TOKEN_KEY, PAIRING_CODE_KEY, SERVICE_URL_KEY])
+    if (generation !== connectionGeneration || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
     const token = typeof stored[TOKEN_KEY] === 'string' ? stored[TOKEN_KEY] : ''
     const pairingCode = typeof stored[PAIRING_CODE_KEY] === 'string' ? stored[PAIRING_CODE_KEY] : ''
     const serviceUrl = normalizeServiceUrl(stored[SERVICE_URL_KEY])
     if (!token && !pairingCode) return
-    socket = new WebSocket(websocketUrl(serviceUrl))
-    socket.addEventListener('open', () => {
-      socket?.send(JSON.stringify({
+    const currentSocket = new WebSocket(websocketUrl(serviceUrl))
+    socket = currentSocket
+    connectionReady = false
+    currentSocket.addEventListener('open', () => {
+      if (socket !== currentSocket) return
+      currentSocket.send(JSON.stringify({
         type: 'hello', token, pairingCode,
         protocolVersion: BROWSER_PROTOCOL_VERSION,
         extensionVersion: browser.runtime.getManifest().version,
       }))
       if (keepaliveTimer) clearInterval(keepaliveTimer)
       keepaliveTimer = setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'keepalive', sentAt: Date.now() }))
+        if (socket === currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+          currentSocket.send(JSON.stringify({ type: 'keepalive', sentAt: Date.now() }))
         }
       }, 20_000)
     })
     socket.addEventListener('message', async (event) => {
+      if (socket !== currentSocket) return
       const message: unknown = JSON.parse(String(event.data))
       if (isPairedMessage(message)) {
         await browser.storage.local.set({ [TOKEN_KEY]: message.token })
@@ -72,19 +80,23 @@ export default defineBackground(() => {
         return
       }
       if (isReadyMessage(message)) {
+        connectionReady = true
         retryMs = 1000
         return
       }
       if (!isBrowserActionEnvelope(message)) return
       const result = await executeBrowserAction(message)
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(result))
+      if (socket === currentSocket && currentSocket.readyState === WebSocket.OPEN) currentSocket.send(JSON.stringify(result))
     })
-    socket.addEventListener('close', scheduleReconnect)
-    socket.addEventListener('error', () => socket?.close())
+    currentSocket.addEventListener('close', () => {
+      if (socket === currentSocket) scheduleReconnect()
+    })
+    currentSocket.addEventListener('error', () => currentSocket.close())
   }
 
   const scheduleReconnect = () => {
     socket = undefined
+    connectionReady = false
     if (keepaliveTimer) clearInterval(keepaliveTimer)
     keepaliveTimer = undefined
     if (reconnectTimer) clearTimeout(reconnectTimer)
@@ -95,15 +107,23 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener(async (message: unknown) => {
     if (isDefaultResumeImageRequest(message)) return fetchDefaultResumeImage()
     if (isPairingRequest(message)) {
-      return browser.storage.local
-        .set({ [PAIRING_CODE_KEY]: message.code, [SERVICE_URL_KEY]: normalizeServiceUrl(message.serviceUrl) })
-        .then(() => browser.storage.local.remove(TOKEN_KEY))
-        .then(() => { socket?.close(); return connect() })
-        .then(() => ({ ok: true }))
+      connectionGeneration += 1
+      await browser.storage.local.set({ [PAIRING_CODE_KEY]: message.code, [SERVICE_URL_KEY]: normalizeServiceUrl(message.serviceUrl) })
+      await browser.storage.local.remove(TOKEN_KEY)
+      const previousSocket = socket
+      socket = undefined
+      connectionReady = false
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+      if (keepaliveTimer) clearInterval(keepaliveTimer)
+      keepaliveTimer = undefined
+      previousSocket?.close()
+      await connect()
+      return { ok: true }
     }
     if (isConnectionStatusRequest(message)) {
       return {
-        connected: socket?.readyState === WebSocket.OPEN,
+        connected: connectionReady && socket?.readyState === WebSocket.OPEN,
         protocolVersion: BROWSER_PROTOCOL_VERSION,
         serviceUrl: normalizeServiceUrl((await browser.storage.local.get(SERVICE_URL_KEY))[SERVICE_URL_KEY]),
       }
