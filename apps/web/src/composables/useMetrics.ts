@@ -186,6 +186,7 @@ export function useMetrics() {
       skipped: '已跳过',
       blocked: '被规则拦截',
       fatal_limit: '触发上限',
+      uncertain: '结果待核实',
     }
     const counters = new Map<string, number>()
     for (const record of deliveries.value) {
@@ -242,4 +243,5 @@ export const deliveryStatusText: Record<string, string> = {
   skipped: '已跳过',
   blocked: '被拦截',
   fatal_limit: '触发上限',
+  uncertain: '结果待核实',
 }

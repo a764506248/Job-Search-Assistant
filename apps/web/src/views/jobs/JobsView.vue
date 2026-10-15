@@ -73,7 +73,7 @@
           <td><div class="job-greeting-cell"><span :class="['greeting-status', { ready: Boolean(job.generatedGreeting) }]">{{ job.generatedGreeting ? '已生成' : '未生成' }}</span><p class="job-greeting-preview" :title="job.generatedGreeting || '当前快照尚未生成问候语'">{{ job.generatedGreeting || '当前快照尚未生成问候语' }}</p></div></td>
           <td><div class="snapshot-outcomes"><span :class="job.hasCommunicated ? 'outcome-positive' : ''">{{ job.hasCommunicated ? '已沟通' : '未沟通' }}</span><span :class="job.hasInterview ? 'outcome-positive' : ''">{{ job.hasInterview ? '有面试' : '无面试' }}</span><small>{{ job.resumeVariant === 'optimized' ? '优化简历' : '默认简历' }}</small></div></td>
           <td><time>{{ formatTime(job.capturedAt) }}</time><br><small>{{ sourceLabel(job.source) }}</small></td>
-          <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="router.push({ name: 'analysis', query: { jobId: job.id } })">分析</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
+          <td><div class="row-actions"><a-button type="primary" ghost size="small" @click="openDetail(job)">查看详情</a-button><a-button size="small" @click="router.push({ name: 'analysis', query: { jobId: job.id } })">分析</a-button><a-button size="small" @click="editTracking(job)">跟进</a-button><a-button size="small" :loading="matchingId === job.id" @click="runMatch(job)">自动匹配</a-button><a-button v-if="job.source !== 'codex-phone'" size="small" :href="job.url" target="_blank">打开</a-button><a-button size="small" danger @click="confirmDelete(job)">删除</a-button></div></td>
         </tr></tbody>
       </table></div>
       <div v-if="total" class="snapshot-pagination"><a-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-size-changer="true" :page-size-options="['10', '20', '50', '100']" show-quick-jumper :show-total="(value: number) => `共 ${value} 条职位快照`" @change="changePage" @show-size-change="changePageSize" /></div>
@@ -124,7 +124,7 @@ const resumePreviewSections = computed(() => materialPreview.value ? [
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`
 const strategyLabel = (value: string) => ({ custom: '定制简历 + 定制问候语', default: '默认简历 + 默认问候语', blocked: '不投递' } as Record<string, string>)[value] || value
 const jobTags = (job: StoredJob) => [job.experience, job.education, ...(job.skills || []).slice(0, 4)].filter(Boolean) as string[]
-const sourceLabel = (source: StoredJob['source']) => ({ dom: '页面采集', 'page-state': '页面数据', manual: '手动添加' })[source]
+const sourceLabel = (source: StoredJob['source']) => ({ dom: '页面采集', 'page-state': '页面数据', manual: '手动添加', 'codex-phone': 'Codex 手机采集' })[source]
 
 function resetForm() { Object.assign(form, emptyForm()) }
 async function createJob() {

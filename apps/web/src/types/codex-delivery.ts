@@ -50,6 +50,7 @@ export type AgentKeyRecord = {
 
 export type CodexDeliveryRun = {
   id: number
+  configSnapshot: CodexDeliveryConfig
   status: string
   currentStage: string
   currentSourceTab: string | null
@@ -80,6 +81,9 @@ export type CodexDeliveryStep = {
   decisionReasons: string[]
   greeting: string | null
   status: string
+  currentAction: string
+  matchedRules: string[]
+  riskFlags: string[]
   evidence: Record<string, any> | null
   errorMessage: string | null
 }

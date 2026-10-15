@@ -68,11 +68,12 @@ POST /v1/agent/runs/{runId}/jobs/{stepId}/prepare
 {
   "platformJobId":"...",
   "observedTitle":"详情页当前岗位标题",
-  "observedCompanyName":"详情页当前公司名称"
+  "observedCompanyName":"详情页当前公司名称",
+  "userConfirmed":true
 }
 ```
 
-只有响应状态为 `opening_chat` 才能发送。核对不通过时停止该岗位，不要发送。
+只有响应状态为 `opening_chat` 才能发送。`confirmationMode=per_job` 时，只有取得本岗位用户明确确认后才能传 `userConfirmed=true`；自动模式可省略。核对不通过时停止该岗位，不要发送。
 
 结果：
 
@@ -82,12 +83,19 @@ POST /v1/agent/runs/{runId}/jobs/{stepId}/result
 {
   "outcome":"delivered|skipped|failed|uncertain",
   "idempotencyKey":"run-{runId}-job-{platformJobId}-send-v1",
-  "evidence":{"messageVisible":true},
+  "evidence":{
+    "messageVisible":true,
+    "inputMethod":"first_common_phrase",
+    "sentText":"手机当前会话中实际发送的完整文案",
+    "resumeOutcome":"sent|failed|not_available",
+    "resumeVisible":true,
+    "resumeError":null
+  },
   "errorMessage":null
 }
 ```
 
-`delivered` 必须有 `messageVisible=true` 的已发送页面证据。结果接口同步写入 PC 端投递记录；确认发送后职位快照显示“已沟通”。发送结果不可确认时用 `uncertain`，不能将其记为成功或自动再次发送。同一运行一次只允许一个尚未结束的岗位。
+`delivered` 必须有 `messageVisible=true` 的已发送页面证据。`inputMethod` 按实际方式填写 `pua_type_text`、`universal_clipboard` 或 `first_common_phrase`，`sentText` 填实际全文；使用第一条常用语时不能填 PC 端生成的问候语。配置要求发送简历时还必须报告 `resumeOutcome`；只有 `sent` 需要 `resumeVisible=true`。结果接口同步写入 PC 端投递记录；确认发送后职位快照显示“已沟通”。发送结果不可确认时用 `uncertain`，不能将其记为成功或自动再次发送。同一运行一次只允许一个尚未结束的岗位。非终态结果后，打开下一岗位前至少等待配置的 `intervalSeconds`。
 
 ## 控制与状态
 

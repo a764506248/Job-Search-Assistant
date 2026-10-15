@@ -234,6 +234,13 @@ class CodexDeliveryRepository:
         now = datetime.now(UTC).isoformat()
         values = self._config_values(payload)
         with db_connect(self.database_path) as connection:
+            if config_id is not None:
+                owned = connection.execute(
+                    "SELECT 1 FROM codex_delivery_configs WHERE id = ? AND user_id = ?",
+                    (config_id, user_id),
+                ).fetchone()
+                if owned is None:
+                    raise KeyError(config_id)
             if payload["is_default"]:
                 connection.execute(
                     "UPDATE codex_delivery_configs SET is_default = 0 WHERE user_id = ?",
@@ -325,13 +332,14 @@ class CodexDeliveryRepository:
             run_id = int(cursor.lastrowid)
         return self.get_run(run_id, user_id=user_id)
 
-    def list_runs(self, user_id: int) -> list[dict[str, Any]]:
+    def list_runs(self, user_id: int, *, limit: int = 20) -> list[dict[str, Any]]:
         self.initialize()
+        limit = max(1, min(limit, 20))
         with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT * FROM codex_delivery_runs WHERE user_id = ? ORDER BY id DESC",
-                (user_id,),
+                "SELECT * FROM codex_delivery_runs WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+                (user_id, limit),
             ).fetchall()
         return [self._run_row(row) for row in rows]
 
@@ -348,8 +356,9 @@ class CodexDeliveryRepository:
             result = self._run_row(row)
             if include_steps:
                 steps = connection.execute(
-                    "SELECT * FROM codex_delivery_job_steps WHERE run_id = ? ORDER BY id",
-                    (run_id,),
+                    """SELECT * FROM codex_delivery_job_steps
+                    WHERE run_id = ? AND user_id = ? ORDER BY id""",
+                    (run_id, user_id),
                 ).fetchall()
                 result["steps"] = [self._step_row(step) for step in steps]
             return result
@@ -365,7 +374,7 @@ class CodexDeliveryRepository:
         run = self._assert_running(run_id, user_id)
         self.initialize()
         now = datetime.now(UTC).isoformat()
-        created = False
+        duplicate = False
         with db_connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute(
@@ -394,9 +403,10 @@ class CodexDeliveryRepository:
                 if duplicate is None and table_exists(connection, "delivery_records"):
                     duplicate = connection.execute(
                         """SELECT 1 FROM delivery_records
-                        WHERE user_id = ? AND platform = 'boss' AND platform_job_id = ?
+                        WHERE user_id = ? AND platform = 'boss'
+                        AND platform_job_id IN (?, ?)
                         AND status IN ('delivered', 'greeting_sent') LIMIT 1""",
-                        (user_id, platform_job_id),
+                        (user_id, platform_job_id, f"codex-phone:{platform_job_id}"),
                     ).fetchone()
                 initial_status = "skipped" if duplicate else "discovered"
                 initial_action = "next_job" if duplicate else "capture"
@@ -434,10 +444,18 @@ class CodexDeliveryRepository:
                         user_id,
                     ),
                 )
-                created = not bool(duplicate)
+                duplicate = bool(duplicate)
+                if duplicate and run["scannedCount"] + 1 >= run["configSnapshot"]["maxScanCount"]:
+                    connection.execute(
+                        """UPDATE codex_delivery_runs SET status = 'stopped',
+                        current_stage = 'finished', stop_reason = 'scan_limit_reached',
+                        finished_at = ?, updated_at = ? WHERE id = ? AND user_id = ?""",
+                        (now, now, run_id, user_id),
+                    )
             else:
                 step_id = int(row["id"])
-        return self.get_step(step_id, user_id=user_id), created
+                duplicate = row["status"] in TERMINAL_JOB_STATES
+        return self.get_step(step_id, user_id=user_id), duplicate
 
     def capture_job(
         self, user_id: int, run_id: int, step_id: int, snapshot: dict[str, Any]
@@ -463,6 +481,23 @@ class CodexDeliveryRepository:
                 )
         return self.get_step(step_id, user_id=user_id)
 
+    def link_job_snapshot(
+        self, user_id: int, run_id: int, step_id: int, snapshot_id: int
+    ) -> dict[str, Any]:
+        step = self.get_step(step_id, user_id=user_id)
+        if step["runId"] != run_id or step["status"] != "captured":
+            raise ValueError("岗位未采集，不能关联职位快照")
+        snapshot = dict(step["snapshot"] or {})
+        snapshot["pcSnapshotId"] = snapshot_id
+        now = datetime.now(UTC).isoformat()
+        with db_connect(self.database_path) as connection:
+            connection.execute(
+                """UPDATE codex_delivery_job_steps SET snapshot_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?""",
+                (self._json(snapshot), now, step_id, user_id),
+            )
+        return self.get_step(step_id, user_id=user_id)
+
     def prepare_job(
         self,
         user_id: int,
@@ -471,6 +506,7 @@ class CodexDeliveryRepository:
         platform_job_id: str,
         observed_title: str,
         observed_company_name: str,
+        user_confirmed: bool,
     ) -> dict[str, Any]:
         self._assert_running(run_id, user_id)
         step = self.get_step(step_id, user_id=user_id)
@@ -489,6 +525,9 @@ class CodexDeliveryRepository:
         )
         if expected != observed:
             raise ValueError("岗位详情与快照身份不一致，不能发送")
+        run = self.get_run(run_id, user_id=user_id)
+        if run["configSnapshot"].get("confirmationMode") == "per_job" and not user_confirmed:
+            raise ValueError("当前配置要求每岗确认，尚未取得本岗位用户确认")
         now = datetime.now(UTC).isoformat()
         with db_connect(self.database_path) as connection:
             connection.execute(
@@ -599,6 +638,20 @@ class CodexDeliveryRepository:
                 raise ValueError("发送前必须核对岗位详情")
             if evidence.get("messageVisible") is not True:
                 raise ValueError("缺少可验证的问候语已发送证据")
+            if evidence.get("inputMethod") not in {
+                "pua_type_text",
+                "universal_clipboard",
+                "first_common_phrase",
+            }:
+                raise ValueError("缺少有效的问候语输入方式证据")
+            if not str(evidence.get("sentText") or "").strip():
+                raise ValueError("缺少实际发送的完整问候语")
+            if run["configSnapshot"].get("sendResume"):
+                resume_outcome = evidence.get("resumeOutcome")
+                if resume_outcome not in {"sent", "failed", "not_available"}:
+                    raise ValueError("当前计划要求发送简历，缺少简历处理结果")
+                if resume_outcome == "sent" and evidence.get("resumeVisible") is not True:
+                    raise ValueError("缺少简历已发送的可见证据")
         elif outcome == "skipped" and step["status"] not in {"rejected", "eligible"}:
             raise ValueError("只有已分析的岗位可以跳过")
         elif outcome in {"failed", "uncertain"} and step["status"] not in {
@@ -684,7 +737,11 @@ class CodexDeliveryRepository:
     def finish_run(
         self, run_id: int, user_id: int, status: str, reason: str | None
     ) -> dict[str, Any]:
-        self.get_run(run_id, user_id=user_id)
+        run = self.get_run(run_id, user_id=user_id)
+        if run["status"] not in {"running", "paused"}:
+            raise ValueError(f"运行当前状态为 {run['status']}，不能再次结束")
+        if status == "completed" and run["deliveredCount"] < run["targetDeliveryCount"]:
+            raise ValueError("成功投递数未达到目标，不能标记为已完成")
         now = datetime.now(UTC).isoformat()
         with db_connect(self.database_path) as connection:
             connection.execute(

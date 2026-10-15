@@ -6,6 +6,21 @@
 
 > 产品功能示意图已经过去敏与动漫化处理；其中人物、简历、文件名和模型信息均为虚构内容，不对应真实用户或企业。
 
+## 选择你的投递方式
+
+本项目现在提供两条互不影响的流程。第一次使用建议先选一种，不要同时运行：
+
+| 你更看重什么 | 推荐入口 | 使用方式 |
+| --- | --- | --- |
+| 批量采集、网页集中确认、浏览器自动执行 | [网页自动投递](#整体流程) | Chrome 扩展 + 管理后台 |
+| 读取 BOSS 手机端更新岗位、逐个核对 JD、根据本人资料生成问候语并留下完整记录 | [iPhone + Codex 精准单岗投递](docs/CODEX_IPHONE_DELIVERY_GUIDE.md) | 真实 iPhone + Codex + Agent Key |
+
+![iPhone + Codex 精准单岗投递流程](docs/assets/codex-delivery/iphone-codex-delivery-overview.png)
+
+手机流程是新增的独立入口，不会改动或接管原来的网页自动投递任务。它更适合希望优先查看“推荐 / 附近 / 最新”岗位、逐岗判断硬性条件，并确认每条发送结果的用户。开始前需要先安装 [iPhone Use](https://github.com/zhongerxin/iPhone-use)，再按照[手机精准投递使用指南](docs/CODEX_IPHONE_DELIVERY_GUIDE.md)完成连接、配置和首次目标 1 的安全试投。
+
+供 Codex 执行这条流程的项目 Skill 已随仓库提供：[`boss-codex-delivery`](.agents/skills/boss-codex-delivery/SKILL.md)。其他用户可以从 GitHub 路径 `.agents/skills/boss-codex-delivery` 安装，不需要复制项目内部代码。
+
 ## 许可证
 
 本项目以 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供源码：允许个人学习、研究、实验、修改和其他非商业用途，也可在保留许可证的前提下分发；**不允许商业使用**。
@@ -43,6 +58,8 @@
 - [数据模型与接口约定](docs/DATA_MODEL.md)
 - [一键安装与自动投递产品化路线图](docs/PRODUCTIZATION_ROADMAP.md)
 - [自动投递技术设计与阶段交付](docs/AUTOMATION_TECHNICAL_DESIGN.md)
+- [iPhone + Codex 精准单岗投递（用户指南）](docs/CODEX_IPHONE_DELIVERY_GUIDE.md)
+- [BOSS Codex 单岗投递 Skill](.agents/skills/boss-codex-delivery/SKILL.md)
 
 ## 产品化路线图
 

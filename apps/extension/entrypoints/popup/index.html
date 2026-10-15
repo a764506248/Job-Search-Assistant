@@ -11,8 +11,17 @@
       <p class="eyebrow">JOB SEARCH ASSISTANT</p>
       <h1>自动投递扩展</h1>
       <p id="status" class="status">正在检查本地连接…</p>
+      <form id="pair-form" class="pairing">
+        <label for="service-url">服务地址（本地或线上域名）</label>
+        <input id="service-url" name="service-url" type="url" inputmode="url" required placeholder="http://127.0.0.1:8765" autocomplete="url">
+        <label for="pair-code">本地后台显示的 6 位配对码</label>
+        <div class="pair-row">
+          <input id="pair-code" name="pair-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autocomplete="off">
+          <button id="pair" type="submit">连接</button>
+        </div>
+      </form>
       <button id="open-console" type="button">打开 BOSS 页面控制台</button>
-      <p class="hint">配对、问候语和简历图片策略已合并到 BOSS 页面右下角的悬浮控制台。</p>
+      <p class="hint">在这里完成配对；问候语和简历图片策略可在 BOSS 页面的控制台查看。</p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

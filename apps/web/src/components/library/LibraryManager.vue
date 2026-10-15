@@ -3,6 +3,45 @@
     <section class="panel form-panel">
       <div class="panel-heading"><div><p class="eyebrow">{{ eyebrow }}</p><h2>{{ formTitle }}</h2></div></div>
       <form class="data-form" @submit.prevent="save">
+        <template v-if="kind === 'models'">
+          <label>服务商
+            <select v-model="form.data.provider" @change="changeModelProvider">
+              <option v-for="(preset, key) in modelPresets" :key="key" :value="key">{{ preset.label }}</option>
+              <option v-for="provider in customProviders" :key="provider.value" :value="provider.value">{{ provider.label }}</option>
+            </select>
+          </label>
+          <label v-if="selectedModelPreset">模型
+            <select v-model="modelChoice" @change="changeModelChoice">
+              <option v-for="model in selectedModelPreset.models" :key="model.value" :value="model.value">{{ model.label }}</option>
+              <option value="custom">自定义模型 ID…</option>
+            </select>
+          </label>
+          <label v-if="!selectedModelPreset || modelChoice === 'custom'">模型 ID
+            <input v-model.trim="form.data.modelId" required placeholder="填写服务商公布的模型 ID" />
+          </label>
+          <label>API Key
+            <input v-model.trim="form.data.apiKey" type="password" :required="!editingId" autocomplete="new-password" placeholder="粘贴服务商提供的 API Key" />
+          </label>
+          <label v-if="!selectedModelPreset">API Base URL
+            <input v-model.trim="form.data.baseUrl" type="url" required placeholder="https://example.com/v1" />
+          </label>
+          <p v-if="selectedModelPreset" class="form-note">默认使用 {{ selectedModelPreset.baseUrl }}；通常只需填写 API Key。</p>
+          <details class="model-advanced">
+            <summary>高级设置：名称、调用角色和 API 地址</summary>
+            <label>名称<input v-model.trim="form.name" :placeholder="`${form.data.provider} · ${form.data.modelId}`" /></label>
+            <label>调用角色
+              <select v-model="form.data.usageRole">
+                <option value="primary">主模型</option>
+                <option value="fallback">兜底模型</option>
+                <option value="available">普通备用模型</option>
+              </select>
+            </label>
+            <label v-if="selectedModelPreset">API Base URL
+              <input v-model.trim="form.data.baseUrl" type="url" required placeholder="https://example.com/v1" />
+            </label>
+          </details>
+        </template>
+        <template v-else>
         <label>名称<input v-model.trim="form.name" required :placeholder="namePlaceholder" /></label>
         <label v-for="field in fields" :key="field.key">
           {{ field.label }}
@@ -19,6 +58,7 @@
             :placeholder="field.placeholder"
           />
         </label>
+        </template>
         <p v-if="note" class="form-note">{{ note }}</p>
         <div class="form-actions">
           <a-button type="primary" html-type="submit" :loading="saving">{{ editingId ? '保存修改' : submitLabel }}</a-button>
@@ -83,10 +123,11 @@
 
 <script setup lang="ts">
 import { Modal, message } from 'ant-design-vue'
-import { onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
 import type { LibraryRecord } from '../../types'
+import { customProviders, modelPresets } from '../../views/library/model-presets'
 
 export interface FieldOption { label: string; value: string }
 export interface FieldDefinition {
@@ -122,6 +163,19 @@ const confirmingId = ref<number | null>(null)
 const modelStatuses = reactive<Record<number, { ok: boolean; text: string }>>({})
 const previewUrls = reactive<Record<number, string>>({})
 const form = reactive<{ name: string; data: Record<string, any> }>({ name: '', data: {} })
+const modelChoice = ref('')
+const selectedModelPreset = computed(() => modelPresets[String(form.data.provider)])
+
+function changeModelProvider() {
+  const preset = selectedModelPreset.value
+  form.data.modelId = preset?.models[0]?.value || ''
+  form.data.baseUrl = preset?.baseUrl || ''
+  modelChoice.value = preset?.models[0]?.value || 'custom'
+}
+
+function changeModelChoice() {
+  form.data.modelId = modelChoice.value === 'custom' ? '' : modelChoice.value
+}
 
 function clearPreviewUrls() {
   Object.entries(previewUrls).forEach(([id, url]) => {
@@ -143,6 +197,15 @@ async function loadResumePreviews(items: LibraryRecord[]) {
 }
 
 function defaults() {
+  if (props.kind === 'models') {
+    return {
+      provider: 'DeepSeek',
+      modelId: modelPresets.DeepSeek.models[0].value,
+      baseUrl: modelPresets.DeepSeek.baseUrl,
+      apiKey: '',
+      usageRole: 'available',
+    }
+  }
   return Object.fromEntries(props.fields.map((field) => [field.key, field.defaultValue || '']))
 }
 
@@ -150,6 +213,7 @@ function resetForm() {
   editingId.value = null
   form.name = ''
   form.data = defaults()
+  modelChoice.value = props.kind === 'models' ? String(form.data.modelId) : ''
 }
 
 async function reload() {
@@ -167,8 +231,9 @@ async function save() {
   try {
     const data = { ...form.data }
     if (props.kind === 'models' && editingId.value && !data.apiKey) delete data.apiKey
-    if (editingId.value) await api.updateRecord(props.kind, editingId.value, form.name, data)
-    else await api.createRecord(props.kind, form.name, data)
+    const name = props.kind === 'models' ? (form.name || `${data.provider} · ${data.modelId}`) : form.name
+    if (editingId.value) await api.updateRecord(props.kind, editingId.value, name, data)
+    else await api.createRecord(props.kind, name, data)
     resetForm()
     await reload()
     message.success('数据已保存')
@@ -180,6 +245,12 @@ function edit(record: LibraryRecord) {
   editingId.value = record.id
   form.name = record.name
   form.data = { ...defaults(), ...record.data, ...(props.kind === 'models' ? { apiKey: '' } : {}) }
+  if (props.kind === 'models') {
+    const preset = selectedModelPreset.value
+    modelChoice.value = preset?.models.some(model => model.value === form.data.modelId)
+      ? String(form.data.modelId)
+      : 'custom'
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 

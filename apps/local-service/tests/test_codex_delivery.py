@@ -1,8 +1,12 @@
 from conftest import authenticate
 from fastapi.testclient import TestClient
 
+from job_search_assistant.codex_delivery.eligibility import (
+    education_block_reason,
+    incomplete_title_reason,
+    missing_linux_evidence_reason,
+)
 from job_search_assistant.main import create_app
-from job_search_assistant.codex_delivery.eligibility import education_block_reason
 
 
 def config_payload(**overrides: object) -> dict:
@@ -45,6 +49,14 @@ def config_payload(**overrides: object) -> dict:
 
 def agent_headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
+
+
+def delivered_evidence(text: str = "您好，希望进一步沟通。") -> dict:
+    return {
+        "messageVisible": True,
+        "inputMethod": "pua_type_text",
+        "sentText": text,
+    }
 
 
 def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
@@ -94,6 +106,13 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
     )
     assert capture.status_code == 200
     step_id = capture.json()["id"]
+    same_active = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/check",
+        json={"platformJobId": "boss-1001", "sourceTab": "最新"},
+        headers=headers,
+    )
+    assert same_active.status_code == 200
+    assert same_active.json()["duplicate"] is False
 
     analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step_id}/analyze", headers=headers)
     assert analyzed.status_code == 200
@@ -143,7 +162,7 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
         json={
             "outcome": "delivered",
             "idempotencyKey": "delivery-boss-1001",
-            "evidence": {"messageVisible": True},
+            "evidence": delivered_evidence(),
         },
         headers=headers,
     )
@@ -156,7 +175,7 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
         json={
             "outcome": "delivered",
             "idempotencyKey": "delivery-boss-1001",
-            "evidence": {"messageVisible": True},
+            "evidence": delivered_evidence(),
         },
         headers=headers,
     )
@@ -231,6 +250,44 @@ def test_codex_configs_keys_and_runs_are_isolated_per_user(tmp_path) -> None:
     )
 
 
+def test_run_list_shows_only_latest_20_for_current_user(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    run_ids = [
+        client.post("/v1/agent/runs", json={}, headers=agent_headers(key)).json()["id"]
+        for _ in range(22)
+    ]
+    listed = client.get("/v1/codex-delivery/runs").json()["items"]
+    assert [run["id"] for run in listed] == list(reversed(run_ids[-20:]))
+    assert client.get(f"/v1/codex-delivery/runs/{run_ids[0]}").status_code == 200
+
+
+def test_other_user_config_update_cannot_change_own_default_or_select_foreign_resume(
+    tmp_path,
+) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    first_config = client.post("/v1/codex-delivery/configs", json=config_payload()).json()
+    resume = client.post(
+        "/v1/library/resumes", json={"name": "首个用户简历", "data": {"content": "测试"}}
+    ).json()
+
+    authenticate(client, "codex-isolation-second", "password123")
+    own_config = client.post("/v1/codex-delivery/configs", json=config_payload()).json()
+    forbidden = client.put(
+        f"/v1/codex-delivery/configs/{first_config['id']}",
+        json=config_payload(name="越权设默认", isDefault=True),
+    )
+    assert forbidden.status_code == 404
+    assert client.get("/v1/codex-delivery/configs").json()["items"][0]["id"] == own_config["id"]
+    assert (
+        client.post(
+            "/v1/codex-delivery/configs", json=config_payload(resumeId=resume["id"])
+        ).status_code
+        == 422
+    )
+
+
 def test_uncertain_result_stops_run_without_recording_delivery(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     client.post("/v1/codex-delivery/configs", json=config_payload())
@@ -295,23 +352,363 @@ def test_education_requirement_blocks_delivery_despite_high_similarity(tmp_path)
         },
         headers=headers,
     ).json()
-    analyzed = client.post(
-        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers
-    )
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
     assert analyzed.status_code == 200
     assert analyzed.json()["shouldDeliver"] is False
     assert analyzed.json()["match"]["decision"]["shouldDeliver"] is False
-    assert any("硕士" in reason and "本科" in reason for reason in analyzed.json()["decisionReasons"])
+    assert any(
+        "硕士" in reason and "本科" in reason for reason in analyzed.json()["decisionReasons"]
+    )
 
 
 def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> None:
     profile = {"educations": [{"degree": "本科"}]}
-    assert education_block_reason(
-        {"education": "本科", "description": "硕士优先"}, profile
-    ) is None
-    assert education_block_reason(
-        {"description": "本科及以上学历，硕士优先"}, profile
-    ) is None
-    assert education_block_reason(
-        {"education": "硕士", "description": "负责 Agent 开发"}, profile
-    ) == "岗位要求硕士及以上学历，个人档案为本科"
+    assert education_block_reason({"education": "本科", "description": "硕士优先"}, profile) is None
+    assert education_block_reason({"description": "本科及以上学历，硕士优先"}, profile) is None
+    assert (
+        education_block_reason({"education": "硕士", "description": "负责 Agent 开发"}, profile)
+        == "岗位要求硕士及以上学历，个人档案为本科"
+    )
+
+
+def test_incomplete_phone_title_cannot_be_sent() -> None:
+    assert incomplete_title_reason({"title": "AI 智能体工程师（医疗方向"})
+    assert incomplete_title_reason({"title": "AI Agent 工程师..."})
+    assert incomplete_title_reason({"title": "AI Agent 工程师（医疗方向）"}) is None
+
+
+def test_required_linux_experience_needs_user_evidence() -> None:
+    snapshot = {"description": "任职要求：有Linux环境使用经验，熟悉Python。"}
+    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "RAG"]}])
+    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "Linux"]}]) is None
+    assert missing_linux_evidence_reason({"description": "有Linux环境使用经验者优先。"}, []) is None
+
+
+def test_required_linux_gap_blocks_codex_delivery_even_with_high_similarity(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.put("/v1/profile", json={"data": {"summary": "有 Python Agent 与 RAG 项目经验"}})
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "linux-required",
+            "snapshot": {
+                "title": "AI Agent 工程师",
+                "companyName": "示例科技",
+                "description": "负责 Agent 和 RAG 开发。任职要求：有Linux环境使用经验。",
+                "skills": ["Python", "RAG"],
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("Linux" in reason for reason in analyzed.json()["decisionReasons"])
+
+
+def test_codex_flow_blocks_below_matching_threshold(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.post(
+        "/v1/codex-delivery/configs",
+        json=config_payload(minimumScore=100, minimumCustomizationConfidence=100),
+    )
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "weak-evidence",
+            "snapshot": {
+                "title": "Go 工程师",
+                "companyName": "示例公司",
+                "description": "负责 Go 后端开发",
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("阈值" in reason for reason in analyzed.json()["decisionReasons"])
+
+
+def test_phone_flow_reuses_pc_snapshot_greeting_and_delivery_records(tmp_path) -> None:
+    generated_greeting = "您好，我做过真实的 Python Agent 项目，期待交流岗位需求。"
+
+    class GreetingSpy:
+        def __init__(self) -> None:
+            self.contexts: list[dict] = []
+
+        def generate(self, context: dict, model_record_id=None, *, user_id: int = 1) -> dict:
+            self.contexts.append(context)
+            return {"greeting": generated_greeting}
+
+    greeting_generator = GreetingSpy()
+    client = TestClient(
+        create_app(tmp_path / "jobs.sqlite3", greeting_generator=greeting_generator)
+    )
+    client.put(
+        "/v1/profile",
+        json={"data": {"education": "学历：本科", "summary": "有真实 Python Agent 项目"}},
+    )
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "visible-fingerprint-1",
+            "snapshot": {
+                "title": "Python Agent 工程师",
+                "companyName": "测试科技",
+                "description": "负责 Python Agent 开发，要求本科及以上学历。",
+                "education": "本科",
+                "skills": ["Python", "Agent"],
+            },
+        },
+        headers=headers,
+    ).json()
+    snapshot_id = step["snapshot"]["pcSnapshotId"]
+    jobs = client.get("/v1/jobs").json()["items"]
+    assert any(job["id"] == snapshot_id and job["source"] == "codex-phone" for job in jobs)
+
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
+    assert analyzed.json()["greeting"] == generated_greeting
+    assert greeting_generator.contexts[0]["profile"]["education"] == "学历：本科"
+    assert greeting_generator.contexts[0]["job"]["title"] == "Python Agent 工程师"
+    saved_job = next(
+        job for job in client.get("/v1/jobs").json()["items"] if job["id"] == snapshot_id
+    )
+    assert saved_job["generatedGreeting"] == analyzed.json()["greeting"]
+
+    prepared = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
+        json={
+            "platformJobId": "visible-fingerprint-1",
+            "observedTitle": "Python Agent 工程师",
+            "observedCompanyName": "测试科技",
+        },
+        headers=headers,
+    )
+    assert prepared.status_code == 200
+    result = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/result",
+        json={
+            "outcome": "delivered",
+            "idempotencyKey": "phone-flow-greeting-sent-1",
+            "evidence": {
+                "messageVisible": True,
+                "inputMethod": "first_common_phrase",
+                "sentText": "您好，我对这个岗位很感兴趣，期待与您沟通。",
+            },
+        },
+        headers=headers,
+    )
+    assert result.status_code == 200
+    saved_job = next(
+        job for job in client.get("/v1/jobs").json()["items"] if job["id"] == snapshot_id
+    )
+    assert saved_job["hasCommunicated"] is True
+    delivery = client.get("/v1/deliveries").json()["items"][0]
+    assert delivery["status"] == "delivered"
+    assert delivery["greetingText"] == "您好，我对这个岗位很感兴趣，期待与您沟通。"
+    assert delivery["metadata"]["source"] == "codex-phone"
+    assert delivery["metadata"]["evidence"]["inputMethod"] == "first_common_phrase"
+
+
+def test_per_job_confirmation_finish_and_resume_evidence_are_enforced(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    resume = client.post(
+        "/v1/library/resumes", json={"name": "指定简历", "data": {"content": "Python"}}
+    ).json()
+    client.post(
+        "/v1/codex-delivery/configs",
+        json=config_payload(
+            targetDeliveryCount=2,
+            confirmationMode="per_job",
+            resumeId=resume["id"],
+            sendResume=True,
+        ),
+    )
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "per-job-1",
+            "snapshot": {
+                "title": "Python 工程师",
+                "companyName": "示例公司",
+                "description": "负责 Python 后端开发",
+            },
+        },
+        headers=headers,
+    ).json()
+    client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    identity = {
+        "platformJobId": "per-job-1",
+        "observedTitle": "Python 工程师",
+        "observedCompanyName": "示例公司",
+    }
+    assert (
+        client.post(
+            f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
+            json=identity,
+            headers=headers,
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
+            json={**identity, "userConfirmed": True},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/v1/agent/runs/{run_id}/jobs/{step['id']}/result",
+            json={
+                "outcome": "delivered",
+                "idempotencyKey": "per-job-result-1",
+                "evidence": delivered_evidence(),
+            },
+            headers=headers,
+        ).status_code
+        == 409
+    )
+    result = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/result",
+        json={
+            "outcome": "delivered",
+            "idempotencyKey": "per-job-result-1",
+            "evidence": {**delivered_evidence(), "resumeOutcome": "not_available"},
+        },
+        headers=headers,
+    )
+    assert result.status_code == 200
+    assert result.json()["run"]["status"] == "running"
+    assert (
+        client.post(
+            f"/v1/agent/runs/{run_id}/finish",
+            json={"status": "completed", "reason": "提前完成"},
+            headers=headers,
+        ).status_code
+        == 409
+    )
+    stopped = client.post(
+        f"/v1/agent/runs/{run_id}/finish",
+        json={"status": "stopped", "reason": "测试结束"},
+        headers=headers,
+    )
+    assert stopped.status_code == 200
+
+
+def test_historical_codex_delivery_is_duplicate_and_stops_at_scan_limit(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    config = client.post(
+        "/v1/codex-delivery/configs",
+        json=config_payload(targetDeliveryCount=1, maxScanCount=1),
+    ).json()
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    first_run = client.post(
+        "/v1/agent/runs", json={"configId": config["id"]}, headers=headers
+    ).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{first_run}/jobs/capture",
+        json={
+            "platformJobId": "history-1",
+            "snapshot": {
+                "title": "Python 工程师",
+                "companyName": "历史公司",
+                "description": "负责 Python 开发",
+            },
+        },
+        headers=headers,
+    ).json()
+    client.post(f"/v1/agent/runs/{first_run}/jobs/{step['id']}/analyze", headers=headers)
+    client.post(
+        f"/v1/agent/runs/{first_run}/jobs/{step['id']}/prepare",
+        json={
+            "platformJobId": "history-1",
+            "observedTitle": "Python 工程师",
+            "observedCompanyName": "历史公司",
+        },
+        headers=headers,
+    )
+    assert (
+        client.post(
+            f"/v1/agent/runs/{first_run}/jobs/{step['id']}/result",
+            json={
+                "outcome": "delivered",
+                "idempotencyKey": "history-result-1",
+                "evidence": delivered_evidence(),
+            },
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    second_run = client.post(
+        "/v1/agent/runs", json={"configId": config["id"]}, headers=headers
+    ).json()["id"]
+    duplicate = client.post(
+        f"/v1/agent/runs/{second_run}/jobs/check",
+        json={"platformJobId": "history-1"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    run = client.get(f"/v1/agent/runs/{second_run}", headers=headers).json()
+    assert run["status"] == "stopped"
+    assert run["stopReason"] == "scan_limit_reached"
+
+
+def test_only_selected_resume_is_used_for_hard_evidence_and_greeting(tmp_path) -> None:
+    class GreetingSpy:
+        def __init__(self) -> None:
+            self.context: dict | None = None
+
+        def generate(self, context: dict, model_record_id=None, *, user_id: int = 1) -> dict:
+            self.context = context
+            return {"greeting": "您好，希望沟通。"}
+
+    spy = GreetingSpy()
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3", greeting_generator=spy))
+    selected = client.post(
+        "/v1/library/resumes", json={"name": "指定简历", "data": {"content": "Python Agent"}}
+    ).json()
+    client.post(
+        "/v1/library/resumes", json={"name": "其他简历", "data": {"content": "熟练使用 Linux"}}
+    )
+    client.post("/v1/codex-delivery/configs", json=config_payload(resumeId=selected["id"]))
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "selected-resume-1",
+            "snapshot": {
+                "title": "Agent 工程师",
+                "companyName": "示例公司",
+                "description": "负责 Agent 开发，任职要求：有 Linux 环境使用经验。",
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("Linux" in reason for reason in analyzed.json()["decisionReasons"])
+    assert spy.context is not None
+    assert spy.context["selectedResume"]["id"] == selected["id"]

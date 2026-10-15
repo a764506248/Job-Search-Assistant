@@ -91,6 +91,7 @@ class JobPrepareInput(ApiModel):
     platform_job_id: str = Field(min_length=1, max_length=300)
     observed_title: str = Field(min_length=1, max_length=300)
     observed_company_name: str = Field(min_length=1, max_length=300)
+    user_confirmed: bool = False
 
 
 class JobResultInput(ApiModel):

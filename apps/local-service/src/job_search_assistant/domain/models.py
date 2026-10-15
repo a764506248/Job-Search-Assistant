@@ -310,11 +310,13 @@ class CapturedJob(ApiModel):
     generated_resume_id: int | None = None
     resume_optimization: str | None = Field(default=None, max_length=5000)
     captured_at: datetime
-    source: Literal["dom", "page-state", "manual"]
+    source: Literal["dom", "page-state", "manual", "codex-phone"]
 
     @model_validator(mode="after")
     def normalize_activity(self) -> "CapturedJob":
-        self.recruiter_active_text = self.recruiter_active_text.strip() if self.recruiter_active_text else None
+        self.recruiter_active_text = (
+            self.recruiter_active_text.strip() if self.recruiter_active_text else None
+        )
         self.recruiter_activity = normalize_recruiter_activity(self.recruiter_active_text)
         return self
 
@@ -381,7 +383,8 @@ class DeliveryRecordInput(ApiModel):
     location: str | None = Field(default=None, max_length=200)
     recruiter_name: str | None = Field(default=None, max_length=200)
     status: Literal[
-        "delivered", "greeting_sent", "failed", "skipped", "blocked", "fatal_limit"
+        "delivered", "greeting_sent", "failed", "skipped", "blocked", "fatal_limit",
+        "uncertain",
     ]
     decision: str | None = Field(default=None, max_length=50)
     reason: str | None = Field(default=None, max_length=2000)

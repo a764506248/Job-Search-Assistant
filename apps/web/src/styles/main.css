@@ -137,6 +137,9 @@ td small { color: var(--muted); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-actions { display: flex; gap: 8px; }
 .form-note { margin: -4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.model-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
+.model-advanced summary { color: var(--brand-deep); cursor: pointer; font-size: 12px; font-weight: 700; }
+.model-advanced[open] { display: grid; gap: 12px; }
 .guidance { padding: 25px; background: #edf6f1; border-color: #d0e6dc; }
 .guidance-mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: white; margin-bottom: 18px; }
 .guidance h3 { margin-bottom: 8px; }
