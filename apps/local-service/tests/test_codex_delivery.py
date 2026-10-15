@@ -52,15 +52,18 @@ def agent_headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
-def delivered_evidence(text: str = "您好，希望进一步沟通。") -> dict:
+def delivered_evidence(
+    text: str = "您好，希望进一步沟通。", input_method: str = "pua_type_text"
+) -> dict:
     return {
         "messageVisible": True,
-        "inputMethod": "pua_type_text",
+        "inputMethod": input_method,
         "sentText": text,
     }
 
 
-def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
+@pytest.mark.parametrize("input_method", ["pua_type_text", "wda_keys"])
+def test_agent_key_config_and_single_job_run_are_isolated(tmp_path, input_method: str) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
 
     config = client.post("/v1/codex-delivery/configs", json=config_payload())
@@ -89,7 +92,7 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
 
     snapshot = {
         "title": "Python 后端工程师",
-        "companyName": "示例科技",
+        "companyName": "示例科技股份有限公司",
         "description": "负责 Python 服务端开发和 API 设计",
         "skills": ["Python", "FastAPI"],
         "salaryText": "20-30K",
@@ -139,6 +142,18 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
     )
     assert mismatched.status_code == 409
 
+    different_company = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step_id}/prepare",
+        json={
+            "platformJobId": "boss-1001",
+            "observedTitle": "Python 后端工程师",
+            "observedCompanyName": "示例科技服务有限公司",
+        },
+        headers=headers,
+    )
+    assert different_company.status_code == 409
+    assert "公司名称" in different_company.json()["detail"]
+
     prepare = client.post(
         f"/v1/agent/runs/{run_id}/jobs/{step_id}/prepare",
         json={
@@ -163,7 +178,7 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
         json={
             "outcome": "delivered",
             "idempotencyKey": "delivery-boss-1001",
-            "evidence": delivered_evidence(),
+            "evidence": delivered_evidence(input_method=input_method),
         },
         headers=headers,
     )
@@ -176,7 +191,7 @@ def test_agent_key_config_and_single_job_run_are_isolated(tmp_path) -> None:
         json={
             "outcome": "delivered",
             "idempotencyKey": "delivery-boss-1001",
-            "evidence": delivered_evidence(),
+            "evidence": delivered_evidence(input_method=input_method),
         },
         headers=headers,
     )

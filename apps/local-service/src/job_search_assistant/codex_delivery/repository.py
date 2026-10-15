@@ -516,15 +516,19 @@ class CodexDeliveryRepository:
         expected = (
             step["platformJobId"],
             self._normalize_identity(snapshot.get("title")),
-            self._normalize_identity(snapshot.get("companyName")),
+            self._normalize_company_identity(snapshot.get("companyName")),
         )
         observed = (
             platform_job_id,
             self._normalize_identity(observed_title),
-            self._normalize_identity(observed_company_name),
+            self._normalize_company_identity(observed_company_name),
         )
-        if expected != observed:
-            raise ValueError("岗位详情与快照身份不一致，不能发送")
+        if expected[0] != observed[0]:
+            raise ValueError("岗位标识与快照不一致，不能发送")
+        if expected[1] != observed[1]:
+            raise ValueError("岗位标题与快照不一致，不能发送")
+        if expected[2] != observed[2]:
+            raise ValueError("公司名称与快照不一致，不能发送")
         run = self.get_run(run_id, user_id=user_id)
         if run["configSnapshot"].get("confirmationMode") == "per_job" and not user_confirmed:
             raise ValueError("当前配置要求每岗确认，尚未取得本岗位用户确认")
@@ -640,6 +644,7 @@ class CodexDeliveryRepository:
                 raise ValueError("缺少可验证的问候语已发送证据")
             if evidence.get("inputMethod") not in {
                 "pua_type_text",
+                "wda_keys",
                 "universal_clipboard",
                 "first_common_phrase",
             }:
@@ -770,6 +775,14 @@ class CodexDeliveryRepository:
     @staticmethod
     def _normalize_identity(value: object) -> str:
         return "".join(str(value or "").casefold().split())
+
+    @classmethod
+    def _normalize_company_identity(cls, value: object) -> str:
+        name = cls._normalize_identity(value)
+        for suffix in ("股份有限公司", "有限责任公司", "有限公司", "股份公司"):
+            if name.endswith(suffix) and len(name) > len(suffix):
+                return name[: -len(suffix)]
+        return name
 
     @staticmethod
     def _key_hash(value: str) -> str:
