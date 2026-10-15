@@ -1,3 +1,4 @@
+import pytest
 from conftest import authenticate
 from fastapi.testclient import TestClient
 
@@ -357,6 +358,114 @@ def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> No
     assert education_block_reason(
         {"education": "硕士", "description": "负责 Agent 开发"}, profile
     ) == "岗位要求硕士及以上学历，个人档案为本科"
+
+
+@pytest.mark.parametrize(
+    ("profile", "resume_data", "required", "expected"),
+    [
+        ({}, {"rawText": "教育经历\n北京城市学院｜计算机科学与技术·本科｜2012—2016"}, "本科", None),
+        (
+            {},
+            {"rawText": "教育背景\n北京城市学院｜本科\n工作经历\n指导硕士项目"},
+            "硕士",
+            "岗位要求硕士及以上学历，所选简历为本科",
+        ),
+        ({}, {"educations": [{"degree": "本科"}]}, "本科", None),
+        ({}, {"education": "本科"}, "硕士", "岗位要求硕士及以上学历，所选简历为本科"),
+        (
+            {"education": "本科"},
+            {"education": "硕士"},
+            "硕士",
+            "岗位要求硕士及以上学历，个人档案为本科",
+        ),
+        (
+            {},
+            {"rawText": "项目经历\n硕士招聘系统开发"},
+            "本科",
+            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历",
+        ),
+        (
+            {},
+            {"confirmationStatus": "pending", "education": "本科"},
+            "本科",
+            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历",
+        ),
+    ],
+)
+def test_education_gate_uses_selected_resume_only_when_profile_missing(
+    profile, resume_data, required, expected
+) -> None:
+    assert (
+        education_block_reason({"education": required}, profile, {"data": resume_data}) == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("required", "select_resume", "should_deliver"),
+    [("本科", True, True), ("硕士", True, False), ("本科", False, False)],
+)
+def test_analyze_uses_run_selected_resume_education(
+    tmp_path, required, select_resume, should_deliver
+) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.put("/v1/profile", json={"data": {"summary": "真实 Python Agent 项目"}})
+    resume = client.post(
+        "/v1/library/resumes",
+        json={
+            "name": "本次选中简历",
+            "data": {"rawText": "教育经历\n北京城市学院｜计算机科学与技术·本科｜2012—2016"},
+        },
+    ).json()
+    other_resume = client.post(
+        "/v1/library/resumes",
+        json={"name": "其他简历", "data": {"education": "博士"}},
+    ).json()
+    config = client.post(
+        "/v1/codex-delivery/configs",
+        json=config_payload(resumeId=resume["id"] if select_resume else None),
+    ).json()
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    # Later config edits must not change the resume selected by this run.
+    client.put(
+        f"/v1/codex-delivery/configs/{config['id']}",
+        json=config_payload(resumeId=other_resume["id"]),
+    )
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "resume-education-fallback",
+            "snapshot": {
+                "title": "Python Agent 工程师",
+                "companyName": "示例科技",
+                "description": "负责 Python Agent 开发",
+                "education": required,
+                "skills": ["Python", "Agent"],
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is should_deliver
+    assert analyzed.json()["match"]["decision"]["shouldDeliver"] is should_deliver
+    if required == "硕士":
+        assert "岗位要求硕士及以上学历，所选简历为本科" in analyzed.json()["decisionReasons"]
+    prepared = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
+        json={
+            "platformJobId": "resume-education-fallback",
+            "observedTitle": "Python Agent 工程师",
+            "observedCompanyName": "示例科技",
+        },
+        headers=headers,
+    )
+    assert prepared.status_code == (200 if should_deliver else 409)
+    if should_deliver:
+        assert prepared.json()["status"] == "opening_chat"
+    # Fallback is read-only; it must not silently rewrite the user's profile.
+    assert "education" not in client.get("/v1/agent/context", headers=headers).json()["profile"]
 
 
 def test_incomplete_phone_title_cannot_be_sent() -> None:

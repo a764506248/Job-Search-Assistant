@@ -337,15 +337,16 @@ def create_codex_delivery_router(
             evidence,
         )
         profile = library_repository.get_profile(user_id=user_id)
-        materials = [
-            profile,
-            library_repository.list("projects", user_id=user_id),
-            library_repository.list("resumes", user_id=user_id),
-        ]
+        resumes = library_repository.list("resumes", user_id=user_id)
+        selected_resume = next(
+            (item for item in resumes if item["id"] == run["configSnapshot"].get("resumeId")),
+            None,
+        )
+        materials = [profile, library_repository.list("projects", user_id=user_id), resumes]
         block_reasons = [
             reason
             for reason in (
-                education_block_reason(snapshot, profile),
+                education_block_reason(snapshot, profile, selected_resume),
                 incomplete_title_reason(snapshot),
                 missing_linux_evidence_reason(snapshot, materials),
             )
