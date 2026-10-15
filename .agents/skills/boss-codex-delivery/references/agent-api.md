@@ -12,7 +12,10 @@ Content-Type: application/json
 1. `GET /v1/agent/me`：验证 Key 与当前用户。
 2. `GET /v1/agent/context`：读取档案、项目、简历、规则和求职目标。
 3. `GET /v1/agent/configs/default`：读取筛选及投递计划。
-4. `POST /v1/agent/runs`，body 为 `{}` 或 `{ "configId": 1 }`：创建运行。
+4. 展示前三个只读接口返回的执行方案、资料依据及手机入口，等待用户明确确认。确认前不创建运行，也不开始手机导航或筛选；完整确认要求见 [SKILL.md](../SKILL.md#启动与授权)。
+5. 用户确认且手机 READY 后，`POST /v1/agent/runs`，body 为 `{}` 或 `{ "configId": 1 }`：创建运行。
+
+`jobIntentions` 不是手机搜索词，`sourceTabs` 指定首页来源页签。例如 `["最新"]` 对应首页「最新 → 筛选」，不对应搜索结果「最新优先」。搜索路径需要用户另行明确要求并确认。
 
 ## 单岗循环
 
@@ -58,7 +61,9 @@ POST /v1/agent/runs/{runId}/jobs/capture
 POST /v1/agent/runs/{runId}/jobs/{stepId}/analyze
 ```
 
-读取响应中的 `shouldDeliver`、`decisionReasons`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中。Skill 采用召回优先策略：行业、业务场景和岗位方向大致相近即可倾向投递，不因技能、年限或材料表述不完全一致再增加额外否决；接口明确返回 `shouldDeliver=false` 时仍按接口结果跳过。
+读取响应中的 `shouldDeliver`、`decisionReasons`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中。结合 JD 的主要职责判断整体相关性，不要求全部技能、工具、年限或加分项逐条匹配；明确禁投规则及真实且不可协商的条件冲突仍需遵守。选岗时先看可见名称，优先相关岗位，略过明显跨行业/职责无关项，详见 [选岗与相关性判断](../SKILL.md#选岗与相关性判断)。
+
+资料遗漏造成的误判与真实不匹配分开报告。此判断策略不改变 API 状态机：`shouldDeliver=false` 时不能自行发送，`prepare` 仍必须返回 `opening_chat`；仅修改 Skill 不会自动修复或改变后端判定逻辑。
 
 发送前二次核对：
 

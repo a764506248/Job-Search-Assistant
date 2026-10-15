@@ -339,16 +339,16 @@ def create_codex_delivery_router(
         projects = library_repository.list("projects", user_id=user_id)
         resumes = library_repository.list("resumes", user_id=user_id)
         selected_resume_id = run["configSnapshot"].get("resumeId")
-        selected_resumes = (
-            [item for item in resumes if item.get("id") == selected_resume_id]
-            if selected_resume_id is not None
-            else []
+        selected_resume = next(
+            (item for item in resumes if item.get("id") == selected_resume_id),
+            None,
         )
+        selected_resumes = [selected_resume] if selected_resume is not None else []
         materials = [profile, projects, selected_resumes]
         block_reasons = [
             reason
             for reason in (
-                education_block_reason(snapshot, profile),
+                education_block_reason(snapshot, profile, selected_resume),
                 incomplete_title_reason(snapshot),
                 missing_linux_evidence_reason(snapshot, materials),
             )

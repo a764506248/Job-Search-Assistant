@@ -45,26 +45,69 @@ def _required_degree(snapshot: dict[str, Any]) -> int | None:
     return max(hard_ranks, default=None)
 
 
-def education_block_reason(snapshot: dict[str, Any], profile: dict[str, Any]) -> str | None:
+def _profile_degree_rank(profile: dict[str, Any]) -> int | None:
+    entries = profile.get("educations") or []
+    values = [item.get("degree") for item in entries if isinstance(item, dict)]
+    values.extend(item.get("content") for item in entries if isinstance(item, dict))
+    values.append(profile.get("education"))
+    return max(
+        (rank for value in values if (rank := _degree_rank(value)) is not None),
+        default=None,
+    )
+
+
+def _resume_degree_rank(resume: dict[str, Any]) -> int | None:
+    data = resume.get("data") or {}
+    if data.get("confirmationStatus") == "pending":
+        return None
+    structured = _profile_degree_rank(data)
+    if structured is not None:
+        return structured
+
+    # Only inspect education sections, not project/JD text mentioning other degrees.
+    raw_text = str(data.get("rawText") or "").replace("\r\n", "\n")
+    sections = re.split(
+        r"(?im)^[ \t]*(教育经历|教育背景|教育信息|education(?:[ \t]+background)?)"
+        r"[ \t]*[：:]?[ \t]*$",
+        raw_text,
+    )
+    ranks = []
+    for section in sections[2::2]:
+        education = re.split(
+            r"(?im)^[ \t]*(?:工作经历|工作经验|项目经历|项目经验|项目实践|个人优势|"
+            r"专业技能|技术栈|技能清单|自我评价|求职意向|work experience|"
+            r"professional experience|projects|skills|summary)[ \t]*[：:]?[ \t]*$",
+            section,
+            maxsplit=1,
+        )[0]
+        if (rank := _degree_rank(education)) is not None:
+            ranks.append(rank)
+    return max(ranks, default=None)
+
+
+def education_block_reason(
+    snapshot: dict[str, Any],
+    profile: dict[str, Any],
+    selected_resume: dict[str, Any] | None = None,
+) -> str | None:
     required = _required_degree(snapshot)
     if required is None:
         return None
 
-    entries = profile.get("educations") or []
-    values = [item.get("degree") for item in entries if isinstance(item, dict)]
-    values.append(profile.get("education"))
-    actual = max(
-        (rank for value in values if (rank := _degree_rank(value)) is not None),
-        default=None,
-    )
+    actual = _profile_degree_rank(profile)
+    source = "个人档案"
+    if actual is None and selected_resume is not None:
+        actual = _resume_degree_rank(selected_resume)
+        source = "所选简历"
     if actual is not None and actual >= required:
         return None
 
     required_label = next(label for label, rank in _DEGREE_RANK.items() if rank == required)
     if actual is None:
-        return f"岗位要求{required_label}及以上学历，但个人档案未填写可核验学历"
+        sources = "个人档案和所选简历均" if selected_resume is not None else "个人档案"
+        return f"岗位要求{required_label}及以上学历，但{sources}未填写可核验学历"
     actual_label = next(label for label, rank in _DEGREE_RANK.items() if rank == actual)
-    return f"岗位要求{required_label}及以上学历，个人档案为{actual_label}"
+    return f"岗位要求{required_label}及以上学历，{source}为{actual_label}"
 
 
 def incomplete_title_reason(snapshot: dict[str, Any]) -> str | None:
