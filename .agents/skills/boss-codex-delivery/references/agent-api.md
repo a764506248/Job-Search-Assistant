@@ -58,7 +58,7 @@ POST /v1/agent/runs/{runId}/jobs/capture
 POST /v1/agent/runs/{runId}/jobs/{stepId}/analyze
 ```
 
-读取响应中的 `shouldDeliver`、`decisionReasons`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中；学历等硬条件不符时即使文本相似度高也不得投递。
+读取响应中的 `shouldDeliver`、`decisionReasons`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中。Skill 采用召回优先策略：行业、业务场景和岗位方向大致相近即可倾向投递，不因技能、年限或材料表述不完全一致再增加额外否决；接口明确返回 `shouldDeliver=false` 时仍按接口结果跳过。
 
 发送前二次核对：
 
