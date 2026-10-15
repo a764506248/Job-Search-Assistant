@@ -25,7 +25,7 @@ describe('extension popup pairing', () => {
     })
     const createTab = vi.fn()
     vi.stubGlobal('browser', {
-      runtime: { sendMessage, getManifest: () => ({ version: '0.4.33' }) },
+      runtime: { sendMessage, getManifest: () => ({ version: '0.4.34' }) },
       storage: { local: { get: vi.fn(async () => ({ browserServiceUrl: 'http://127.0.0.1:8765' })) } },
       tabs: { create: createTab },
     })
@@ -40,14 +40,14 @@ describe('extension popup pairing', () => {
       type: 'job-search-assistant:pair', code: '123456', serviceUrl: 'https://example.com',
     })
     expect(createTab).not.toHaveBeenCalled()
-    expect(document.querySelector('#extension-version')?.textContent).toBe('v0.4.33')
+    expect(document.querySelector('#extension-version')?.textContent).toBe('v0.4.34')
     expect(document.querySelector('#status')?.textContent).toContain('已连接')
   })
 
   it('does not submit an invalid code or service address', async () => {
     const sendMessage = vi.fn().mockResolvedValue({ connected: false, protocolVersion: '1.0' })
     vi.stubGlobal('browser', {
-      runtime: { sendMessage, getManifest: () => ({ version: '0.4.33' }) },
+      runtime: { sendMessage, getManifest: () => ({ version: '0.4.34' }) },
       storage: { local: { get: vi.fn(async () => ({})) } },
     })
     await import('../entrypoints/popup/main')
