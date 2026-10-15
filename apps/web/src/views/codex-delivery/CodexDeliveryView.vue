@@ -113,7 +113,7 @@
         <span>保存后可通过 Agent Key 选择方案；历史任务保留创建时的配置快照。</span>
       </div>
 
-      <div class="field-grid">
+      <div class="field-grid config-fields">
         <label class="wide">配置名称<input v-model.trim="config.name" required /></label>
         <label class="choice wide"><input v-model="config.isDefault" type="checkbox" />设为默认投递方案</label>
         <fieldset class="wide">
@@ -385,7 +385,7 @@ useRefresh(loadAll)
 .config-toolbar span { color: var(--muted); font-size: 12px; }
 .connection-grid, .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .connection-grid, .key-list, .config-panel > .field-grid, .config-panel > .filter-groups { margin-left: 22px; margin-right: 22px; }
-.connection-grid, .config-panel > .field-grid:first-of-type { margin-top: 20px; }
+.connection-grid, .config-panel > .config-fields { margin-top: 20px; }
 .config-panel > .field-grid:last-child, .key-list { margin-bottom: 22px; }
 label { display: grid; gap: 5px; color: #32453d; font-size: 12px; font-weight: 600; }
 input:not([type='checkbox']), textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #cad8d1; border-radius: 8px; padding: 8px 10px; background: #fff; color: #1e3028; font: inherit; font-size: 13px; }

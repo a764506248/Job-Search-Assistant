@@ -1,7 +1,6 @@
 import {
   findBossChatImageInput,
   loadDefaultImage,
-  mountBrowserControlPanel,
   putFileIntoInput,
   readAutomationSettings,
 } from '../src/features/resume-image-test/panel'
@@ -27,7 +26,7 @@ export default defineContentScript({
   matches: ['*://zhipin.com/*', '*://*.zhipin.com/*'],
   runAt: 'document_idle',
   async main() {
-    mountBrowserControlPanel(document)
+    document.getElementById('job-search-assistant-control-host')?.remove()
     browser.runtime.onMessage.addListener((message: unknown) => {
       if (!isBrowserActionMessage(message)) return
       return handleBrowserAction(message.envelope)

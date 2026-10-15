@@ -150,7 +150,7 @@
       <div class="section-heading compact">
         <p class="landing-kicker"><i></i> 四步开始</p>
         <h2>第一次使用，也不用研究半天</h2>
-        <p>跟着产品里的向导做完四步，就能用一个真实职位完成安全测试。</p>
+        <p>跟着产品里的向导完成三项配置，然后前往自动投递设置筛选条件与投递计划。</p>
       </div>
       <div class="workflow-line">
         <article v-for="(step, index) in steps" :key="step.title">
@@ -197,7 +197,7 @@
     <section class="final-cta landing-section">
       <p class="landing-kicker"><i></i> 少一点重复，多一点选择</p>
       <h2>准备好更认真地找下一份工作了吗？</h2>
-      <p>先完成一次安全测试，再决定如何把它放进你的求职流程。</p>
+      <p>完成首次配置后，先核对筛选条件与投递计划，再启动任务。</p>
       <button class="primary-action" @click="enterProduct">{{ entryLabel }} <span>→</span></button>
     </section>
 
@@ -234,7 +234,7 @@ const steps = [
   { symbol: '⌁', title: '连接浏览器扩展', description: '让本地服务读取你已经登录的职位页面。', note: '保留现有登录状态' },
   { symbol: '▤', title: '导入并确认简历', description: 'AI 帮你整理内容，你确认后再写入资料库。', note: 'PDF、DOCX、TXT、Markdown' },
   { symbol: '✦', title: '配置 AI 模型', description: '选择你自己的模型服务，用于简历与职位分析。', note: '支持主模型与兜底模型' },
-  { symbol: '▶', title: '测试一个职位', description: '先跑一次完整流程，确认结果后再逐步扩大。', note: '安全地验证整个链路' },
+  { symbol: '▶', title: '设置自动投递', description: '核对筛选条件和投递计划，再决定何时启动任务。', note: '无需手动添加测试职位' },
 ]
 </script>
 

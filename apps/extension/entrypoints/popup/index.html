@@ -9,7 +9,10 @@
   <body>
     <main>
       <p class="eyebrow">JOB SEARCH ASSISTANT</p>
-      <h1>自动投递扩展</h1>
+      <div class="title-row">
+        <h1>自动投递扩展</h1>
+        <span id="extension-version" class="version" aria-label="扩展版本">v—</span>
+      </div>
       <p id="status" class="status">正在检查本地连接…</p>
       <form id="pair-form" class="pairing">
         <label for="service-url">服务地址（本地或线上域名）</label>
@@ -20,8 +23,7 @@
           <button id="pair" type="submit">连接</button>
         </div>
       </form>
-      <button id="open-console" type="button">打开 BOSS 页面控制台</button>
-      <p class="hint">在这里完成配对；问候语和简历图片策略可在 BOSS 页面的控制台查看。</p>
+      <p class="hint">在这里完成配对；连接成功后可在已登录的 BOSS 页面使用自动投递功能。</p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -3,13 +3,13 @@
     <section class="setup-hero setup-guide-hero">
       <div>
         <span class="pill">首次使用 · 约 5 分钟</span>
-        <h2>四步完成首次安全配置</h2>
+        <h2>三步完成首次配置</h2>
         <p>先跑通最短路径，再逐步探索项目库、匹配规则和简历模板。每一步都会根据服务器上的真实状态自动更新。</p>
         <div class="setup-hero-actions">
-          <span>{{ completedGuideSteps }}/4 已完成</span>
+          <span>{{ completedGuideSteps }}/3 已完成</span>
         </div>
       </div>
-      <div class="setup-score"><strong>{{ activeStep }}/4</strong><span>当前步骤</span></div>
+      <div class="setup-score"><strong>{{ completedGuideSteps }}/3</strong><span>配置进度</span></div>
     </section>
 
     <div v-if="error" class="setup-error" role="alert"><strong>无法读取安装状态</strong><span>{{ error }}</span><a-button @click="load">重新连接</a-button></div>
@@ -24,7 +24,29 @@
 
       <div class="setup-guide-stage">
         <transition name="guide-slide" mode="out-in">
-          <article :key="activeGuide.id" class="setup-guide-card">
+          <article v-if="activeStep === 'done'" key="done" class="setup-guide-card">
+            <div class="setup-guide-copy">
+              <span class="setup-guide-kicker">READY TO START</span>
+              <h2>恭喜，首次配置已完成！</h2>
+              <p>浏览器扩展、简历和模型均已准备好。接下来前往自动投递，核对筛选条件与投递计划后再启动任务；无需提前手动添加测试职位。</p>
+              <div class="setup-guide-status is-complete">
+                <span>✓</span>
+                <div><strong>已完成 3 项配置</strong><small>可以开始设置自动投递任务</small></div>
+              </div>
+              <div class="setup-guide-actions">
+                <a-button type="primary" @click="go('/automation')">前往自动投递</a-button>
+              </div>
+            </div>
+            <div class="setup-guide-visual" aria-hidden="true">
+              <div class="setup-visual-glow"></div><div class="setup-visual-orbit orbit-one"></div><div class="setup-visual-orbit orbit-two"></div>
+              <div class="setup-visual-device">
+                <div class="setup-device-top"><i></i><i></i><i></i></div>
+                <div class="setup-device-content"><span class="visual-shield">✓</span><b>配置完成</b><em>READY</em></div>
+              </div>
+              <span class="setup-pulse-dot dot-one"></span><span class="setup-pulse-dot dot-two"></span><span class="setup-pulse-dot dot-three"></span>
+            </div>
+          </article>
+          <article v-else :key="activeGuide.id" class="setup-guide-card">
             <div class="setup-guide-copy">
               <span class="setup-guide-kicker">STEP 0{{ activeGuide.id }}</span>
               <h2>{{ activeGuide.title }}</h2><p>{{ activeGuide.description }}</p>
@@ -40,14 +62,12 @@
                   <a-button @click="scrollToBrowserDetails">查看连接说明</a-button>
                 </template>
                 <a-button v-else-if="activeStep === 2" type="primary" @click="go('/resumes')">{{ activeGuide.complete ? '查看已确认简历' : '导入并确认简历' }}</a-button>
-                <a-button v-else-if="activeStep === 3" type="primary" @click="go('/models')">{{ activeGuide.complete ? '查看模型配置' : '配置并测试模型' }}</a-button>
                 <template v-else>
-                  <a-button type="primary" :loading="safeTesting" @click="sampleJob ? runOneJobSafetyTest() : go('/jobs')">{{ sampleJob ? (advancedUnlocked ? '重新执行安全测试' : '开始 1 个职位安全测试') : '先添加一个职位' }}</a-button>
-                  <a-button v-if="sampleJob" @click="go(`/analysis?jobId=${sampleJob.id}`)">查看测试职位</a-button>
+                  <a-button type="primary" @click="go('/models')">{{ activeGuide.complete ? '查看模型配置' : '配置并测试模型' }}</a-button>
+                  <a-button v-if="setupComplete" @click="activeStep = 'done'">查看完成页</a-button>
                 </template>
               </div>
               <p v-if="pairing && activeStep === 1" class="setup-pairing-inline">配对码 <strong>{{ pairing.code }}</strong><small>10 分钟内有效</small></p>
-              <p v-if="guideMessage && activeStep === 4" class="setup-guide-message">{{ guideMessage }}</p>
             </div>
 
             <div class="setup-guide-visual" :class="`is-step-${activeGuide.id}`" aria-hidden="true">
@@ -57,15 +77,14 @@
                 <div class="setup-device-content">
                   <template v-if="activeGuide.id === 1"><span class="visual-extension">J</span><b>浏览器插件</b><em>{{ browserProtocol?.connected ? 'CONNECTED' : 'PAIRING' }}</em></template>
                   <template v-else-if="activeGuide.id === 2"><span class="visual-document"><i></i><i></i><i></i></span><b>简历识别与确认</b><em>LOCAL ONLY</em></template>
-                  <template v-else-if="activeGuide.id === 3"><span class="visual-model"><i></i><i></i><i></i></span><b>模型连接测试</b><em>ENCRYPTED</em></template>
-                  <template v-else><span class="visual-shield">✓</span><b>单职位安全测试</b><em>NO DELIVERY</em></template>
+                  <template v-else><span class="visual-model"><i></i><i></i><i></i></span><b>模型连接测试</b><em>ENCRYPTED</em></template>
                 </div><span class="setup-visual-scan"></span>
               </div>
               <span class="setup-pulse-dot dot-one"></span><span class="setup-pulse-dot dot-two"></span><span class="setup-pulse-dot dot-three"></span>
             </div>
           </article>
         </transition>
-        <div class="setup-guide-progress" role="progressbar" aria-label="首次配置进度" :aria-valuenow="completedGuideSteps" aria-valuemin="0" aria-valuemax="4"><i :style="{ width: `${completedGuideSteps * 25}%` }"></i></div>
+        <div class="setup-guide-progress" role="progressbar" aria-label="首次配置进度" :aria-valuenow="completedGuideSteps" aria-valuemin="0" aria-valuemax="3"><i :style="{ width: `${(completedGuideSteps / 3) * 100}%` }"></i></div>
       </div>
     </section>
 
@@ -74,7 +93,7 @@
       <div class="setup-browser-content">
         <div class="browser-pairing-card">
           <h3>{{ browserProtocol?.connected ? '统一 Chrome 扩展已连接' : '在 BOSS 页面完成配对' }}</h3>
-          <p>{{ browserProtocol?.connected ? `扩展 ${browserProtocol.extensionVersion || ''} 已接入本地服务，协议 ${browserProtocol.protocolVersion}。` : '先生成配对码，再打开已登录的 BOSS 页面，在右下角扩展控制台输入。配对码仅用于连接本机服务。' }}</p>
+          <p>{{ browserProtocol?.connected ? `扩展 ${browserProtocol.extensionVersion || ''} 已接入本地服务，协议 ${browserProtocol.protocolVersion}。` : '先生成配对码，再点击 Chrome 工具栏中的扩展图标，在弹窗中输入服务地址和配对码。配对码仅用于连接本机服务。' }}</p>
           <strong v-if="pairing && !browserProtocol?.connected" class="browser-pairing-code">{{ pairing.code }}</strong>
           <div class="browser-pairing-actions"><a-button type="primary" :href="extensionDownloadUrl" target="_blank" rel="noopener noreferrer">下载最新版插件</a-button><a-button v-if="!browserProtocol?.connected" :loading="pairingLoading" @click="createPairing">生成配对码</a-button><a-button :loading="loading" @click="load">重新检测</a-button></div>
           <p v-if="browserMessage" class="browser-pairing-message">{{ browserMessage }}</p>
@@ -99,9 +118,9 @@
       </div>
     </details>
 
-    <section class="setup-advanced" :class="{ 'is-locked': !advancedUnlocked }">
-      <div><p class="eyebrow">AFTER FIRST SUCCESS</p><h2>{{ advancedUnlocked ? '继续探索进阶能力' : '首次测试成功后再解锁进阶能力' }}</h2><p>{{ advancedUnlocked ? '现在可以按需要补充项目证据、细化匹配规则，或制作专属简历模板。' : '先完成上面的四步，不必在首次使用时理解所有配置。' }}</p></div>
-      <div class="setup-advanced-links"><a-button :disabled="!advancedUnlocked" @click="go('/projects')">项目库</a-button><a-button :disabled="!advancedUnlocked" @click="go('/rules')">匹配规则</a-button><a-button :disabled="!advancedUnlocked" @click="go('/templates')">简历模板</a-button></div>
+    <section class="setup-advanced" :class="{ 'is-locked': !setupComplete }">
+      <div><p class="eyebrow">AFTER SETUP</p><h2>{{ setupComplete ? '继续探索进阶能力' : '完成首次配置后再探索进阶能力' }}</h2><p>{{ setupComplete ? '现在可以按需要补充项目证据、细化匹配规则，或制作专属简历模板。' : '先完成上面的三项配置，不必在首次使用时理解所有设置。' }}</p></div>
+      <div class="setup-advanced-links"><a-button :disabled="!setupComplete" @click="go('/projects')">项目库</a-button><a-button :disabled="!setupComplete" @click="go('/rules')">匹配规则</a-button><a-button :disabled="!setupComplete" @click="go('/templates')">简历模板</a-button></div>
     </section>
   </div>
 </template>
@@ -111,26 +130,21 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../services/api'
 import { useRefresh } from '../../composables/useRefresh'
-import type { BrowserPairing, BrowserProbe, BrowserProtocolStatus, SetupCheckStatus, SetupStatus, SetupTestRunResult, StoredJob } from '../../types'
+import type { BrowserPairing, BrowserProbe, BrowserProtocolStatus, SetupCheckStatus, SetupStatus } from '../../types'
 
-type GuideStepId = 1 | 2 | 3 | 4
+type GuideStepId = 1 | 2 | 3
 const router = useRouter()
 const extensionDownloadUrl = 'https://github.com/a764506248/Job-Search-Assistant/releases/latest/download/job-search-assistant-chrome-mv3.zip'
 const status = ref<SetupStatus>()
 const loading = ref(false)
 const error = ref('')
 const savingProbe = ref(false)
-const safeTesting = ref(false)
-const testResult = ref<SetupTestRunResult>()
 const browserProtocol = ref<BrowserProtocolStatus>()
 const pairing = ref<BrowserPairing>()
 const pairingLoading = ref(false)
 const browserMessage = ref('')
-const guideMessage = ref('')
 const profileName = ref('')
-const sampleJob = ref<StoredJob | null>(null)
-const activeStep = ref<GuideStepId>(1)
-const advancedUnlocked = ref(localStorage.getItem('jsa_onboarding_safe_test') === 'passed')
+const activeStep = ref<GuideStepId | 'done'>(1)
 let initialized = false
 
 const probe = ref<BrowserProbe>({ projectExtensionReady: false, bossLoggedIn: false, source: 'manual' })
@@ -143,13 +157,13 @@ const issueCount = computed(() => issueChecks.value.length)
 const checkReady = (key: string) => status.value?.checks.some(check => check.key === key && check.status === 'ready') || false
 
 const guideSteps = computed(() => [
-  { id: 1 as GuideStepId, title: '安装并连接插件', short: '连接已登录的 BOSS 页面', description: '安装统一 Chrome 扩展，通过六位配对码连接本地服务，并确认当前 BOSS 账号身份。', complete: Boolean(browserProtocol.value?.connected) && checkReady('boss-login'), statusTitle: '等待插件连接', statusText: browserProtocol.value?.connected ? '扩展已连接，请继续确认 BOSS 账号身份。' : '生成配对码后，在 BOSS 页面右下角控制台输入。' },
+  { id: 1 as GuideStepId, title: '安装并连接插件', short: '连接已登录的 BOSS 页面', description: '安装统一 Chrome 扩展，通过六位配对码连接本地服务，并确认当前 BOSS 账号身份。', complete: Boolean(browserProtocol.value?.connected) && checkReady('boss-login'), statusTitle: '等待插件连接', statusText: browserProtocol.value?.connected ? '扩展已连接，请继续确认 BOSS 账号身份。' : '生成配对码后，在 Chrome 工具栏的扩展弹窗中输入。' },
   { id: 2 as GuideStepId, title: '导入并确认简历', short: '核对识别结果再写入', description: '上传现有简历，让系统在本机完成结构化识别；核对姓名、目标岗位和项目经历后再确认。', complete: checkReady('resume'), statusTitle: '等待确认简历', statusText: '未确认的识别结果不会进入后续职位分析与材料生成。' },
   { id: 3 as GuideStepId, title: '配置模型', short: '保存并完成连接测试', description: '选择模型服务，填写接口地址与密钥，然后执行连接测试。密钥只保存在你的本地服务中。', complete: checkReady('model'), statusTitle: '等待模型验证', statusText: '只有通过连接测试的模型才会用于 AI 分析。' },
-  { id: 4 as GuideStepId, title: '完成安全测试', short: advancedUnlocked.value ? '真实流程已经验证' : '只分析 1 个职位，不投递', description: '选取已有职位执行只读分析和环境预检，或根据当前账号的成功投递记录自动确认数据链路已经跑通。', complete: advancedUnlocked.value, statusTitle: sampleJob.value ? '可以开始安全测试' : '还缺少测试职位', statusText: advancedUnlocked.value ? '已检测到当前账号的安全测试或成功投递记录。' : sampleJob.value ? `将测试：${sampleJob.value.title} · ${sampleJob.value.companyName}` : '先采集或手动添加一个职位快照。' },
 ])
 const activeGuide = computed(() => guideSteps.value.find(step => step.id === activeStep.value) || guideSteps.value[0])
 const completedGuideSteps = computed(() => guideSteps.value.filter(step => step.complete).length)
+const setupComplete = computed(() => completedGuideSteps.value === 3)
 
 function statusIcon(value: SetupCheckStatus) { return value === 'ready' ? '✓' : value === 'blocked' ? '!' : '…' }
 function go(path: string) { router.push(path) }
@@ -159,16 +173,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [setupResult, browserResult, profileResult, jobsResult, automationResult] = await Promise.all([api.setupStatus(), api.browserStatus(), api.profile(), api.jobs({ page: 1, pageSize: 1 }), api.automationRuns()])
+    const [setupResult, browserResult, profileResult] = await Promise.all([api.setupStatus(), api.browserStatus(), api.profile()])
     status.value = setupResult
     browserProtocol.value = browserResult
     profileName.value = String(profileResult.data.displayName || '').trim()
-    sampleJob.value = jobsResult.items[0] || null
-    if (automationResult.items.some(run => run.successCount > 0)) {
-      advancedUnlocked.value = true
-      localStorage.setItem('jsa_onboarding_safe_test', 'passed')
+    if (!initialized || setupComplete.value) {
+      activeStep.value = guideSteps.value.find(step => !step.complete)?.id || 'done'
+      initialized = true
     }
-    if (!initialized) { activeStep.value = guideSteps.value.find(step => !step.complete)?.id || 4; initialized = true }
   } catch (reason) { error.value = (reason as Error).message }
   finally { loading.value = false }
 }
@@ -185,24 +197,6 @@ async function saveBrowserProbe() {
   try { await api.saveBrowserProbe(probe.value); await load() }
   catch (reason) { error.value = (reason as Error).message }
   finally { savingProbe.value = false }
-}
-
-async function runOneJobSafetyTest() {
-  if (!sampleJob.value || safeTesting.value) return
-  safeTesting.value = true
-  guideMessage.value = `正在对“${sampleJob.value.title}”执行本地只读分析…`
-  try {
-    await api.analyzeJob(sampleJob.value.id, false)
-    guideMessage.value = '职位分析完成，正在检查环境与配置…'
-    testResult.value = await api.runSetupTest()
-    if (testResult.value.ok) {
-      advancedUnlocked.value = true
-      localStorage.setItem('jsa_onboarding_safe_test', 'passed')
-      guideMessage.value = `安全测试通过：“${sampleJob.value.title}”已完成只读分析，没有发送消息或执行投递。`
-    } else guideMessage.value = testResult.value.message
-    await load()
-  } catch (reason) { guideMessage.value = `安全测试未完成：${(reason as Error).message}` }
-  finally { safeTesting.value = false }
 }
 
 useRefresh(load)
