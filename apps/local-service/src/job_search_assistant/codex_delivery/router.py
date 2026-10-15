@@ -86,7 +86,7 @@ def create_codex_delivery_router(
         try:
             return repository.get_run(run_id, user_id=user_id, include_steps=steps)
         except KeyError as error:
-            raise HTTPException(status_code=404, detail="Codex 投递任务不存在") from error
+            raise HTTPException(status_code=404, detail="BOSS 手机逐岗投递任务不存在") from error
 
     def validate_resume(payload: DeliveryConfigInput, user_id: int) -> None:
         if payload.resume_id is None:
@@ -194,7 +194,7 @@ def create_codex_delivery_router(
         identity = agent_identity(request)
         config = repository.default_config(int(identity["user"]["id"]))
         if config is None:
-            raise HTTPException(status_code=404, detail="尚未创建 Codex 投递配置")
+            raise HTTPException(status_code=404, detail="尚未创建手机逐岗投递配置")
         return config
 
     @router.post("/agent/runs", status_code=status.HTTP_201_CREATED)
@@ -210,7 +210,7 @@ def create_codex_delivery_router(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="配置不存在") from error
         if config is None or not config["enabled"]:
-            raise HTTPException(status_code=409, detail="没有可用的 Codex 投递配置")
+            raise HTTPException(status_code=409, detail="没有可用的手机逐岗投递配置")
         return repository.create_run(user_id, config)
 
     @router.get("/agent/runs/{run_id}")
@@ -355,9 +355,9 @@ def create_codex_delivery_router(
             if reason
         ]
         if match.suitability_score < run["configSnapshot"]["minimumScore"]:
-            block_reasons.append("岗位适合度未达 Codex 投递阈值")
+            block_reasons.append("岗位适合度未达手机逐岗投递阈值")
         if match.customization_confidence < run["configSnapshot"]["minimumCustomizationConfidence"]:
-            block_reasons.append("材料定制可信度未达 Codex 投递阈值")
+            block_reasons.append("材料定制可信度未达手机逐岗投递阈值")
         if block_reasons:
             decision = match.decision.model_copy(
                 update={

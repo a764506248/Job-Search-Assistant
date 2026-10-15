@@ -13,13 +13,13 @@
 | 你更看重什么 | 推荐入口 | 使用方式 |
 | --- | --- | --- |
 | 批量采集、网页集中确认、浏览器自动执行 | [网页自动投递](#整体流程) | Chrome 扩展 + 管理后台 |
-| 读取 BOSS 手机端更新岗位、逐个核对 JD、根据本人资料生成问候语并留下完整记录 | [iPhone + Codex 精准单岗投递](docs/CODEX_IPHONE_DELIVERY_GUIDE.md) | 真实 iPhone + Codex + Agent Key |
+| 读取 BOSS 手机端更新岗位、逐个核对 JD、根据本人资料生成问候语并留下完整记录 | [BOSS 手机逐岗投递](docs/CODEX_IPHONE_DELIVERY_GUIDE.md) | 真实 iPhone + 兼容的 AI 助手（如 Codex）+ Agent Key |
 
-![iPhone + Codex 精准单岗投递流程](docs/assets/codex-delivery/iphone-codex-delivery-overview.png)
+![BOSS 手机逐岗投递流程](docs/assets/codex-delivery/iphone-codex-delivery-overview.png)
 
 手机流程是新增的独立入口，不会改动或接管原来的网页自动投递任务。它更适合希望优先查看“推荐 / 附近 / 最新”岗位、逐岗判断硬性条件，并确认每条发送结果的用户。开始前需要先安装 [iPhone Use](https://github.com/zhongerxin/iPhone-use)，再按照[手机精准投递使用指南](docs/CODEX_IPHONE_DELIVERY_GUIDE.md)完成连接、配置和首次目标 1 的安全试投。
 
-供 Codex 执行这条流程的项目 Skill 已随仓库提供：[`boss-codex-delivery`](.agents/skills/boss-codex-delivery/SKILL.md)。其他用户可以从 GitHub 路径 `.agents/skills/boss-codex-delivery` 安装，不需要复制项目内部代码。
+供 Codex 使用的项目 Skill 已随仓库提供：[`boss-codex-delivery`](.agents/skills/boss-codex-delivery/SKILL.md)。其他具备 Agent API 与 iPhone 操作能力的 AI 助手也可执行这条流程；Skill 安装标识保持不变，以兼容已安装的用户。
 
 ## 许可证
 
@@ -58,8 +58,8 @@
 - [数据模型与接口约定](docs/DATA_MODEL.md)
 - [一键安装与自动投递产品化路线图](docs/PRODUCTIZATION_ROADMAP.md)
 - [自动投递技术设计与阶段交付](docs/AUTOMATION_TECHNICAL_DESIGN.md)
-- [iPhone + Codex 精准单岗投递（用户指南）](docs/CODEX_IPHONE_DELIVERY_GUIDE.md)
-- [BOSS Codex 单岗投递 Skill](.agents/skills/boss-codex-delivery/SKILL.md)
+- [BOSS 手机逐岗投递（用户指南）](docs/CODEX_IPHONE_DELIVERY_GUIDE.md)
+- [BOSS 手机逐岗投递 Skill（Codex 版）](.agents/skills/boss-codex-delivery/SKILL.md)
 
 ## 产品化路线图
 

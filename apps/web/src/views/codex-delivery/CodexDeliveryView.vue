@@ -3,8 +3,8 @@
     <section class="notice-card automation-command panel">
       <div>
         <p class="eyebrow">ISOLATED IPHONE WORKFLOW</p>
-        <h2>Codex 单岗投递</h2>
-        <p>这是独立的手机投递链路，只读取你的档案、项目、简历和规则，不会创建或修改旧的网页自动投递任务。</p>
+        <h2>BOSS 手机逐岗投递</h2>
+        <p>由你选择的 AI 助手操作 iPhone，逐个分析并投递 BOSS 岗位。此流程只读取你的档案、项目、简历和规则，不会创建或修改旧的网页自动投递任务。</p>
       </div>
       <span class="isolation-badge">手机端独立流程</span>
     </section>
@@ -13,7 +13,7 @@
       <div class="panel-heading progress-title">
         <div>
           <p class="eyebrow">LIVE PROGRESS</p>
-          <h3 id="codex-progress-title">Codex 投递进度</h3>
+          <h3 id="codex-progress-title">手机逐岗投递进度</h3>
           <p class="progress-subtitle">仅显示最近 20 次任务；点击任务查看统计与岗位明细。</p>
         </div>
         <a-button :loading="loading" @click="loadAll">刷新进度</a-button>
@@ -50,7 +50,7 @@
         <div class="progress-empty-icon" aria-hidden="true"><span>01</span><span>02</span><span>03</span></div>
         <div>
           <strong>还没有投递任务</strong>
-          <p>完成下方配置并交给 Codex 启动后，扫描、分析与投递进度会实时显示在这里。</p>
+          <p>完成下方配置并交给支持 Agent API 与 iPhone 操作的 AI 助手启动后，扫描、分析与投递进度会实时显示在这里。</p>
         </div>
       </div>
       <div v-if="selectedRun" class="step-panel">
@@ -71,13 +71,13 @@
 
     <section class="panel connection-panel">
       <div class="panel-heading">
-        <div><p class="eyebrow">CONNECTION</p><h3>Codex 连接</h3></div>
+        <div><p class="eyebrow">CONNECTION</p><h3>AI 助手连接</h3></div>
         <a-button type="primary" :loading="creatingKey" @click="createKey">生成 Agent Key</a-button>
       </div>
       <div class="connection-grid">
         <label>服务地址<input :value="serviceUrl" readonly /></label>
         <div class="connection-help">
-          <strong>Codex 需要两项信息</strong>
+          <strong>AI 助手需要两项信息</strong>
           <span>Base URL：{{ serviceUrl }}</span>
           <span>Agent Key：仅在生成后显示一次，不包含 BOSS 密码。</span>
         </div>
@@ -117,7 +117,7 @@
         <label class="wide">配置名称<input v-model.trim="config.name" required /></label>
         <label class="choice wide"><input v-model="config.isDefault" type="checkbox" />设为默认投递方案</label>
         <fieldset class="wide">
-          <legend>来源页签（按勾选顺序由 Codex 处理）</legend>
+          <legend>来源页签（按勾选顺序逐岗处理）</legend>
           <label v-for="tab in sourceTabOptions" :key="tab" class="choice">
             <input v-model="config.sourceTabs" type="checkbox" :value="tab" />{{ tab }}
           </label>
@@ -173,7 +173,7 @@
         </label>
         <label class="wide">兜底问候语<textarea v-model="config.fallbackGreeting" rows="3" maxlength="2000"></textarea></label>
         <label class="choice wide"><input v-model="config.stopOnUncertain" type="checkbox" />结果不确定时立即停止，不自动重发</label>
-        <label class="choice wide"><input v-model="config.sendResume" type="checkbox" />沟通成功后发送所选简历（由 Codex 执行前再次确认）</label>
+        <label class="choice wide"><input v-model="config.sendResume" type="checkbox" />沟通成功后发送所选简历（由 AI 助手执行前再次确认）</label>
       </div>
     </form>
 
@@ -313,7 +313,7 @@ async function saveConfig() {
     const saved = await api.saveCodexDeliveryConfig({ ...config })
     loadConfig(saved)
     configs.value = await api.codexDeliveryConfigs().then(result => result.items)
-    message.success('Codex 投递配置已保存')
+    message.success('手机逐岗投递配置已保存')
   } catch (error) { message.error((error as Error).message) }
   finally { saving.value = false }
 }
@@ -321,7 +321,7 @@ async function saveConfig() {
 async function createKey() {
   creatingKey.value = true
   try {
-    const result = await api.createAgentKey('本机 Codex')
+    const result = await api.createAgentKey('本机 AI 助手')
     newPlaintextKey.value = result.plaintext
     keys.value.unshift(result.key)
     message.success('Agent Key 已生成，仅显示这一次')
@@ -341,7 +341,7 @@ async function copyKey() {
 
 function revokeKey(id: number) {
   Modal.confirm({
-    title: '撤销这个 Agent Key？', content: '使用该 Key 的 Codex 将立即无法继续请求。', okText: '撤销', okType: 'danger', cancelText: '取消',
+    title: '撤销这个 Agent Key？', content: '使用该 Key 的 AI 助手将立即无法继续请求。', okText: '撤销', okType: 'danger', cancelText: '取消',
     async onOk() {
       try {
         const result = await api.revokeAgentKey(id)

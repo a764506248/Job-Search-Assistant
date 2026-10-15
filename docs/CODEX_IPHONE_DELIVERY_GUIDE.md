@@ -1,6 +1,6 @@
-# iPhone + Codex 精准单岗投递
+# BOSS 手机逐岗投递
 
-这是一条面向求职者的手机投递流程。Codex 从你本人登录的 BOSS iPhone App 中读取当前可见的新岗位，每次只处理一个职位：先保存 JD，再结合你的档案、项目和所选简历判断是否符合，符合时使用与 PC 端相同的生成能力准备问候语，发送后把实际结果写回 Job Search Assistant。
+这是一条面向求职者的手机投递流程。具备 Agent API 与 iPhone 操作能力的 AI 助手（下文以 Codex 为例）从你本人登录的 BOSS iPhone App 中读取当前可见的新岗位，每次只处理一个职位：先保存 JD，再结合你的档案、项目和所选简历判断是否符合，符合时使用与 PC 端相同的生成能力准备问候语，发送后把实际结果写回 Job Search Assistant。
 
 它不会替换原来的网页自动投递，也不会修改已有网页任务。两条流程可以保留在同一套系统里，但不要在同一时间对同一个 BOSS 账号执行投递。
 
@@ -27,18 +27,18 @@
 1. 一台 Mac，并安装完成完整 Xcode。只有 Command Line Tools 不够。
 2. 一部通过 USB 连接的真实 iPhone。手机需要信任这台 Mac、开启系统要求的开发者模式，并在安装和操作期间保持解锁。
 3. iPhone 上已登录自己的 BOSS 账号。
-4. 本机可用的 Codex，以及 Python 3.9+、符合 iPhone Use 要求的 Node.js 和 npm。
+4. 本机可用的 Codex 或其他兼容 AI 助手，以及 Python 3.9+、符合 iPhone Use 要求的 Node.js 和 npm。
 5. 已启动的 Job Search Assistant，并在“个人档案、项目库、简历库”中保存真实资料。
 
-Apple 账号登录、设备信任、开发者模式、密码、验证码和 Face ID 都由你本人完成。Codex 不应询问或代为输入这些敏感信息。
+Apple 账号登录、设备信任、开发者模式、密码、验证码和 Face ID 都由你本人完成。AI 助手不应询问或代为输入这些敏感信息。
 
 ## 第一步：安装 iPhone Use
 
-iPhone Use 负责让 Codex 通过 USB 读取和操作你的真实 iPhone。项目地址：
+iPhone Use 负责让兼容的 AI 助手通过 USB 读取和操作你的真实 iPhone。项目地址：
 
 <https://github.com/zhongerxin/iPhone-use>
 
-最省事的方法，是把下面这段话发给本机 Codex：
+以 Codex 为例，可以把下面这段话发给本机助手：
 
 ```text
 请帮我安装和配置 iPhone Use：
@@ -67,9 +67,9 @@ sh scripts/install.sh
 
 只有 iPhone Use 明确返回 READY 后，才继续下面的投递流程。详细依赖和故障排查以 [iPhone Use 官方 README](https://github.com/zhongerxin/iPhone-use#readme)为准。
 
-## 第二步：安装本项目的投递 Skill
+## 第二步：准备 AI 助手（Codex 可安装项目 Skill）
 
-本仓库提供了可独立安装的 [`boss-codex-delivery` Skill](../.agents/skills/boss-codex-delivery/SKILL.md)。它告诉 Codex 如何读取你的配置、逐岗分析、控制 iPhone、验证发送结果以及安全停止。
+本仓库提供了可独立安装的 [`boss-codex-delivery` Skill](../.agents/skills/boss-codex-delivery/SKILL.md)。Codex 用户可用它读取配置、逐岗分析、控制 iPhone、验证发送结果以及安全停止。`boss-codex-delivery` 是保留兼容性的安装标识，不是网页功能仅限 Codex 的意思；其他助手无需安装 Codex Skill，但必须具备相应的 [Agent API 契约](../.agents/skills/boss-codex-delivery/references/agent-api.md)和 iPhone 操作能力。
 
 让其他用户安装时，可把下面的话发给 Codex：
 
@@ -86,7 +86,7 @@ Skill 安装后会在下一轮对话可用。它只负责编排新增的手机�
 
 1. 启动 Job Search Assistant，打开 <http://127.0.0.1:8765> 并登录。
 2. 先检查“个人档案、项目库、简历库”，确保内容真实、最新。
-3. 打开左侧“Codex 投递”。
+3. 打开左侧“BOSS 手机逐岗投递”。
 4. 在页面顶部生成 Agent Key，并立即复制保存。完整 Key 只显示一次。
 5. 保存手机筛选和投递计划：
    - 来源：推荐、附近、最新；
@@ -99,19 +99,19 @@ Skill 安装后会在下一轮对话可用。它只负责编排新增的手机�
    - 自动投递或每岗确认。
 6. 第一次真实使用把目标投递数设为 `1`，确认整个闭环正确后再逐步增加。
 
-Agent Key 只用于本机 Codex 调用当前登录用户的 Agent API。它不是 BOSS 密码，但仍然属于敏感凭据：不要提交到 Git、截图公开或写进 Skill 文件；不再使用时在页面中撤销。
+Agent Key 用于你选择的 AI 助手调用当前登录用户的 Agent API。它不是 BOSS 密码，但仍然属于敏感凭据：不要提交到 Git、截图公开或写进 Skill 文件；不再使用时在页面中撤销。
 
-## 第四步：让 Codex 开始逐岗处理
+## 第四步：让 AI 助手开始逐岗处理
 
-确认手机已解锁、BOSS 已登录、iPhone Use 为 READY 后，在 Codex 中发出类似请求：
+确认手机已解锁、BOSS 已登录、iPhone Use 为 READY 后，以 Codex 为例发出类似请求：
 
 ```text
-使用 boss-codex-delivery 和 iPhone Use，读取我的默认 Codex 投递配置。
+使用 boss-codex-delivery 和 iPhone Use，读取我的默认 BOSS 手机逐岗投递配置。
 先向我确认来源、筛选条件、所选简历和目标投递数，再开始逐岗处理。
 使用我本次提供的 Agent Key；不要修改旧网页自动投递任务。
 ```
 
-随后把网页刚生成的 Agent Key 只提供给本次本机任务。Codex 会按保存的计划执行：
+随后把网页刚生成的 Agent Key 只提供给本次任务。兼容的 AI 助手会按保存的计划执行：
 
 ```text
 进入 BOSS 的推荐 / 附近 / 最新
@@ -127,7 +127,7 @@ Agent Key 只用于本机 Codex 调用当前登录用户的 Agent API。它不�
 → 等待设定间隔，再处理下一个
 ```
 
-在“每岗确认”模式下，Codex 会在真正打开沟通前，把岗位、公司、分数、风险和完整问候语给你确认。没有得到本岗位确认时不能发送。
+在“每岗确认”模式下，AI 助手会在真正打开沟通前，把岗位、公司、分数、风险和完整问候语给你确认。没有得到本岗位确认时不能发送。
 
 ## 系统如何判断是否投递
 
@@ -144,7 +144,7 @@ Agent Key 只用于本机 Codex 调用当前登录用户的 Agent API。它不�
 
 ## 问候语输入与结果记录
 
-Codex 按下面的顺序尝试把 PC 端生成的完整问候语输入 BOSS：
+AI 助手按下面的顺序尝试把 PC 端生成的完整问候语输入 BOSS：
 
 1. 优先使用 iPhone Use 的文字输入能力；
 2. 输入控件不兼容时，尝试 Mac 到 iPhone 的通用剪贴板；
@@ -168,7 +168,7 @@ Codex 按下面的顺序尝试把 PC 端生成的完整问候语输入 BOSS：
 
 ## 在哪里查看结果
 
-回到管理后台的“Codex 投递”，可以看到：
+回到管理后台的“BOSS 手机逐岗投递”，可以看到：
 
 - 当前任务状态和目标进度；
 - 已扫描、已采集、已分析、符合、跳过、失败和待确认数量；

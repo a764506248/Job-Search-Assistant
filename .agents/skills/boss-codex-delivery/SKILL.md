@@ -1,13 +1,13 @@
 ---
 name: boss-codex-delivery
-description: 使用 Job Search Assistant 的 Agent API 与 iPhone Use，在用户明确要求启动手机投递时读取其配置和资料，逐个采集、分析并安全投递 BOSS 职位。用于 Codex 单岗投递，不用于旧网页自动投递或普通求职建议。
+description: 使用 Job Search Assistant 的 Agent API 与 iPhone Use，在用户明确要求启动 BOSS 手机逐岗投递时读取其配置和资料，逐个采集、分析并安全投递职位。不用于旧网页自动投递或普通求职建议。
 ---
 
-# BOSS Codex 单岗投递
+# BOSS 手机逐岗投递
 
 ## 适用边界
 
-只在用户明确要求启动、继续、暂停或查看 Codex 手机投递任务时使用。本 Skill 编排手机和 API，不修改旧网页自动投递任务、浏览器扩展状态或 `automation_runs`。
+只在用户明确要求启动、继续、暂停或查看 BOSS 手机逐岗投递任务时使用。本 Skill 编排手机和 API，不修改旧网页自动投递任务、浏览器扩展状态或 `automation_runs`。
 
 启动前需要：
 
@@ -16,7 +16,7 @@ description: 使用 Job Search Assistant 的 Agent API 与 iPhone Use，在用�
 - iPhone Use 服务 READY，手机已解锁且 BOSS 已登录。
 
 - Key、验证码、密码和会话信息不得写入项目文件、长期日志或聊天总结。
-- **Agent Key 只从两个来源获取**：① 用户在当前对话中明确提供；② 环境变量 `JSA_AGENT_KEY`。**不得扫描磁盘、会话记录、日志、剪贴板或任何本机文件来寻找 Key**，也不得把 Key 回显到对话里。取不到就引导用户在“Codex 投递”页面生成，不要代替用户创建网页登录身份。
+- **Agent Key 只从两个来源获取**：① 用户在当前对话中明确提供；② 环境变量 `JSA_AGENT_KEY`。**不得扫描磁盘、会话记录、日志、剪贴板或任何本机文件来寻找 Key**，也不得把 Key 回显到对话里。取不到就引导用户在“BOSS 手机逐岗投递”页面生成，不要代替用户创建网页登录身份。
 
 调用接口时读取 [Agent API](references/agent-api.md)。
 

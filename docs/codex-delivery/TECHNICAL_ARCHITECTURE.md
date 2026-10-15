@@ -1,4 +1,4 @@
-# Codex 单岗投递技术架构
+# BOSS 手机逐岗投递技术架构
 
 ## 1. 架构原则
 
@@ -6,9 +6,9 @@
 
 ```mermaid
 flowchart LR
-    UI[新增 Codex 投递页面] -->|用户登录令牌| API[本地服务]
+    UI[新增 BOSS 手机逐岗投递页面] -->|用户登录令牌| API[本地服务]
     UI -->|创建/撤销| KEY[Agent Key 服务]
-    C[Codex] -->|Base URL + Bearer Agent Key| AGENT[Agent API]
+    C[兼容 AI 助手，如 Codex] -->|Base URL + Bearer Agent Key| AGENT[Agent API]
     AGENT --> AUTH[Key 摘要校验与 user_id 解析]
     AUTH --> READ[只读用户上下文]
     READ --> PROFILE[(档案/项目/简历/规则)]
@@ -26,7 +26,7 @@ flowchart LR
 
 ## 2. 模块划分
 
-整体职责分为三层：页面提供配置和可观察性，API 提供受控的数据与状态能力，项目 Skill 负责 Codex 与 iPhone 的逐岗编排。执行步骤不硬编码进后端 runner。
+整体职责分为三层：页面提供配置和可观察性，API 提供受控的数据与状态能力，项目 Skill 作为 Codex 的逐岗编排示例；其他助手可按同一 API 契约与 iPhone 操作能力执行。执行步骤不硬编码进后端 runner。
 
 新增后端包 `job_search_assistant/codex_delivery/`：
 
