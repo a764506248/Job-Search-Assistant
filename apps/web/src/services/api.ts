@@ -143,9 +143,9 @@ export const api = {
   deleteRecord: (kind: string, id: number) => request<void>(`/v1/library/${kind}/${id}`, { method: 'DELETE' }),
   testModel: (id: number) => request<{ message: string; latencyMs: number }>(`/v1/library/models/${id}/test`, { method: 'POST' }),
   agentKeys: () => request<{ items: AgentKeyRecord[] }>('/v1/agent-keys'),
-  createAgentKey: (name: string, expiresInDays = 90) => request<{ key: AgentKeyRecord; plaintext: string }>(
+  createAgentKey: (name: string, baseUrl: string, expiresInDays = 90) => request<{ key: AgentKeyRecord; plaintext: string }>(
     '/v1/agent-keys',
-    json('POST', { name, scopes: ['agent:read', 'agent:run'], expiresInDays }),
+    json('POST', { name, baseUrl, scopes: ['agent:read', 'agent:run'], expiresInDays }),
   ),
   revokeAgentKey: (id: number) => request<{ key: AgentKeyRecord }>(`/v1/agent-keys/${id}`, { method: 'DELETE' }),
   codexDeliveryConfigs: () => request<{ items: CodexDeliveryConfig[] }>('/v1/codex-delivery/configs'),

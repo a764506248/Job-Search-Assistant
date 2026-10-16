@@ -62,7 +62,7 @@ Codex 新增项目 Skill：
 | revoked_at | nullable | 撤销时间 |
 | created_at | NOT NULL | 创建时间 |
 
-Key 形式建议为 `jsa_agent_<prefix>_<secret>`。服务端使用安全随机数生成明文，只在创建响应中返回一次；数据库保存摘要。
+新版 Key 形式为 `jsa_agent_v2_<Base URL 的 base64url 无填充编码>_<prefix>_<secret>`；服务端使用安全随机数生成密钥，只在创建响应中返回一次，数据库保存**完整 Key**的摘要。地址由网页创建 Key 时提供，服务端规范化后编码；任何地址字段篡改都会让完整 Key 摘要不匹配。旧客户端不传地址时仍生成兼容的 `jsa_agent_<prefix>_<secret>`，旧 Key 无法反推出地址。服务迁址后需重新生成 Key，或由用户明确提供新 Base URL。
 
 ### 3.2 `codex_delivery_configs`
 

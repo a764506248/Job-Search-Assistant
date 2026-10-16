@@ -77,19 +77,19 @@
       <div class="connection-grid">
         <label>服务地址<input :value="serviceUrl" readonly /></label>
         <div class="connection-help">
-          <strong>AI 助手需要两项信息</strong>
-          <span>Base URL：{{ serviceUrl }}</span>
-          <span>Agent Key：仅在生成后显示一次，不包含 BOSS 密码。</span>
+          <strong>新 Agent Key 已包含服务地址</strong>
+          <span>当前地址：{{ serviceUrl }}</span>
+          <span>复制新 Key 即可识别连接地址；旧 Key 仍需单独提供 Base URL。Key 仅在生成后显示一次，不包含 BOSS 密码。</span>
         </div>
       </div>
       <div v-if="newPlaintextKey" class="secret-box" role="status">
-        <div><strong>请立即复制并安全保存</strong><span>关闭或刷新后无法再次查看完整 Key。</span></div>
+        <div><strong>请立即复制并安全保存</strong><span>这个 Key 已包含当前服务地址；关闭或刷新后无法再次查看完整 Key。</span></div>
         <code>{{ newPlaintextKey }}</code>
         <a-button @click="copyKey">复制 Key</a-button>
       </div>
       <div class="key-list">
         <div v-for="key in keys" :key="key.id" class="key-row">
-          <div><strong>{{ key.name }}</strong><span>jsa_agent_{{ key.keyPrefix }}_•••• · {{ key.scopes.join('、') }}</span><small>创建：{{ formatRunTime(key.createdAt) }} · 最近使用：{{ key.lastUsedAt ? formatRunTime(key.lastUsedAt) : '尚未使用' }} · 到期：{{ key.expiresAt ? formatRunTime(key.expiresAt) : '长期有效' }}</small></div>
+          <div><strong>{{ key.name }}</strong><span>Key 前缀 {{ key.keyPrefix }} · {{ key.scopes.join('、') }}</span><small>创建：{{ formatRunTime(key.createdAt) }} · 最近使用：{{ key.lastUsedAt ? formatRunTime(key.lastUsedAt) : '尚未使用' }} · 到期：{{ key.expiresAt ? formatRunTime(key.expiresAt) : '长期有效' }}</small></div>
           <span :class="key.revokedAt ? 'status-muted' : 'status-ready'">{{ key.revokedAt ? '已撤销' : '可用' }}</span>
           <a-button v-if="!key.revokedAt" danger @click="revokeKey(key.id)">撤销</a-button>
         </div>
@@ -159,7 +159,7 @@
         </template>
         <label>目标成功投递数<input v-model.number="config.targetDeliveryCount" type="number" min="1" max="100" required /></label>
         <label>最大扫描职位数<input v-model.number="config.maxScanCount" type="number" min="1" max="1000" required /></label>
-        <label>岗位处理间隔（秒）<input v-model.number="config.intervalSeconds" type="number" min="1" max="60" step="0.5" /></label>
+        <label>岗位间隔下限（秒，实际等待 1–2 倍）<input v-model.number="config.intervalSeconds" type="number" min="1" max="60" step="0.5" /></label>
         <label>最低资料相似度<input v-model.number="config.minimumScore" type="number" min="0" max="100" /></label>
         <label>最低问候语置信度<input v-model.number="config.minimumCustomizationConfidence" type="number" min="0" max="100" /></label>
         <label>确认模式
@@ -321,7 +321,7 @@ async function saveConfig() {
 async function createKey() {
   creatingKey.value = true
   try {
-    const result = await api.createAgentKey('本机 AI 助手')
+    const result = await api.createAgentKey('本机 AI 助手', serviceUrl.value)
     newPlaintextKey.value = result.plaintext
     keys.value.unshift(result.key)
     message.success('Agent Key 已生成，仅显示这一次')

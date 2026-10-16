@@ -5,6 +5,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -141,12 +142,21 @@ class CodexDeliveryRepository:
             )
 
     def create_key(
-        self, user_id: int, name: str, scopes: list[str], expires_in_days: int | None
+        self,
+        user_id: int,
+        name: str,
+        scopes: list[str],
+        expires_in_days: int | None,
+        base_url: str | None = None,
     ) -> tuple[dict[str, Any], str]:
         self.initialize()
         prefix = secrets.token_hex(6)
         secret = secrets.token_urlsafe(32)
-        plaintext = f"jsa_agent_{prefix}_{secret}"
+        if base_url:
+            encoded_url = urlsafe_b64encode(base_url.encode("utf-8")).decode("ascii").rstrip("=")
+            plaintext = f"jsa_agent_v2_{encoded_url}_{prefix}_{secret}"
+        else:
+            plaintext = f"jsa_agent_{prefix}_{secret}"
         now = datetime.now(UTC)
         expires_at = (
             (now + timedelta(days=expires_in_days)).isoformat() if expires_in_days else None
@@ -396,7 +406,10 @@ class CodexDeliveryRepository:
                     raise ValueError(f"请先完成岗位 {active['platform_job_id']} 的处理")
                 duplicate = connection.execute(
                     """SELECT 1 FROM codex_delivery_job_steps
-                    WHERE user_id = ? AND platform_job_id = ? AND status = 'delivered'
+                    WHERE user_id = ? AND platform_job_id = ?
+                    AND (status = 'delivered' OR
+                         (status = 'skipped' AND
+                          json_extract(evidence_json, '$.priorCommunication') = 1))
                     LIMIT 1""",
                     (user_id, platform_job_id),
                 ).fetchone()
@@ -657,8 +670,16 @@ class CodexDeliveryRepository:
                     raise ValueError("当前计划要求发送简历，缺少简历处理结果")
                 if resume_outcome == "sent" and evidence.get("resumeVisible") is not True:
                     raise ValueError("缺少简历已发送的可见证据")
-        elif outcome == "skipped" and step["status"] not in {"rejected", "eligible"}:
-            raise ValueError("只有已分析的岗位可以跳过")
+        elif outcome == "skipped":
+            if step["status"] not in {"rejected", "eligible", "opening_chat"}:
+                raise ValueError("只有已分析的岗位可以跳过")
+            if step["status"] == "opening_chat" and evidence.get("priorCommunication") is not True:
+                raise ValueError("打开沟通后仅能因已核实的历史沟通而跳过")
+            if evidence.get("priorCommunication") is True and evidence.get("source") not in {
+                "boss_detail_status",
+                "boss_chat_history",
+            }:
+                raise ValueError("历史沟通跳过缺少 BOSS 页面证据来源")
         elif outcome in {"failed", "uncertain"} and step["status"] not in {
             "discovered",
             "captured",

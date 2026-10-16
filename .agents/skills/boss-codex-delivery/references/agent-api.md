@@ -1,5 +1,7 @@
 # Agent API
 
+新生成的 Agent Key 格式为 `jsa_agent_v2_<Base URL 的 base64url 无填充编码>_<12 位前缀>_<随机密钥>`。使用 Skill 的 [地址解析脚本](../scripts/resolve_agent_url.py) 从 Key 读取创建时的 Base URL，只输出地址，不输出密钥；然后向该地址的 `/v1/agent/me` 验证。Key 的地址字段不是服务身份的独立证明，不要把 Key 发往自动猜测或搜索到的其他地址。旧版 `jsa_agent_<前缀>_<密钥>` 没有地址，需用户另行提供 Base URL 或设置 `JSA_AGENT_BASE_URL`。地址变更后由用户明确提供新地址或重新生成 Key。
+
 所有请求使用：
 
 ```http
@@ -26,6 +28,8 @@ POST /v1/agent/runs/{runId}/jobs/check
 
 {"platformJobId":"...","sourceTab":"最新","listPosition":1}
 ```
+
+`duplicate=true` 表示服务端已有同一 `platformJobId` 的成功投递，或记录过 BOSS 手机已沟通的明确证据；接口会把本次步骤记为跳过。`duplicate=false` 不是“手机上从未投递”的证明：可见字段指纹变化、人工投递和旧流程未同步时仍可能漏检。发送前还须按 [防重复沟通](../SKILL.md#防重复沟通)检查 BOSS 详情状态及目标聊天历史。
 
 采集：
 
@@ -116,7 +120,9 @@ POST /v1/agent/runs/{runId}/jobs/{stepId}/result
 "evidence": {"messageVisible": false, "inputMethod": "none", "sentText": ""}
 ```
 
-`delivered` 必须有 `messageVisible=true` 的已发送页面证据。`inputMethod` 按实际方式填写 `pua_type_text`、`wda_keys`、`universal_clipboard` 或 `first_common_phrase`，`sentText` 填实际全文；使用第一条常用语时不能填 PC 端生成的问候语。`wda_keys` 仅用于 [iPhone 输入与回读](iphone-input.md) 所述的已聚焦自定义输入框兜底，不表示发送动作。配置要求发送简历时还必须报告 `resumeOutcome`；只有 `sent` 需要 `resumeVisible=true`。结果接口同步写入 PC 端投递记录；确认发送后职位快照显示“已沟通”。发送结果不可确认时用 `uncertain`，不能将其记为成功或自动再次发送。同一运行一次只允许一个尚未结束的岗位。非终态结果后，打开下一岗位前至少等待配置的 `intervalSeconds`。
+手机已明确显示同岗历史沟通时，`skipped` 的证据应增加 `"priorCommunication": true` 和 `"source": "boss_detail_status|boss_chat_history"`，`errorMessage` 说明本次未发送及看到的状态。`opening_chat` 状态仅在确认已有历史沟通时允许这样跳过；不得借此掩盖发送结果不明。服务端会用此标记阻止后续运行对相同 `platformJobId` 重复投递。若岗位身份或历史消息归属不确定，用 `uncertain` 并暂停，不要伪造为已跳过或已成功。
+
+`delivered` 必须有 `messageVisible=true` 的已发送页面证据。`inputMethod` 按实际方式填写 `pua_type_text`、`wda_keys`、`universal_clipboard` 或 `first_common_phrase`，`sentText` 填实际全文；使用第一条常用语时不能填 PC 端生成的问候语。`wda_keys` 仅用于 [iPhone 输入与回读](iphone-input.md) 所述的已聚焦自定义输入框兜底，不表示发送动作。配置要求发送简历时还必须报告 `resumeOutcome`；只有 `sent` 需要 `resumeVisible=true`。结果接口同步写入 PC 端投递记录；确认发送后职位快照显示“已沟通”。发送结果不可确认时用 `uncertain`，不能将其记为成功或自动再次发送。同一运行一次只允许一个尚未结束的岗位。非终态结果后，回到职位列表，再按 [Skill 的间隔规则](../SKILL.md#串行执行)独立抽取并等待 `intervalSeconds` 至其两倍之间的时间，之后才能打开下一岗位。
 
 ## 控制与状态
 

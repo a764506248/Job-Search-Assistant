@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from ..domain.models import ApiModel
 
@@ -68,6 +69,33 @@ class AgentKeyCreate(ApiModel):
         default_factory=lambda: ["agent:read", "agent:run"], min_length=1
     )
     expires_in_days: int | None = Field(default=90, ge=1, le=365)
+    base_url: str | None = Field(default=None, max_length=255)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None  # 兼容旧客户端：不带地址的 Key 仍可创建和使用。
+        candidate = value.strip()
+        parsed = urlsplit(candidate)
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError("服务地址端口无效") from error
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or any(char.isspace() for char in candidate)
+        ):
+            raise ValueError("服务地址必须是不含账号、路径、查询或片段的 http(s) 站点地址")
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("服务地址端口无效")
+        return f"{parsed.scheme}://{parsed.netloc}"
 
 
 class AgentRunCreate(ApiModel):

@@ -1,3 +1,8 @@
+import base64
+import importlib.util
+import re
+from pathlib import Path
+
 import pytest
 from conftest import authenticate
 from fastapi.testclient import TestClient
@@ -50,6 +55,57 @@ def config_payload(**overrides: object) -> dict:
 
 def agent_headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
+
+
+def test_agent_key_embeds_service_url_without_changing_authentication(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.post(
+        "/v1/agent-keys",
+        json={"name": "手机助手", "baseUrl": "https://jobs.example.com/"},
+    )
+    assert response.status_code == 201
+    key = response.json()["plaintext"]
+    match = re.fullmatch(r"jsa_agent_v2_([A-Za-z0-9_-]+)_[0-9a-f]{12}_[A-Za-z0-9_-]{43}", key)
+    assert match is not None
+    encoded_url = match.group(1)
+    decoded_url = base64.urlsafe_b64decode(encoded_url + "=" * (-len(encoded_url) % 4))
+    assert decoded_url.decode() == "https://jobs.example.com"
+    resolver_path = (
+        Path(__file__).resolve().parents[3]
+        / ".agents/skills/boss-codex-delivery/scripts/resolve_agent_url.py"
+    )
+    resolver_spec = importlib.util.spec_from_file_location("resolve_agent_url", resolver_path)
+    assert resolver_spec is not None and resolver_spec.loader is not None
+    resolver = importlib.util.module_from_spec(resolver_spec)
+    resolver_spec.loader.exec_module(resolver)
+    assert resolver.resolve_base_url(key) == "https://jobs.example.com"
+    assert client.get("/v1/agent/me", headers=agent_headers(key)).status_code == 200
+
+    other_url = base64.urlsafe_b64encode(b"https://other.example.com").decode().rstrip("=")
+    tampered_key = key.replace(encoded_url, other_url, 1)
+    assert client.get("/v1/agent/me", headers=agent_headers(tampered_key)).status_code == 401
+
+    legacy = client.post("/v1/agent-keys", json={"name": "旧助手"}).json()["plaintext"]
+    assert legacy.startswith("jsa_agent_") and not legacy.startswith("jsa_agent_v2_")
+    assert client.get("/v1/agent/me", headers=agent_headers(legacy)).status_code == 200
+    with pytest.raises(ValueError, match="旧版 Key"):
+        resolver.resolve_base_url(legacy)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "ftp://example.com",
+        "https://user@example.com",
+        "https://example.com/jobs",
+        "https://example.com/?x=1",
+        "http://example.com:bad",
+    ],
+)
+def test_agent_key_rejects_non_origin_urls(tmp_path, base_url: str) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    response = client.post("/v1/agent-keys", json={"name": "手机助手", "baseUrl": base_url})
+    assert response.status_code == 422
 
 
 def delivered_evidence(
@@ -795,6 +851,95 @@ def test_historical_codex_delivery_is_duplicate_and_stops_at_scan_limit(tmp_path
     run = client.get(f"/v1/agent/runs/{second_run}", headers=headers).json()
     assert run["status"] == "stopped"
     assert run["stopReason"] == "scan_limit_reached"
+
+
+def test_prior_boss_chat_can_be_skipped_after_prepare_and_deduplicated(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    config = client.post(
+        "/v1/codex-delivery/configs", json=config_payload(maxScanCount=2)
+    ).json()
+    key = client.post("/v1/agent-keys", json={"name": "手机助手"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post(
+        "/v1/agent/runs", json={"configId": config["id"]}, headers=headers
+    ).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "boss-prior-chat-1",
+            "snapshot": {
+                "title": "Python 后端工程师",
+                "companyName": "示例科技",
+                "description": "负责 Python 后端开发",
+            },
+        },
+        headers=headers,
+    ).json()
+    step_id = step["id"]
+    analyzed = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step_id}/analyze", headers=headers
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is True
+    prepared = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step_id}/prepare",
+        json={
+            "platformJobId": "boss-prior-chat-1",
+            "observedTitle": "Python 后端工程师",
+            "observedCompanyName": "示例科技",
+        },
+        headers=headers,
+    )
+    assert prepared.status_code == 200
+
+    result_url = f"/v1/agent/runs/{run_id}/jobs/{step_id}/result"
+    unsupported_skip = client.post(
+        result_url,
+        json={
+            "outcome": "skipped",
+            "idempotencyKey": "prior-chat-result-1",
+            "evidence": {"messageVisible": False, "inputMethod": "none", "sentText": ""},
+        },
+        headers=headers,
+    )
+    assert unsupported_skip.status_code == 409
+    skipped = client.post(
+        result_url,
+        json={
+            "outcome": "skipped",
+            "idempotencyKey": "prior-chat-result-1",
+            "evidence": {
+                "messageVisible": False,
+                "inputMethod": "none",
+                "sentText": "",
+                "priorCommunication": True,
+                "source": "boss_chat_history",
+            },
+            "errorMessage": "BOSS 当前岗位已有历史出站消息，本次未发送",
+        },
+        headers=headers,
+    )
+    assert skipped.status_code == 200
+    assert skipped.json()["step"]["status"] == "skipped"
+    snapshot_id = skipped.json()["step"]["snapshot"]["pcSnapshotId"]
+    snapshot = next(
+        job for job in client.get("/v1/jobs").json()["items"] if job["id"] == snapshot_id
+    )
+    assert snapshot["hasCommunicated"] is True
+    run = client.get(f"/v1/agent/runs/{run_id}", headers=headers).json()
+    assert run["skippedCount"] == 1
+    assert run["deliveredCount"] == 0
+
+    later_run = client.post(
+        "/v1/agent/runs", json={"configId": config["id"]}, headers=headers
+    ).json()["id"]
+    duplicate = client.post(
+        f"/v1/agent/runs/{later_run}/jobs/check",
+        json={"platformJobId": "boss-prior-chat-1"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
 
 
 def test_only_selected_resume_is_used_for_hard_evidence_and_greeting(tmp_path) -> None:

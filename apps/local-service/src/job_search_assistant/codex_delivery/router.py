@@ -105,7 +105,8 @@ def create_codex_delivery_router(
     def create_agent_key(payload: AgentKeyCreate, request: Request) -> dict[str, Any]:
         user = web_user(request)
         key, plaintext = repository.create_key(
-            int(user["id"]), payload.name, payload.scopes, payload.expires_in_days
+            int(user["id"]), payload.name, payload.scopes, payload.expires_in_days,
+            base_url=payload.base_url,
         )
         return {"key": key, "plaintext": plaintext}
 
@@ -458,7 +459,10 @@ def create_codex_delivery_router(
                     location=pc_job.location,
                     recruiter_name=pc_job.recruiter_name,
                     status=payload.outcome,
-                    decision="deliver" if step["shouldDeliver"] else "skip",
+                    decision=(
+                        "skip" if payload.outcome == "skipped"
+                        else "deliver" if step["shouldDeliver"] else "skip"
+                    ),
                     reason=payload.error_message or _optional_text(payload.evidence.get("reason")),
                     greeting_text=(
                         _optional_text(payload.evidence.get("sentText"))
@@ -489,6 +493,22 @@ def create_codex_delivery_router(
                         "has_communicated": True,
                         "has_interview": pc_job.has_interview,
                         "generated_greeting": actual_greeting,
+                        "resume_variant": pc_job.resume_variant,
+                        "generated_resume_id": pc_job.generated_resume_id,
+                        "resume_optimization": pc_job.resume_optimization,
+                    },
+                    user_id=user_id,
+                )
+            elif (
+                payload.outcome == "skipped"
+                and payload.evidence.get("priorCommunication") is True
+            ):
+                job_repository.update_tracking(
+                    pc_job.id,
+                    {
+                        "has_communicated": True,
+                        "has_interview": pc_job.has_interview,
+                        "generated_greeting": pc_job.generated_greeting,
                         "resume_variant": pc_job.resume_variant,
                         "generated_resume_id": pc_job.generated_resume_id,
                         "resume_optimization": pc_job.resume_optimization,
