@@ -95,7 +95,7 @@ Codex 新增项目 Skill：
 
 对 `(run_id, platform_job_id)` 和 `idempotency_key` 建唯一约束。岗位详情必须同时写入新步骤的 `snapshot_json` 与现有 `job_postings` 职位快照，后者标记 `source=codex-phone`、使用独立命名空间的岗位标识，避免覆盖旧采集记录；步骤中的 `pcSnapshotId` 可定位 PC 端记录。iPhone 页面未给出原生岗位 ID 时，使用标题、公司、招聘者、地点、薪资等屏幕可见字段形成稳定去重指纹，不调用分享或复制链接。
 
-分析使用现有 `CloudGreetingGenerator` 与 PC 端相同的 `job/profile/localEvidence/defaultGreeting/match` 上下文；学历等硬条件在文本相似度评分之外单独否决。结果接口将新步骤的结果同步至 `delivery_records`，确认发送时更新对应职位快照的沟通状态。旧 `automation_runs` 的协议和数据不变。
+分析使用现有 `CloudGreetingGenerator` 与 PC 端相同的 `job/profile/localEvidence/defaultGreeting/match` 上下文；学历等硬条件在文本相似度评分之外单独判断：个人档案或本轮所选简历明确低于岗位硬性要求时否决，双方均未提供可核验学历时只记录“待核实”风险，不把资料缺失误判为明确不符，也不能据此声称学历已满足要求。结果接口将新步骤的结果同步至 `delivery_records`，确认发送时更新对应职位快照的沟通状态。旧 `automation_runs` 的协议和数据不变。
 
 ## 4. API 设计
 

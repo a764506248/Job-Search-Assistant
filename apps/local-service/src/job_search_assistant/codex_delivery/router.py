@@ -25,6 +25,7 @@ from ..repositories import (
 )
 from .eligibility import (
     education_block_reason,
+    education_uncertain_reason,
     incomplete_title_reason,
     missing_linux_evidence_reason,
 )
@@ -346,6 +347,7 @@ def create_codex_delivery_router(
         )
         selected_resumes = [selected_resume] if selected_resume is not None else []
         materials = [profile, projects, selected_resumes]
+        education_warning = education_uncertain_reason(snapshot, profile, selected_resume)
         block_reasons = [
             reason
             for reason in (
@@ -415,7 +417,10 @@ def create_codex_delivery_router(
                     item.model_dump(mode="json", by_alias=True)
                     for item in match.decision.rule_matches
                 ],
-                risks=[item.normalized_value for item in match.analysis.risk_requirements],
+                risks=[
+                    *[item.normalized_value for item in match.analysis.risk_requirements],
+                    *([education_warning] if education_warning else []),
+                ],
                 greeting=greeting,
                 resume_id=run["configSnapshot"].get("resumeId"),
             )

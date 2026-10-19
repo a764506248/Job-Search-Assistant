@@ -104,10 +104,29 @@ def education_block_reason(
 
     required_label = next(label for label, rank in _DEGREE_RANK.items() if rank == required)
     if actual is None:
-        sources = "个人档案和所选简历均" if selected_resume is not None else "个人档案"
-        return f"岗位要求{required_label}及以上学历，但{sources}未填写可核验学历"
+        # Missing evidence is not evidence of a mismatch. Keep the uncertainty
+        # visible to the caller, but only block a known degree below the bar.
+        return None
     actual_label = next(label for label, rank in _DEGREE_RANK.items() if rank == actual)
     return f"岗位要求{required_label}及以上学历，{source}为{actual_label}"
+
+
+def education_uncertain_reason(
+    snapshot: dict[str, Any],
+    profile: dict[str, Any],
+    selected_resume: dict[str, Any] | None = None,
+) -> str | None:
+    required = _required_degree(snapshot)
+    if required is None or _profile_degree_rank(profile) is not None:
+        return None
+    if selected_resume is not None and _resume_degree_rank(selected_resume) is not None:
+        return None
+    required_label = next(label for label, rank in _DEGREE_RANK.items() if rank == required)
+    sources = "个人档案和所选简历均" if selected_resume is not None else "个人档案"
+    return (
+        f"岗位要求{required_label}及以上学历，但{sources}未填写可核验学历；"
+        "请核实，未作为自动拒投条件"
+    )
 
 
 def incomplete_title_reason(snapshot: dict[str, Any]) -> str | None:

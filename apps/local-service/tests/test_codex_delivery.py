@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from job_search_assistant.codex_delivery.eligibility import (
     education_block_reason,
+    education_uncertain_reason,
     incomplete_title_reason,
     missing_linux_evidence_reason,
 )
@@ -465,13 +466,13 @@ def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> No
             {},
             {"rawText": "项目经历\n硕士招聘系统开发"},
             "本科",
-            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历",
+            None,
         ),
         (
             {},
             {"confirmationStatus": "pending", "education": "本科"},
             "本科",
-            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历",
+            None,
         ),
     ],
 )
@@ -483,9 +484,24 @@ def test_education_gate_uses_selected_resume_only_when_profile_missing(
     )
 
 
+def test_unknown_education_is_a_warning_not_a_block() -> None:
+    snapshot = {"education": "本科"}
+    assert education_block_reason(snapshot, {}) is None
+    assert education_uncertain_reason(snapshot, {}) == (
+        "岗位要求本科及以上学历，但个人档案未填写可核验学历；请核实，未作为自动拒投条件"
+    )
+    assert education_uncertain_reason(
+        snapshot, {}, {"data": {"confirmationStatus": "pending", "education": "本科"}}
+    ) == (
+        "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历；"
+        "请核实，未作为自动拒投条件"
+    )
+    assert education_uncertain_reason(snapshot, {"education": "本科"}) is None
+
+
 @pytest.mark.parametrize(
     ("required", "select_resume", "should_deliver"),
-    [("本科", True, True), ("硕士", True, False), ("本科", False, False)],
+    [("本科", True, True), ("硕士", True, False), ("本科", False, True)],
 )
 def test_analyze_uses_run_selected_resume_education(
     tmp_path, required, select_resume, should_deliver
@@ -535,6 +551,8 @@ def test_analyze_uses_run_selected_resume_education(
     assert analyzed.json()["match"]["decision"]["shouldDeliver"] is should_deliver
     if required == "硕士":
         assert "岗位要求硕士及以上学历，所选简历为本科" in analyzed.json()["decisionReasons"]
+    if not select_resume:
+        assert any("学历" in risk and "请核实" in risk for risk in analyzed.json()["riskFlags"])
     prepared = client.post(
         f"/v1/agent/runs/{run_id}/jobs/{step['id']}/prepare",
         json={
