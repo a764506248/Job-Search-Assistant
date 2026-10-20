@@ -24,10 +24,9 @@ from ..repositories import (
     LibraryRepository,
 )
 from .eligibility import (
-    education_block_reason,
-    education_uncertain_reason,
+    education_risk_reason,
     incomplete_title_reason,
-    missing_linux_evidence_reason,
+    linux_evidence_risk_reason,
 )
 from .models import (
     AgentKeyCreate,
@@ -347,20 +346,25 @@ def create_codex_delivery_router(
         )
         selected_resumes = [selected_resume] if selected_resume is not None else []
         materials = [profile, projects, selected_resumes]
-        education_warning = education_uncertain_reason(snapshot, profile, selected_resume)
-        block_reasons = [
+        qualification_risks = [
             reason
             for reason in (
-                education_block_reason(snapshot, profile, selected_resume),
-                incomplete_title_reason(snapshot),
-                missing_linux_evidence_reason(snapshot, materials),
+                education_risk_reason(snapshot, profile, selected_resume),
+                linux_evidence_risk_reason(snapshot, materials),
             )
             if reason
         ]
-        if match.suitability_score < run["configSnapshot"]["minimumScore"]:
-            block_reasons.append("岗位适合度未达手机逐岗投递阈值")
+        block_reasons = [
+            reason
+            for reason in (
+                incomplete_title_reason(snapshot),
+            )
+            if reason
+        ]
+        if match.decision.effective_suitability_score < run["configSnapshot"]["minimumScore"]:
+            qualification_risks.append("岗位适合度未达配置阈值；未作为自动拒投条件")
         if match.customization_confidence < run["configSnapshot"]["minimumCustomizationConfidence"]:
-            block_reasons.append("材料定制可信度未达手机逐岗投递阈值")
+            qualification_risks.append("材料定制可信度未达配置阈值；请核对文案真实性，不自动拒投")
         if block_reasons:
             decision = match.decision.model_copy(
                 update={
@@ -419,7 +423,7 @@ def create_codex_delivery_router(
                 ],
                 risks=[
                     *[item.normalized_value for item in match.analysis.risk_requirements],
-                    *([education_warning] if education_warning else []),
+                    *qualification_risks,
                 ],
                 greeting=greeting,
                 resume_id=run["configSnapshot"].get("resumeId"),

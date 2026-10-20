@@ -8,10 +8,9 @@ from conftest import authenticate
 from fastapi.testclient import TestClient
 
 from job_search_assistant.codex_delivery.eligibility import (
-    education_block_reason,
-    education_uncertain_reason,
+    education_risk_reason,
     incomplete_title_reason,
-    missing_linux_evidence_reason,
+    linux_evidence_risk_reason,
 )
 from job_search_assistant.main import create_app
 
@@ -401,7 +400,7 @@ def test_uncertain_result_stops_run_without_recording_delivery(tmp_path) -> None
     )
 
 
-def test_education_requirement_blocks_delivery_despite_high_similarity(tmp_path) -> None:
+def test_education_mismatch_is_reported_without_forcing_rejection(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     client.put(
         "/v1/profile",
@@ -427,20 +426,20 @@ def test_education_requirement_blocks_delivery_despite_high_similarity(tmp_path)
     ).json()
     analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
     assert analyzed.status_code == 200
-    assert analyzed.json()["shouldDeliver"] is False
-    assert analyzed.json()["match"]["decision"]["shouldDeliver"] is False
+    assert analyzed.json()["shouldDeliver"] is True
+    assert analyzed.json()["match"]["decision"]["shouldDeliver"] is True
     assert any(
-        "硕士" in reason and "本科" in reason for reason in analyzed.json()["decisionReasons"]
+        "硕士" in risk and "本科" in risk for risk in analyzed.json()["riskFlags"]
     )
 
 
-def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> None:
+def test_education_risk_ignores_preferences_and_accepts_met_requirements() -> None:
     profile = {"educations": [{"degree": "本科"}]}
-    assert education_block_reason({"education": "本科", "description": "硕士优先"}, profile) is None
-    assert education_block_reason({"description": "本科及以上学历，硕士优先"}, profile) is None
+    assert education_risk_reason({"education": "本科", "description": "硕士优先"}, profile) is None
+    assert education_risk_reason({"description": "本科及以上学历，硕士优先"}, profile) is None
     assert (
-        education_block_reason({"education": "硕士", "description": "负责 Agent 开发"}, profile)
-        == "岗位要求硕士及以上学历，个人档案为本科"
+        education_risk_reason({"education": "硕士", "description": "负责 Agent 开发"}, profile)
+        == "岗位要求硕士及以上学历，个人档案为本科；未作为自动拒投条件"
     )
 
 
@@ -452,56 +451,62 @@ def test_education_gate_ignores_preferences_and_accepts_met_requirements() -> No
             {},
             {"rawText": "教育背景\n北京城市学院｜本科\n工作经历\n指导硕士项目"},
             "硕士",
-            "岗位要求硕士及以上学历，所选简历为本科",
+            "岗位要求硕士及以上学历，所选简历为本科；未作为自动拒投条件",
         ),
         ({}, {"educations": [{"degree": "本科"}]}, "本科", None),
-        ({}, {"education": "本科"}, "硕士", "岗位要求硕士及以上学历，所选简历为本科"),
+        (
+            {},
+            {"education": "本科"},
+            "硕士",
+            "岗位要求硕士及以上学历，所选简历为本科；未作为自动拒投条件",
+        ),
         (
             {"education": "本科"},
             {"education": "硕士"},
             "硕士",
-            "岗位要求硕士及以上学历，个人档案为本科",
+            "岗位要求硕士及以上学历，个人档案为本科；未作为自动拒投条件",
         ),
         (
             {},
             {"rawText": "项目经历\n硕士招聘系统开发"},
             "本科",
-            None,
+            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历；"
+            "请核实，未作为自动拒投条件",
         ),
         (
             {},
             {"confirmationStatus": "pending", "education": "本科"},
             "本科",
-            None,
+            "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历；"
+            "请核实，未作为自动拒投条件",
         ),
     ],
 )
-def test_education_gate_uses_selected_resume_only_when_profile_missing(
+def test_education_risk_uses_selected_resume_only_when_profile_missing(
     profile, resume_data, required, expected
 ) -> None:
     assert (
-        education_block_reason({"education": required}, profile, {"data": resume_data}) == expected
+        education_risk_reason({"education": required}, profile, {"data": resume_data}) == expected
     )
 
 
 def test_unknown_education_is_a_warning_not_a_block() -> None:
     snapshot = {"education": "本科"}
-    assert education_block_reason(snapshot, {}) is None
-    assert education_uncertain_reason(snapshot, {}) == (
+    assert education_risk_reason(snapshot, {}) == (
         "岗位要求本科及以上学历，但个人档案未填写可核验学历；请核实，未作为自动拒投条件"
     )
-    assert education_uncertain_reason(
+    assert education_risk_reason(
         snapshot, {}, {"data": {"confirmationStatus": "pending", "education": "本科"}}
     ) == (
         "岗位要求本科及以上学历，但个人档案和所选简历均未填写可核验学历；"
         "请核实，未作为自动拒投条件"
     )
-    assert education_uncertain_reason(snapshot, {"education": "本科"}) is None
+    assert education_risk_reason(snapshot, {"education": "本科"}) is None
 
 
 @pytest.mark.parametrize(
     ("required", "select_resume", "should_deliver"),
-    [("本科", True, True), ("硕士", True, False), ("本科", False, True)],
+    [("本科", True, True), ("硕士", True, True), ("本科", False, True)],
 )
 def test_analyze_uses_run_selected_resume_education(
     tmp_path, required, select_resume, should_deliver
@@ -550,7 +555,10 @@ def test_analyze_uses_run_selected_resume_education(
     assert analyzed.json()["shouldDeliver"] is should_deliver
     assert analyzed.json()["match"]["decision"]["shouldDeliver"] is should_deliver
     if required == "硕士":
-        assert "岗位要求硕士及以上学历，所选简历为本科" in analyzed.json()["decisionReasons"]
+        assert any(
+            "岗位要求硕士及以上学历，所选简历为本科" in risk
+            for risk in analyzed.json()["riskFlags"]
+        )
     if not select_resume:
         assert any("学历" in risk and "请核实" in risk for risk in analyzed.json()["riskFlags"])
     prepared = client.post(
@@ -562,7 +570,7 @@ def test_analyze_uses_run_selected_resume_education(
         },
         headers=headers,
     )
-    assert prepared.status_code == (200 if should_deliver else 409)
+    assert prepared.status_code == 200
     if should_deliver:
         assert prepared.json()["status"] == "opening_chat"
     # Fallback is read-only; it must not silently rewrite the user's profile.
@@ -577,12 +585,12 @@ def test_incomplete_phone_title_cannot_be_sent() -> None:
 
 def test_required_linux_experience_needs_user_evidence() -> None:
     snapshot = {"description": "任职要求：有Linux环境使用经验，熟悉Python。"}
-    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "RAG"]}])
-    assert missing_linux_evidence_reason(snapshot, [{"skills": ["Python", "Linux"]}]) is None
-    assert missing_linux_evidence_reason({"description": "有Linux环境使用经验者优先。"}, []) is None
+    assert linux_evidence_risk_reason(snapshot, [{"skills": ["Python", "RAG"]}])
+    assert linux_evidence_risk_reason(snapshot, [{"skills": ["Python", "Linux"]}]) is None
+    assert linux_evidence_risk_reason({"description": "有Linux环境使用经验者优先。"}, []) is None
 
 
-def test_required_linux_gap_blocks_codex_delivery_even_with_high_similarity(tmp_path) -> None:
+def test_required_linux_gap_is_a_risk_not_a_forced_rejection(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     client.put("/v1/profile", json={"data": {"summary": "有 Python Agent 与 RAG 项目经验"}})
     client.post("/v1/codex-delivery/configs", json=config_payload())
@@ -604,11 +612,11 @@ def test_required_linux_gap_blocks_codex_delivery_even_with_high_similarity(tmp_
     ).json()
     analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
     assert analyzed.status_code == 200
-    assert analyzed.json()["shouldDeliver"] is False
-    assert any("Linux" in reason for reason in analyzed.json()["decisionReasons"])
+    assert analyzed.json()["shouldDeliver"] is True
+    assert any("Linux" in risk for risk in analyzed.json()["riskFlags"])
 
 
-def test_codex_flow_blocks_below_matching_threshold(tmp_path) -> None:
+def test_codex_flow_reports_low_scores_without_forced_rejection(tmp_path) -> None:
     client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
     client.post(
         "/v1/codex-delivery/configs",
@@ -631,8 +639,62 @@ def test_codex_flow_blocks_below_matching_threshold(tmp_path) -> None:
     ).json()
     analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
     assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is True
+    assert any("阈值" in risk for risk in analyzed.json()["riskFlags"])
+
+
+def test_identity_and_explicit_block_rules_still_reject(tmp_path) -> None:
+    client = TestClient(create_app(tmp_path / "jobs.sqlite3"))
+    client.post("/v1/codex-delivery/configs", json=config_payload())
+    client.post(
+        "/v1/library/rules",
+        json={"name": "明确禁投", "data": {"pattern": "外包驻场", "action": "block_delivery"}},
+    )
+    key = client.post("/v1/agent-keys", json={"name": "Codex"}).json()["plaintext"]
+    headers = agent_headers(key)
+    run_id = client.post("/v1/agent/runs", json={}, headers=headers).json()["id"]
+    step = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "explicitly-blocked",
+            "snapshot": {
+                "title": "Python 工程师",
+                "companyName": "示例公司",
+                "description": "负责 Python 开发，外包驻场。",
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
+    assert analyzed.status_code == 200
     assert analyzed.json()["shouldDeliver"] is False
-    assert any("阈值" in reason for reason in analyzed.json()["decisionReasons"])
+    assert "命中禁止投递规则" in analyzed.json()["decisionReasons"]
+
+    skipped = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{step['id']}/result",
+        json={"outcome": "skipped", "idempotencyKey": "explicitly-blocked-skip-1", "evidence": {}},
+        headers=headers,
+    )
+    assert skipped.status_code == 200
+    truncated = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/capture",
+        json={
+            "platformJobId": "truncated-title",
+            "snapshot": {
+                "title": "Python 工程师（",
+                "companyName": "示例公司",
+                "description": "负责 Python 开发。",
+            },
+        },
+        headers=headers,
+    ).json()
+    analyzed = client.post(
+        f"/v1/agent/runs/{run_id}/jobs/{truncated['id']}/analyze",
+        headers=headers,
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["shouldDeliver"] is False
+    assert any("标题" in reason for reason in analyzed.json()["decisionReasons"])
 
 
 def test_phone_flow_reuses_pc_snapshot_greeting_and_delivery_records(tmp_path) -> None:
@@ -960,7 +1022,7 @@ def test_prior_boss_chat_can_be_skipped_after_prepare_and_deduplicated(tmp_path)
     assert duplicate.json()["duplicate"] is True
 
 
-def test_only_selected_resume_is_used_for_hard_evidence_and_greeting(tmp_path) -> None:
+def test_only_selected_resume_is_used_for_risk_evidence_and_greeting(tmp_path) -> None:
     class GreetingSpy:
         def __init__(self) -> None:
             self.context: dict | None = None
@@ -995,7 +1057,7 @@ def test_only_selected_resume_is_used_for_hard_evidence_and_greeting(tmp_path) -
     ).json()
     analyzed = client.post(f"/v1/agent/runs/{run_id}/jobs/{step['id']}/analyze", headers=headers)
     assert analyzed.status_code == 200
-    assert analyzed.json()["shouldDeliver"] is False
-    assert any("Linux" in reason for reason in analyzed.json()["decisionReasons"])
+    assert analyzed.json()["shouldDeliver"] is True
+    assert any("Linux" in risk for risk in analyzed.json()["riskFlags"])
     assert spy.context is not None
     assert spy.context["selectedResume"]["id"] == selected["id"]

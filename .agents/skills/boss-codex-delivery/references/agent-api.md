@@ -73,7 +73,7 @@ POST /v1/agent/runs/{runId}/jobs/capture
 POST /v1/agent/runs/{runId}/jobs/{stepId}/analyze
 ```
 
-读取响应中的 `shouldDeliver`、`decisionReasons`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中。结合 JD 的主要职责判断整体相关性，不要求全部技能、工具、年限或加分项逐条匹配；明确禁投规则及真实且不可协商的条件冲突仍需遵守。选岗时先看可见名称，优先相关岗位，略过明显跨行业/职责无关项，详见 [选岗与相关性判断](../SKILL.md#选岗与相关性判断)。
+读取响应中的 `shouldDeliver`、`decisionReasons`、`riskFlags`、`score`、`greetingConfidence` 与 `greeting`。问候语使用 PC 端同一生成器，生成内容也保存在职位快照中。结合 JD 的主要职责判断整体相关性；学历、Linux、技能、工具、年限及分数/置信度差距只记录为风险，不作为新流程的强制拒投条件。仍须遵守用户明确设置的禁投规则和 API 状态机，不能虚构已满足的资格。选岗时先看可见名称，优先相关岗位，略过明显跨行业/职责无关项，详见 [选岗与相关性判断](../SKILL.md#选岗与相关性判断)。
 
 资料遗漏造成的误判与真实不匹配分开报告。此判断策略不改变 API 状态机：`shouldDeliver=false` 时不能自行发送，`prepare` 仍必须返回 `opening_chat`；仅修改 Skill 不会自动修复或改变后端判定逻辑。
 
