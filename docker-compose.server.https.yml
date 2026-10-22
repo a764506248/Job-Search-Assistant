@@ -1,0 +1,9 @@
+# jsazhushou.cn 的可选 HTTPS 配置，须与 docker-compose.server.yml 一起使用。
+# 证书保存在服务器 ./certs/，不进入镜像或 Git；HTTP 80 端口仍保留。
+services:
+  web:
+    ports:
+      - "443:443"
+    volumes:
+      - ./deploy/server-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro

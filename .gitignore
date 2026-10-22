@@ -15,6 +15,7 @@ coverage/
 data/
 generated/
 output/
+/certs/
 
 # BOSS automation runtime state (generated in the selected work directory)
 /batch_state.json
