@@ -2,6 +2,8 @@
 
 本文说明从零启动 Job Search Assistant 所需的软件、网络、模型、浏览器和本地数据条件。自动化链路只需要 Docker 本地服务、统一 Chrome 扩展和经用户确认的简历。
 
+使用线上版时，直接打开 [https://jsazhushou.cn/](https://jsazhushou.cn/) 并登录，无需执行下方本地 Docker 安装步骤。进入[安装向导](https://jsazhushou.cn/setup)生成配对码，扩展服务地址填写 `https://jsazhushou.cn`；手机流程在[BOSS 手机逐岗投递](https://jsazhushou.cn/codex-delivery)配置并生成 Agent Key。线上数据保存在服务器，本地部署数据保存在自己的设备，两者不会自动同步。服务器维护见[部署说明](DEPLOY_SERVER.md)。
+
 > 统一扩展负责搜索、职位收集和投递页面 I/O，本地服务负责保存、规则、本地资料匹配、模型分析和任务状态；用户确认企业清单后才允许投递。启动后问候语由扩展自动发送，简历图片受后台任务开关与已有本地策略控制。完整状态见[自动投递技术设计](AUTOMATION_TECHNICAL_DESIGN.md)。
 
 ## 0. 一键安装器

@@ -54,6 +54,10 @@ Job Search Assistant 想解决的，就是这些重复但又不能完全省略�
 
 ## 第一步：启动 Job Search Assistant
 
+### 直接使用线上版
+
+打开 [https://jsazhushou.cn/](https://jsazhushou.cn/) 并登录，随后从本文“第二步”继续。已有账号直接登录；线上已有管理员时，新增账号由管理员创建。线上版无需本机 Docker，扩展服务地址填写 `https://jsazhushou.cn`，配对码从同一站点的[安装向导](https://jsazhushou.cn/setup)生成。线上资料与本地部署资料分别保存，不会自动同步。
+
 ### 普通用户：直接使用发布版
 
 找一个空文件夹，在这个文件夹中打开终端，然后执行：

@@ -180,8 +180,10 @@ Agent Context 采用最小披露：
 
 ## 8. 服务地址与网络
 
-- 同一台 Mac 上的 Codex 使用 `http://127.0.0.1:8765`。
-- 其他设备访问时使用部署域名，例如 `https://jobs.example.com`。
+- 正式部署使用 `https://jsazhushou.cn`，Agent API 前缀为 `https://jsazhushou.cn/v1/agent`；手机投递页面为 `https://jsazhushou.cn/codex-delivery`。
+- 使用本地部署时，同一台 Mac 上的 Codex 使用 `http://127.0.0.1:8765`；不能把本地地址当作线上服务。
+- 新版 Agent Key 携带生成时的 Base URL，连接时先解析地址，再向该地址验证身份；正式域名只是部署约定，不覆盖 Key 地址。迁址后重新生成 Key，或由用户明确提供新地址。
+- 浏览器扩展线上配对使用 `https://jsazhushou.cn`（不含 `/v1`），WebSocket 使用同一域名的 WSS 通道；iPhone Use 控制通道仍运行在用户本机。
 - 不建议使用裸公网 IP + HTTP 传输 Agent Key。
 - CORS 只影响浏览器；Codex 的服务端请求仍必须走 Bearer 鉴权。
 - 服务启动日志和前端复制按钮不得把完整 Key 写入可长期保留的日志。

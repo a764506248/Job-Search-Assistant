@@ -2,14 +2,21 @@
 
 服务器部署使用 GitHub Actions 构建的 GHCR 镜像，不在 2 核/2 GB 机器上执行前端或 Python 依赖构建。
 
+## 正式环境地址
+
+正式站点为 [https://jsazhushou.cn/](https://jsazhushou.cn/)，后台登录 `/login`、扩展安装与配对 `/setup`、手机投递 `/codex-delivery`。浏览器扩展服务地址和 Agent Base URL 均填写 `https://jsazhushou.cn`，健康检查为 `https://jsazhushou.cn/v1/health`。本地安装继续使用 `http://127.0.0.1:8765`，不做全局替换。
+
+正式实例当前使用 `/opt/job-search-assistant` 下的两份 Compose 文件，业务数据保留在该目录的 `deploy-data/`，证书保留在 `certs/`。服务器登录方式由运维本机配置，不在文档或仓库保存凭据。
+
 ## 发布镜像
 
 部署工作流响应 `main` 分支和 `v*` 标签。功能分支不会自动发布；从功能分支发布时，先提交并推送，再创建版本标签：
 
 ```bash
-git push origin codex/automation-controls-v030
-git tag -a v0.3.1 -m "automation controls" codex/automation-controls-v030
-git push origin v0.3.1
+git push origin HEAD
+# 将 vX.Y.Z 替换为本次尚未发布的固定版本号。
+git tag -a vX.Y.Z -m "production release" HEAD
+git push origin vX.Y.Z
 ```
 
 等待 GitHub Actions 完成后，服务器显式使用该版本标签。不要依赖 `latest`，这样可以避免服务器无意间拉到其他版本。
@@ -19,9 +26,10 @@ git push origin v0.3.1
 在服务器项目目录执行：
 
 ```bash
-cd ~/Job-Search-Assistant
-JSA_IMAGE_TAG=v0.3.1 docker compose -f docker-compose.server.yml pull
-JSA_IMAGE_TAG=v0.3.1 docker compose -f docker-compose.server.yml up -d
+cd /opt/job-search-assistant
+# 以下为仅启用 HTTP 的自建实例示例；正式域名必须使用后文两份 Compose 的 HTTPS 更新命令。
+JSA_IMAGE_TAG=vX.Y.Z docker compose -f docker-compose.server.yml pull
+JSA_IMAGE_TAG=vX.Y.Z docker compose -f docker-compose.server.yml up -d
 docker compose -f docker-compose.server.yml ps
 curl http://127.0.0.1/v1/health
 ```
@@ -63,6 +71,20 @@ curl --fail https://jsazhushou.cn/v1/health
 ```
 
 HTTPS 的 Nginx 配置通过服务器文件覆盖镜像默认配置。若发布版本修改了 `apps/web/nginx.conf` 的 API、WebSocket 或其他路由，也需要把对应改动同步到 `deploy/server-nginx.conf`。
+
+正式发布前备份数据库和当前部署配置，记录旧镜像标签；同步本次版本的 Compose 与 Nginx 配置，保持 `deploy-data/`、`.env` 和 `certs/` 不变。在 `.env` 中将 `JSA_IMAGE_TAG` 更新为本次已构建成功的固定标签，再执行上面的 HTTPS 更新命令。不得执行 `down -v` 或复制开发机数据库覆盖线上数据。
+
+发布后验证：
+
+```bash
+curl --fail https://jsazhushou.cn/
+curl --fail https://jsazhushou.cn/login
+curl --fail https://jsazhushou.cn/v1/health
+# 未携带 Key 时必须返回 401，不能泄露用户资料。
+curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/v1/agent/me
+```
+
+同时核对健康接口版本、实际容器镜像标签与发布版本一致。浏览器登录后确认现有资料、手机投递计划和扩展连接状态；文档更新或容器启动成功不能单独当作业务验收完成。
 
 续期时将新的证书链和匹配私钥替换到上述 `certs/` 文件，保留文件名和权限，再校验并平滑重新加载。证书使用目录挂载，因此原子替换文件后也能读到新证书：
 

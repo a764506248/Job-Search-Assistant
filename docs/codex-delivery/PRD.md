@@ -83,6 +83,7 @@ flowchart TD
 ### 6.1 连接设置
 
 - 展示当前服务地址，区分本机地址与远程 HTTPS 地址。
+- 正式站点为 `https://jsazhushou.cn/`，手机投递页面为 `/codex-delivery`；线上用户在该域名登录并生成 Key，Agent Base URL 为 `https://jsazhushou.cn`。本地部署仍使用 `http://127.0.0.1:8765`，两者数据与 Key 不自动迁移。
 - 创建 Agent Key；明文只在创建时显示一次。
 - 展示 Key 名称、前缀、权限、创建时间、最近使用时间、过期时间和撤销状态。
 - 支持撤销 Key。

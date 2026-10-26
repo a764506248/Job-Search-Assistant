@@ -84,7 +84,7 @@ Skill 安装后会在下一轮对话可用。它只负责编排新增的手机�
 
 ## 第三步：在网页保存自己的投递计划
 
-1. 启动 Job Search Assistant，打开你实际使用的本地或线上网址并登录。
+1. 打开正式站点 [https://jsazhushou.cn/](https://jsazhushou.cn/) 并登录；使用本地部署时则打开 `http://127.0.0.1:8765`。两者数据独立，选择保存了本人资料的站点。
 2. 先检查“个人档案、项目库、简历库”，确保内容真实、最新。
 3. 打开左侧“BOSS 手机逐岗投递”。
 4. 在页面顶部生成 Agent Key，并立即复制保存。完整 Key 只显示一次；新生成的 Key 会携带当前页面使用的服务地址，因此助手无需猜测本地或线上域名。
@@ -100,6 +100,8 @@ Skill 安装后会在下一轮对话可用。它只负责编排新增的手机�
 6. 第一次真实使用把目标投递数设为 `1`，确认整个闭环正确后再逐步增加。
 
 Agent Key 用于你选择的 AI 助手调用当前登录用户的 Agent API。它不是 BOSS 密码，但仍然属于敏感凭据：不要提交到 Git、截图公开或写进 Skill 文件；不再使用时在页面中撤销。旧版 Key 不含服务地址，使用时需要另行告知助手 Base URL，或在网页生成新 Key。服务迁址后，新 Key 内的旧地址也不会自动更新，需要重新生成 Key 或明确提供新地址。
+
+正式站点的手机投递页面是 [https://jsazhushou.cn/codex-delivery](https://jsazhushou.cn/codex-delivery)，Agent Base URL 为 `https://jsazhushou.cn`，接口前缀为 `https://jsazhushou.cn/v1/agent`。在正式域名下生成新版 Key 才会携带该域名；文档地址不覆盖 Key 内地址，也不允许拿同一个 Key 试探其他服务。本机 iPhone Use 继续通过 USB 操作手机，业务数据通过 HTTPS 写回线上后台。
 
 ## 第四步：让 AI 助手开始逐岗处理
 

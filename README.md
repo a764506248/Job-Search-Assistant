@@ -2,6 +2,16 @@
 
 面向 Boss 直聘的智能求职辅助产品。通过浏览器扩展获取职位 JD，由本地知识库检索用户的真实项目与简历资料，再结合云端大模型生成匹配分析、定制简历和个性化问候语。
 
+正式站点：[https://jsazhushou.cn/](https://jsazhushou.cn/)。[登录后台](https://jsazhushou.cn/login)后，可进入[安装向导](https://jsazhushou.cn/setup)配对扩展，或进入[BOSS 手机逐岗投递](https://jsazhushou.cn/codex-delivery)保存计划并生成 Agent Key。
+
+| 用途 | 正式地址 |
+| --- | --- |
+| 管理后台、浏览器扩展服务地址、Agent Base URL | `https://jsazhushou.cn` |
+| API 前缀 | `https://jsazhushou.cn/v1` |
+| 健康检查 | `https://jsazhushou.cn/v1/health` |
+
+使用线上版无需在本机启动后台；浏览器扩展、iPhone Use 和 iPhone 仍在用户设备上运行。扩展配对和 Agent Key 必须来自同一线上账号。本地部署仍使用 `http://127.0.0.1:8765`，本地与线上数据不会自动同步；线上版资料保存于服务器，并按账号隔离。
+
 ![Job Search Assistant 动漫风简历库产品展示](docs/assets/job-search-assistant-dashboard-anime.png)
 
 > 产品功能示意图已经过去敏与动漫化处理；其中人物、简历、文件名和模型信息均为虚构内容，不对应真实用户或企业。
