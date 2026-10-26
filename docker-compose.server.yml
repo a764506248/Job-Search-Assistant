@@ -43,6 +43,7 @@ services:
       - "8765"
     environment:
       JSA_HOST: 0.0.0.0
+      JSA_ENV: production
       JSA_PORT: 8765
       JSA_DATA_DIR: /data
       # Pass a URL-encoded DSN (especially if the password contains @, &, or #).

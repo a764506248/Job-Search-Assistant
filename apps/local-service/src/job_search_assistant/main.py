@@ -47,11 +47,14 @@ def create_app(
     browser_hub: BrowserConnectionHub | None = None,
     **_unused_dependencies: object,
 ) -> FastAPI:
+    docs_enabled = settings.env == "local"
     application = FastAPI(
         title="Job Search Assistant Local Service",
         version=__version__,
-        docs_url="/docs",
-        redoc_url=None,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+        swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect" if docs_enabled else None,
     )
     application.add_middleware(
         CORSMiddleware,

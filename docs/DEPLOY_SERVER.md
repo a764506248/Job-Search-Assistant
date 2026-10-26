@@ -6,7 +6,13 @@
 
 正式站点为 [https://jsazhushou.cn/](https://jsazhushou.cn/)，后台登录 `/login`、扩展安装与配对 `/setup`、手机投递 `/codex-delivery`。浏览器扩展服务地址和 Agent Base URL 均填写 `https://jsazhushou.cn`，健康检查为 `https://jsazhushou.cn/v1/health`。本地安装继续使用 `http://127.0.0.1:8765`，不做全局替换。
 
-正式实例当前使用 `/opt/job-search-assistant` 下的两份 Compose 文件，业务数据保留在该目录的 `deploy-data/`，证书保留在 `certs/`。服务器登录方式由运维本机配置，不在文档或仓库保存凭据。
+服务器使用项目部署目录下的两份 Compose 文件，业务数据保留在该目录的 `deploy-data/`，证书保留在 `certs/`。实际目录、登录方式与凭据由内部运维记录维护。
+
+## 接口文档的环境隔离
+
+`JSA_ENV` 只接受 `local` 或 `production`，默认 `production`，拼写错误时服务启动失败。服务器 Compose 固定设置 `production`，关闭 `/docs`、`/redoc`、`/openapi.json` 及 `/docs/oauth2-redirect`；HTTPS Nginx 额外拦截文档与子路径并返回 404。环境不通过域名、请求 Host 或容器内的 localhost 判断。
+
+本地 Compose 显式设置 `local`，开启 Swagger、ReDoc 和 OpenAPI；直接运行开发服务时设置 `JSA_ENV=local`。文档开关不改变业务 API、扩展 WebSocket、Agent 鉴权或健康检查。线上排障使用内部工具，不临时把生产环境切成 `local`。
 
 ## 发布镜像
 
@@ -26,7 +32,7 @@ git push origin vX.Y.Z
 在服务器项目目录执行：
 
 ```bash
-cd /opt/job-search-assistant
+cd /path/to/Job-Search-Assistant
 # 以下为仅启用 HTTP 的自建实例示例；正式域名必须使用后文两份 Compose 的 HTTPS 更新命令。
 JSA_IMAGE_TAG=vX.Y.Z docker compose -f docker-compose.server.yml pull
 JSA_IMAGE_TAG=vX.Y.Z docker compose -f docker-compose.server.yml up -d
@@ -82,6 +88,11 @@ curl --fail https://jsazhushou.cn/login
 curl --fail https://jsazhushou.cn/v1/health
 # 未携带 Key 时必须返回 401，不能泄露用户资料。
 curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/v1/agent/me
+# 以下文档入口及其子路径必须返回 404（不是前端 SPA 的 200）。
+curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/docs
+curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/openapi.json
+curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/redoc
+curl -s -o /dev/null -w '%{http_code}\n' https://jsazhushou.cn/docs/oauth2-redirect
 ```
 
 同时核对健康接口版本、实际容器镜像标签与发布版本一致。浏览器登录后确认现有资料、手机投递计划和扩展连接状态；文档更新或容器启动成功不能单独当作业务验收完成。

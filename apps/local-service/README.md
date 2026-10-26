@@ -23,7 +23,7 @@ docker compose up -d --build
 ```bash
 # apps/local-service 目录
 uv sync --dev
-uv run uvicorn job_search_assistant.main:app --reload --port 8767
+JSA_ENV=local uv run uvicorn job_search_assistant.main:app --reload --port 8767
 ```
 
 测试：
@@ -39,3 +39,5 @@ uv run pytest -q
 - API 文档：<http://127.0.0.1:8765/docs>
 
 FastAPI 已不再托管前端静态文件。单独调试 API 时可直接访问 <http://127.0.0.1:8767/docs>。
+
+接口文档由 `JSA_ENV` 显式控制：默认 `production`，关闭 `/docs`、`/redoc`、`/openapi.json` 和 Swagger OAuth 辅助页面；仅 `local` 开启这些路由，不根据域名、Host 或监听地址猜测环境。无效环境值会阻止启动。本地 Compose 已设置 `local`，服务器 Compose 固定为 `production`；线上 HTTPS Nginx 额外对文档及其子路径返回 404。健康检查、业务 API 与鉴权不受文档开关影响。普通用户只需使用网页，无需开启接口文档。

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,6 +11,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    env: Literal["local", "production"] = "production"
     host: str = "127.0.0.1"
     port: int = 8765
     local_token: str | None = None

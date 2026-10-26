@@ -19,6 +19,7 @@ services:
     expose:
       - "8765"
     environment:
+      JSA_ENV: local
       JSA_HOST: 0.0.0.0
       JSA_PORT: 8765
       JSA_DATA_DIR: /data
